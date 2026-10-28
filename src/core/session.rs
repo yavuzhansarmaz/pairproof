@@ -24,6 +24,8 @@ pub struct Session {
     pub(crate) expert_set: bool,
     pub(crate) extra_added: bool,
     pub(crate) connected: bool,
+    pub(crate) ever_connected: bool,
+    pub(crate) disconnected_since_ms: Option<u64>,
 }
 
 impl Session {
@@ -53,6 +55,8 @@ impl Session {
             expert_set: false,
             extra_added: false,
             connected: false,
+            ever_connected: false,
+            disconnected_since_ms: None,
         };
         s.push(at_ms, SessionCreated);
         Ok(s)
@@ -96,14 +100,35 @@ impl Session {
 
     pub fn candidate_connected(&mut self, at_ms: u64) -> R {
         self.ensure_not_terminal()?;
-        ensure(
-            self.status == WaitingForCandidate,
-            self.bad_state("candidate_connected"),
-        )?;
         ensure(!self.connected, CandidateAlreadyConnected)?;
-        self.connected = true;
-        self.push(at_ms, CandidateConnected);
+        if !self.ever_connected {
+            ensure(
+                self.status == WaitingForCandidate,
+                self.bad_state("candidate_connected"),
+            )?;
+            self.connected = true;
+            self.ever_connected = true;
+            self.push(at_ms, CandidateConnected);
+        } else {
+            let downtime_ms = at_ms.saturating_sub(self.disconnected_since_ms.unwrap_or(at_ms));
+            self.disconnected_since_ms = None;
+            self.connected = true;
+            self.push(at_ms, EventKind::CandidateReconnected { downtime_ms });
+        }
         Ok(())
+    }
+
+    pub fn candidate_disconnected(&mut self, at_ms: u64) -> R {
+        self.ensure_not_terminal()?;
+        ensure(self.connected, CandidateNotConnected)?;
+        self.connected = false;
+        self.disconnected_since_ms = Some(at_ms);
+        self.push(at_ms, EventKind::CandidateDisconnected);
+        Ok(())
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.connected
     }
 
     pub fn start(&mut self, at_ms: u64) -> R {
@@ -216,6 +241,10 @@ impl Session {
     pub(crate) fn active(&self) -> R<usize> {
         self.ensure_not_terminal()?;
         self.active_pos().ok_or(NoActiveQuestion)
+    }
+
+    pub(crate) fn ensure_connected(&self) -> R {
+        ensure(self.connected, CoreError::CandidateDisconnected)
     }
 
     pub(crate) fn ensure_no_requestion_pending(&self, p: usize) -> R {

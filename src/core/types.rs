@@ -54,6 +54,10 @@ pub enum CoreError {
     CandidateAlreadyConnected,
     #[error("a re-question is pending on the active question")]
     ReQuestionPending,
+    #[error("candidate is disconnected")]
+    CandidateDisconnected,
+    #[error("paste flag size must be greater than zero")]
+    InvalidPasteFlag,
 }
 
 /// Supported solution language for a session.
@@ -131,6 +135,14 @@ impl ApproachChoice {
     }
 }
 
+/// Latest test-run summary for one question.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestSummary {
+    pub passed: u32,
+    pub failed: u32,
+    pub at_ms: u64,
+}
+
 /// One ordered question in a session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuestionSlot {
@@ -145,6 +157,8 @@ pub struct QuestionSlot {
     pub re_question_pending: bool,
     pub started_at_ms: Option<u64>,
     pub finished_at_ms: Option<u64>,
+    pub latest_test: Option<TestSummary>,
+    pub paste_flags: u32,
 }
 
 impl QuestionSlot {
@@ -162,6 +176,8 @@ impl QuestionSlot {
             re_question_pending: false,
             started_at_ms: None,
             finished_at_ms: None,
+            latest_test: None,
+            paste_flags: 0,
         }
     }
 }

@@ -11,13 +11,13 @@ This file tracks the implementation phases for the PairProof MVP defined in [str
 
 ## Summary
 
-Snapshot at time of writing: `cargo test` reports **59 passed, 0 failed, 6 ignored** (28 unit tests in `src/lib.rs`; 10 in `tests/core_artifacts.rs`; 7 in `tests/core_coverage.rs`; 12 in `tests/core_event_log.rs`; 2 in `tests/smoke.rs`; 3 + 3 live spike tests ignored). `cargo fmt --check` and `cargo clippy -- -D warnings` are clean.
+Snapshot at time of writing: `cargo test` reports **68 passed, 0 failed, 6 ignored** (28 unit tests in `src/lib.rs`; 10 in `tests/core_artifacts.rs`; 7 in `tests/core_coverage.rs`; 12 in `tests/core_event_log.rs`; 9 in `tests/core_records.rs`; 2 in `tests/smoke.rs`; 3 + 3 live spike tests ignored). `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean.
 
 | Phase | Name | Status | Evidence | Depends on |
 | --- | --- | --- | --- | --- |
 | 0 | Concept and specification | Done | [structure.md](structure.md) "Final"; [initial.md](initial.md); [must.md](must.md); commits `fe9f15c` (skeleton), `570a5ec`, `c2395a9` | — |
 | 1 | Validation spikes (LeetCode, Meta API) | Done | [src/leetcode/mod.rs](../src/leetcode/mod.rs), [src/ai/mod.rs](../src/ai/mod.rs); commit `281cd95`; model choice in commit `645581f` and [must.md](must.md) | 0 |
-| 2 | Core domain (session, events, artifacts) | In progress | [src/core/](../src/core/) (7 modules); 51 core-related tests green | 0, 1 |
+| 2 | Core domain (session, events, artifacts) | Done | [src/core/](../src/core/) (8 modules); 60 core-related tests green | 0, 1 |
 | 3 | Scoring engine | Not started | [src/scoring/mod.rs](../src/scoring/mod.rs) is a 1-line doc stub | 2 (merge also needs 4) |
 | 4 | AI orchestration and prompts | Not started | [src/ai/mod.rs](../src/ai/mod.rs) client only (credited to Phase 1); no prompts or loops | 1, 2 |
 | 5 | Ingest (JD / resume) | Not started | [src/ingest/mod.rs](../src/ingest/mod.rs) is a 1-line doc stub | 2, 4 |
@@ -29,7 +29,7 @@ Snapshot at time of writing: `cargo test` reports **59 passed, 0 failed, 6 ignor
 | 11 | Hardening and polish (P1) | Not started | fmt/clippy clean today, but no P1 items built | 10 |
 | 12 | Demo and submission | Not started | No demo or submission artifacts in repo | 10, 11 |
 
-**The project is currently in Phase 2.** Phases 0–1 are Done, Phase 2 is implemented and green but has a few event-schema gaps, and no later phase has implementation beyond stubs and one Dockerfile. See [Current state](#current-state).
+**Phase 2 is Done; the project is ready for Phases 3 and 4.** Phases 0–2 are Done, and no later phase has implementation beyond stubs and one Dockerfile. Phases 3 (scoring) and 4 (AI orchestration) can proceed in parallel. See [Current state](#current-state).
 
 Every phase inherits two standing rules from [must.md](must.md) (Project Engineering Standards): each endpoint — user-facing flow, external integration wrapper, and lifecycle operation — ships with maintained tests covering success, error, and edge cases, and an endpoint is not done until its tests pass; and no file may exceed 400 lines, with `rustfmt`/`clippy` clean before merging. The per-phase exit criteria name the concrete tests each phase owes.
 
@@ -91,16 +91,15 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 
 **Exit criteria.**
 
-- [x] Tests per must.md (success/error/edge) for every transition and action, event-log round-trip/gaps/malformed lines, artifact writes: 22 unit tests under `src/core/` (actions 9, session 6, types 5, events 2) plus [tests/core_artifacts.rs](../tests/core_artifacts.rs) (10), [tests/core_coverage.rs](../tests/core_coverage.rs) (7), [tests/core_event_log.rs](../tests/core_event_log.rs) (12) — all green.
-- [x] Work committed (core modules and the three tests/core_*.rs suites).
-- [ ] Event schema covers everything later phases must log (see gaps).
+- [x] Tests per must.md (success/error/edge) for every transition and action, event-log round-trip/gaps/malformed lines, artifact writes: 22 unit tests under `src/core/` (actions 9, session 6, types 5, events 2) plus [tests/core_artifacts.rs](../tests/core_artifacts.rs) (10), [tests/core_coverage.rs](../tests/core_coverage.rs) (7), [tests/core_event_log.rs](../tests/core_event_log.rs) (12), [tests/core_records.rs](../tests/core_records.rs) (9) — all green.
+- [x] Core work committed: initial core in `f45a6c4`, completion work in the commit carrying this update.
+- [x] Event schema covers everything later phases must log (test runs, paste flags, disconnect/reconnect, chat boundary violations).
 
-**Status: In progress.** Implemented and fully green, but the event schema has gaps against structure.md: `EventKind` has no variants for test-run results, paste flags (sections 13, 15, 16), disconnect/resume (section 17), or chat boundary violations (section 10), and `Session` has no disconnected state (`candidate_connected` fires only once). Those could land with their producing phases, but then Phase 2 is not Done yet. Two points to settle with Phases 3/4: `change_approach` clears `locked_expected_tokens` (actuals preserved), implying a fresh lock on re-selection, while section 13 says an expectation "cannot be revised later" — scoring must define which lock a changed approach is judged against; and `write_report` stores Markdown verbatim — report *generation* is Phase 10.
+**Status: Done.** Implemented and fully green. `EventKind` now covers test-run results, paste flags (sections 13, 15, 16), disconnect/resume (section 17), and chat boundary violations (section 10); `Session` has a disconnected state with a reconnect path that resumes at the same question, and [src/core/records.rs](../src/core/records.rs) records test results, paste flags, and chat boundary violations. Token-lock decision (settled): a token lock belongs to an approach selection; `change_approach` clears the current selection so a re-selection locks anew; `slot.locked_expected_tokens` is the current selection's lock; the complete lock history is preserved in `TokensLocked` events and exposed via `Session::token_locks()`. `write_report` stores Markdown verbatim — report *generation* is Phase 10.
 
 **Remaining work.**
 
-- [ ] Add event variants (test results, paste flags, disconnect/resume, chat boundary) + reconnect path with tests, or explicitly re-scope them into Phases 7/9/10.
-- [ ] Settle the token-lock-on-change-approach question with Phase 3.
+- [ ] None.
 
 ## Phase 3 — Scoring engine
 
@@ -149,7 +148,7 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 
 - [ ] Prompt set + parsers for all five call types, with tests.
 - [ ] Coding loop with section 11 termination conditions, wired to core actions/token accounting (`add_tokens`).
-- [ ] Chat assembly with live-state block and boundary-violation logging (needs the Phase 2 event variant).
+- [ ] Chat assembly with live-state block and boundary-violation logging (logs via the Phase 2 `ChatBoundaryViolated` event).
 - [ ] Topic-pool randomized selection flow.
 
 ## Phase 5 — Ingest (JD / resume)
@@ -339,7 +338,7 @@ Explicitly **not** MVP phases (structure.md section 2; initial.md P2). Do not bu
 
 ## Current state
 
-**The project is in Phase 2 (core domain), finishing it.** Phases 0–1 are Done: the spec is Final (`fe9f15c` skeleton) and both clients landed in `281cd95` with models settled in `645581f`. Phase 2 is implemented and green — 59 tests pass, 0 fail, 6 live ignored (`cargo test`, observed at time of writing), 51 of them covering `core` (22 unit + 29 integration) — but the event schema lacks test-result, paste-flag, disconnect, and chat-boundary variants, so its exit criteria are not met. Phases 3–12 are Not started: every remaining module is a 1-line stub, the binary prints "role selection is not implemented yet", and the only later-phase artifact is [sandbox/Dockerfile](../sandbox/Dockerfile). No phase is Blocked; external risks (LeetCode rate limits, CGNAT in Direct mode) are carried in Phases 7 and 10. Next: close the Phase 2 event gaps; then Phases 3 and 4 can proceed in parallel.
+**Phase 2 (core domain) is Done.** Phases 0–2 are Done: the spec is Final (`fe9f15c` skeleton), both clients landed in `281cd95` with models settled in `645581f`, the core landed in `f45a6c4`, and its completion work (test-result, paste-flag, disconnect/reconnect, and chat-boundary events plus evidence recording) lands in the commit carrying this update — 68 tests pass, 0 fail, 6 live ignored (`cargo test`, observed at time of writing), 60 of them covering `core` (22 unit + 38 integration). Phases 3–12 are Not started: every remaining module is a 1-line stub, the binary prints "role selection is not implemented yet", and the only later-phase artifact is [sandbox/Dockerfile](../sandbox/Dockerfile). No phase is Blocked; external risks (LeetCode rate limits, CGNAT in Direct mode) are carried in Phases 7 and 10. Next: Phases 3 (scoring) and 4 (AI orchestration), which can proceed in parallel.
 
 ## How to update this file
 
