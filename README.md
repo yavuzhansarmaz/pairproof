@@ -20,6 +20,10 @@ Project skeleton only. Role selection and interview flows are not implemented ye
 - Docker (expert machine, required for the sandbox)
 - Mutagen (file sync)
 
+## License
+
+MIT. See [LICENSE](LICENSE).
+
 ## Build
 
 ```sh
