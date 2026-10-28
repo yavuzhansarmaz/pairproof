@@ -22,7 +22,7 @@ Project skeleton only. Role selection and interview flows are not implemented ye
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).
 
 ## Build
 
