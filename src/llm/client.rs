@@ -1,12 +1,31 @@
-//! Meta Model API clients (strong and light) and their prompts.
+//! Meta Model API client implementation.
 
+use super::{API_KEY_ENV, DEFAULT_BASE_URL, LIGHT_MODEL, STRONG_MODEL};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-pub const DEFAULT_BASE_URL: &str = "https://api.meta.ai/v1";
-pub const STRONG_MODEL: &str = "muse-wonder-1.0";
-pub const LIGHT_MODEL: &str = "muse-spark-1.3";
-pub const API_KEY_ENV: &str = "MODEL_API_KEY";
+/// Provider reasoning effort, serialised lowercase on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ChatOptions {
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+impl ChatOptions {
+    /// Options requesting low reasoning effort, used for chat calls.
+    pub fn low() -> Self {
+        Self {
+            reasoning_effort: Some(ReasoningEffort::Low),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
@@ -45,11 +64,31 @@ struct ChatRequest {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct StreamOptions {
     include_usage: bool,
+}
+
+/// Builds a chat request, omitting unset optional fields on the wire.
+fn build_request(
+    model: &str,
+    messages: Vec<Message>,
+    stream: bool,
+    options: ChatOptions,
+) -> ChatRequest {
+    ChatRequest {
+        model: model.to_string(),
+        messages,
+        stream,
+        stream_options: stream.then_some(StreamOptions {
+            include_usage: true,
+        }),
+        reasoning_effort: options.reasoning_effort,
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,21 +156,14 @@ fn parse_stream_payload(payload: &str) -> Option<(String, Option<Usage>)> {
         return None;
     }
     let value: serde_json::Value = serde_json::from_str(payload).ok()?;
-    let delta = value
-        .pointer("/choices/0/delta/content")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let usage = value.get("usage").and_then(|u| {
-        if u.is_null() {
-            None
-        } else {
-            serde_json::from_value::<UsageWire>(u.clone())
-                .ok()
-                .map(Usage::from)
-        }
-    });
-    Some((delta, usage))
+    let found = value.pointer("/choices/0/delta/content");
+    let delta = found.and_then(|v| v.as_str()).unwrap_or_default();
+    let usage = value
+        .get("usage")
+        .filter(|u| !u.is_null())
+        .and_then(|u| serde_json::from_value::<UsageWire>(u.clone()).ok())
+        .map(Usage::from);
+    Some((delta.to_string(), usage))
 }
 
 /// Accumulates streamed deltas into a complete chat outcome.
@@ -141,9 +173,7 @@ fn accumulate_stream(payloads: &[&str], model: &str) -> Result<ChatOutcome, Meta
     for payload in payloads {
         if let Some((delta, maybe_usage)) = parse_stream_payload(payload) {
             content.push_str(&delta);
-            if let Some(found) = maybe_usage {
-                usage = found;
-            }
+            usage = maybe_usage.unwrap_or(usage);
         }
     }
     if content.is_empty() {
@@ -174,10 +204,8 @@ impl MetaClient {
 
     /// Builds a client for an explicit base URL and API key.
     pub fn new(base_url: &str, api_key: &str) -> Self {
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()
-            .expect("http client builds");
+        let builder = reqwest::Client::builder().timeout(Duration::from_secs(120));
+        let http = builder.build().expect("http client builds");
         Self {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -190,12 +218,8 @@ impl MetaClient {
     /// Lists model IDs visible to this API key.
     pub async fn list_models(&self) -> Result<Vec<String>, MetaApiError> {
         let url = format!("{}/models", self.base_url);
-        let response = self
-            .http
-            .get(&url)
-            .bearer_auth(&self.api_key)
-            .send()
-            .await?;
+        let builder = self.http.get(&url).bearer_auth(&self.api_key);
+        let response = builder.send().await?;
         let response = Self::ensure_success(response).await?;
         let parsed: ModelsResponse = response.json().await?;
         Ok(parsed.data.into_iter().map(|m| m.id).collect())
@@ -207,27 +231,25 @@ impl MetaClient {
         model: &str,
         messages: Vec<Message>,
     ) -> Result<ChatOutcome, MetaApiError> {
+        self.chat_with_options(model, messages, ChatOptions::default())
+            .await
+    }
+
+    /// Runs one non-streaming chat completion with explicit options.
+    pub async fn chat_with_options(
+        &self,
+        model: &str,
+        messages: Vec<Message>,
+        options: ChatOptions,
+    ) -> Result<ChatOutcome, MetaApiError> {
         let url = format!("{}/chat/completions", self.base_url);
-        let request = ChatRequest {
-            model: model.to_string(),
-            messages,
-            stream: false,
-            stream_options: None,
-        };
-        let response = self
-            .http
-            .post(&url)
-            .bearer_auth(&self.api_key)
-            .json(&request)
-            .send()
-            .await?;
+        let request = build_request(model, messages, false, options);
+        let builder = self.http.post(&url).bearer_auth(&self.api_key);
+        let response = builder.json(&request).send().await?;
         let response = Self::ensure_success(response).await?;
         let parsed: ChatResponse = response.json().await?;
-        let choice = parsed
-            .choices
-            .into_iter()
-            .next()
-            .ok_or(MetaApiError::EmptyChoices)?;
+        let mut choices = parsed.choices.into_iter();
+        let choice = choices.next().ok_or(MetaApiError::EmptyChoices)?;
         let message = choice.message.ok_or(MetaApiError::EmptyChoices)?;
         Ok(ChatOutcome {
             content: message.content,
@@ -242,22 +264,21 @@ impl MetaClient {
         model: &str,
         messages: Vec<Message>,
     ) -> Result<ChatOutcome, MetaApiError> {
+        self.chat_stream_with_options(model, messages, ChatOptions::default())
+            .await
+    }
+
+    /// Runs one streaming chat completion with explicit options.
+    pub async fn chat_stream_with_options(
+        &self,
+        model: &str,
+        messages: Vec<Message>,
+        options: ChatOptions,
+    ) -> Result<ChatOutcome, MetaApiError> {
         let url = format!("{}/chat/completions", self.base_url);
-        let request = ChatRequest {
-            model: model.to_string(),
-            messages,
-            stream: true,
-            stream_options: Some(StreamOptions {
-                include_usage: true,
-            }),
-        };
-        let response = self
-            .http
-            .post(&url)
-            .bearer_auth(&self.api_key)
-            .json(&request)
-            .send()
-            .await?;
+        let request = build_request(model, messages, true, options);
+        let builder = self.http.post(&url).bearer_auth(&self.api_key);
+        let response = builder.json(&request).send().await?;
         let mut response = Self::ensure_success(response).await?;
         let mut buffer = String::new();
         let mut payloads: Vec<String> = Vec::new();
@@ -265,8 +286,7 @@ impl MetaClient {
             buffer.push_str(&String::from_utf8_lossy(&chunk));
             while let Some(index) = buffer.find('\n') {
                 let line: String = buffer.drain(..=index).collect();
-                let line = line.trim();
-                if let Some(payload) = line.strip_prefix("data:") {
+                if let Some(payload) = line.trim().strip_prefix("data:") {
                     payloads.push(payload.trim().to_string());
                 }
             }
@@ -322,5 +342,38 @@ mod tests {
             total_tokens: None,
         });
         assert_eq!(usage.total_tokens, 10);
+    }
+
+    fn request_json(options: ChatOptions) -> String {
+        let req = build_request("m", vec![Message::new("user", "hi")], false, options);
+        serde_json::to_string(&req).expect("request serialises")
+    }
+
+    #[test]
+    fn chat_request_omits_reasoning_effort_by_default() {
+        let json = request_json(ChatOptions::default());
+        assert!(!json.contains("reasoning_effort"), "{json}");
+    }
+
+    #[test]
+    fn chat_request_serializes_low_reasoning_effort() {
+        let json = request_json(ChatOptions::low());
+        assert!(json.contains("\"reasoning_effort\":\"low\""), "{json}");
+    }
+
+    #[test]
+    fn reasoning_effort_variants_serialize_lowercase() {
+        use ReasoningEffort::*;
+        for (effort, want) in [(Low, "\"low\""), (Medium, "\"medium\""), (High, "\"high\"")] {
+            let got = serde_json::to_string(&effort).expect("effort serialises");
+            assert_eq!(got, want);
+        }
+    }
+
+    #[test]
+    fn chat_options_low_sets_low() {
+        let got = ChatOptions::low().reasoning_effort;
+        assert_eq!(got, Some(ReasoningEffort::Low));
+        assert_eq!(ChatOptions::default().reasoning_effort, None);
     }
 }

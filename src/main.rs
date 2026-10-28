@@ -1,3 +1,3 @@
 fn main() -> anyhow::Result<()> {
-    pairproof::cli::run()
+    pairproof::tui::run()
 }

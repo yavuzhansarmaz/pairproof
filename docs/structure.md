@@ -16,7 +16,7 @@
 
 - One binary with expert and candidate modes.
 - Live question sourcing from LeetCode.
-- JD/resume-driven topic and language selection.
+- JD/additional-notes-driven topic and language selection.
 - Direct candidate-to-expert-machine connection with disposable Docker sandbox and Mutagen sync.
 - 10-question flow (5 easy + 3 medium + 2 hard) plus at most 1 expert extra question.
 - Two Meta models: strong (left side) and light (chat).
@@ -28,7 +28,7 @@
 - Authoring original question content or a bundled question snapshot (fallback or otherwise).
 - VPS reverse-tunnel relay (structure must not preclude it; it is not built).
 - Screen-share transport or requests inside PairProof.
-- Multi-language support beyond Python and JavaScript.
+- Multi-language support beyond Python, JavaScript, and SQL.
 - Edit authorship tracking (who changed which line, AI or candidate).
 - Hard per-question or per-session token caps.
 - Web UI, accounts, cloud backend, database server.
@@ -40,7 +40,7 @@
 1. Start PairProof, select `Expert`.
 2. Preflight checklist (Docker, sandbox image, port, external IP, CGNAT suspicion).
 3. Enter Meta Model API key. Charges run on the expert's key.
-4. Paste the job description or upload it as PDF; upload the candidate resume as PDF.
+4. Paste the job description; optionally paste additional notes as a second source.
 5. The system extracts topics, level, and a proposed language; the expert confirms or overrides the language.
 6. The system auto-selects the first 5 easy questions. The expert does not preview or change them.
 7. PairProof shows a connection string with a 60-second rotating secret.
@@ -67,14 +67,14 @@
 
 - Question catalog and statements are fetched **live** from the unofficial GraphQL endpoint used by LeetCode's own web UI. There is no official public API.
 - No bundled snapshot fallback in the MVP. This is an accepted risk: if the endpoint changes or rate-limits, the flow breaks. A GraphQL access spike is therefore the first validation task.
-- LeetCode has no position filter. The AI derives topics (array, graph, DP, etc.) and level from JD + resume; the catalog query uses those topics.
+- LeetCode has no position filter. The AI derives topics (array, graph, DP, etc.) and level from JD + additional notes; the catalog query uses those topics. Domains are mapped to the closest real LeetCode topic slugs from a fixed known-topic list: LeetCode has no domain topics such as machine-learning. Database (SQL) topics are in scope only for SQL sessions, enforced in code as a coherence rule: SQL sessions draw only from the `database` topic pool, and `database` is dropped from Python/JavaScript sessions. The rule exists because LeetCode snippets are language-exclusive (a database question carries a MySQL snippet and no algorithm-language snippet, and vice versa). Unknown slugs are dropped in code because the endpoint silently ignores them, which would return the unfiltered pool.
 - Selection from the relevant topic pool is randomized to reduce memorization.
 
 ## 5. Language Selection
 
-- Supported solution languages in the MVP: **Python and JavaScript**.
-- The AI proposes a language with strict priority: JD requirement first, then the candidate's strongest resume language, then Python as default. The expert gives the final confirmation and can override.
-- If an unsupported language is required, the expert is explicitly warned and must pick a supported one. There is no silent fallback.
+- Supported solution languages in the MVP: **Python, JavaScript, and SQL (MySQL dialect; solution files `.sql`, LeetCode snippet slug "mysql")**.
+- The AI proposes a language from the JD and additional notes taken together: if either text names a language, that language is used; Python is the default only when neither names one. If the two texts conflict, the language stated as a role requirement is preferred, and the proposal must cite which source(s) decided and any conflict. The expert gives the final confirmation and can override.
+- If an unsupported language is required, the expert is explicitly warned and must pick a supported one. There is no silent fallback. MSSQL/T-SQL dialects (`mssql`/`tsql`) stay unsupported in the MVP — only the MySQL dialect is supported.
 
 ## 6. Connection (Candidate to Expert Machine)
 
@@ -88,7 +88,7 @@
 
 ## 7. Sandbox and Sync
 
-- A session is one **disposable Docker container** on the expert machine: SSH server, Python and Node runtimes, and an empty session workspace.
+- A session is one **disposable Docker container** on the expert machine: SSH server, Python and Node runtimes plus a MySQL runner for SQL sessions, and an empty session workspace.
 - Prerequisite: Docker installed. PairProof checks it in preflight and refuses to start without it.
 - Preflight checklist (expert screen, before start): Docker ready, sandbox image ready, port listening, external IP visible, CGNAT suspicion. Failures show concrete guidance; the expert may proceed anyway at their own risk.
 - Sandbox image: built once on the expert machine from a Dockerfile shipped with PairProof, then cached. The image is identical for everyone and contains no keys or personal data.
@@ -100,7 +100,7 @@
 
 ## 8. Candidate Workspace Layout
 
-- One folder per question: `questions/01/question.md` plus `questions/01/solution.py` (or `solution.js`), then `02/`, and so on.
+- One folder per question: `questions/01/question.md` plus `questions/01/solution.py` (or `solution.js` / `solution.sql`), then `02/`, and so on.
 - The candidate edits only `solution.*` files. `question.md` is reference.
 - PairProof tracking data (selected approach, token counters, actions) does not live in candidate-editable files; it is kept in PairProof's own records.
 - The candidate's local sync folder is not deleted after the session; the candidate keeps their copy of the solutions.
@@ -108,8 +108,8 @@
 ## 9. Expert-Side Privacy and Storage
 
 - Meta API key: stored only on the expert machine in a user-private config file with `0600` permissions. Shown masked; deletable; overridable via environment variable. It is never logged, never put into the connection string, never sent to the candidate or the container.
-- JD may be pasted or uploaded as PDF; the resume is PDF. Text extraction runs on the expert side; extracted text is sent to the Meta API for analysis, and this is disclosed on the setup screen.
-- Raw JD/resume files live only in the expert's session folder for the session duration and are automatically deleted at the end. Only the non-personal extraction remains (topics, level, language, question list). After an abnormal exit, a leftover session folder is offered for cleanup on next launch.
+- Both inputs are pastes: the job description (required) and optional additional notes. Each field is bounded to 50,000 characters, truncated on a character boundary with a visible truncated flag. The bounded text is sent to the Meta API for analysis, and this is disclosed on the setup screen.
+- Raw pastes are stored as `jd.txt` and `additional.txt` in the expert's session `raw/` folder for the session duration and are automatically deleted at the end. Only the non-personal extraction remains (topics, level, language, question list). After an abnormal exit, leftover `raw/` folders are offered for cleanup on next launch.
 - Documents never reach the candidate or the container.
 
 ## 10. AI Models and Chat
@@ -160,7 +160,7 @@
 - Starts at **6.0**, clamped to 3.0-10.0. It updates live with a visible breakdown of which component moved it. The breakdown is live, not only final.
 - Only the left side affects it. **Chat has zero score effect**, by design, so the candidate can ask freely.
 - Solved/quality judgement belongs to the AI, not to tests: the strong model reviews each question against its solution codebase at the end (Section 14).
-- Step table. Difficulty multipliers: easy x0.5, medium x1.0, hard x1.5, applied to approach and token lines.
+- Step table. Difficulty multipliers: easy x0.5, medium x1.0, hard x1.5, applied to approach and token lines. Each question also carries its LeetCode acceptance percent; the effective multiplier is the difficulty multiplier x an acceptance factor (>=50% x1.0, 35-49% x1.1, <35% x1.25, unknown x1.0), applied to approach and token lines, including skipped-token settlement.
   - Approach: best +0.30, workable +0.10, weak/wrong -0.20. `Other` is graded on the same scale at selection time. The best-approach marker is recorded internally when options are generated; the candidate never sees it and option order is shuffled.
   - Token ratio (actual / locked expectation): up to 0.8 gives +0.20; 0.8-1.2 gives 0; 1.2-1.8 gives -0.15; above 1.8 gives -0.30.
   - Intervention: a redirect or approach change that leads to a solution gives +0.20; an unnecessary approach change gives -0.10.
@@ -190,7 +190,7 @@
   - Token record: locked expectation vs actual per question.
   - Context summary: extracted topics, level, language, and the selected question list.
 - Raw chat is retained for the evidence chain; the report quotes only relevant excerpts.
-- Never retained: raw JD/resume (deleted at end), API key, connection string, and secret.
+- Never retained: raw JD/additional-notes pastes (deleted at end), API key, connection string, and secret.
 
 ## 16. Copy-Paste and Rules
 
@@ -222,20 +222,19 @@
 ```text
 src/
   main.rs          # entry point only
-  cli/             # UI-1: args, startup, role dispatch (thin)
-  tui/             # UI-2: expert/ and candidate/ screen sets, shared widgets/rendering
+  tui/             # UI: args, startup, role dispatch (thin); expert/ and candidate/ screen sets, shared widgets/rendering
   core/            # interview flow state, session lifecycle, event log, artifacts
   leetcode/        # GraphQL catalog and question fetching
-  ai/              # Meta Model API client (strong/light) and prompts
+  llm/             # Meta Model API client (strong/light) and prompts
   connection/      # connection string, rotating secret, accept/lock handling
   sandbox/         # Docker lifecycle and in-container test execution
   sync/            # Mutagen checks and session sync management
-  ingest/          # JD/resume PDF text extraction and context summary
+  ingest/          # JD/additional-notes paste intake, bounds, and context summary
   scoring/         # fixed step table, token comparison, per-question grade merge
 tests/             # integration tests per flow
 ```
 
-- UI layer = `cli/` + `tui/`. Both call downward only. `core` and every service module must never depend on `cli/` or `tui/`. Checks such as Docker availability are computed in their owning module; the UI only displays results.
+- UI layer = `tui/` only. It calls downward only. `core` and every service module must never depend on `tui/`. Checks such as Docker availability are computed in their owning module; the UI only displays results.
 
 ## 20. Validation Spikes (before full build)
 

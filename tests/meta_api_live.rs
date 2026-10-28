@@ -2,7 +2,7 @@
 //!
 //! Run with: MODEL_API_KEY=... cargo test --test meta_api_live -- --ignored
 
-use pairproof::ai::{Message, MetaClient, LIGHT_MODEL, STRONG_MODEL};
+use pairproof::llm::{Message, MetaClient, LIGHT_MODEL, STRONG_MODEL};
 
 fn live_client() -> MetaClient {
     MetaClient::from_env().expect("MODEL_API_KEY must be set for the live spike")
