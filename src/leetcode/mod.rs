@@ -1,5 +1,9 @@
 //! Live LeetCode GraphQL catalog and question fetching.
 
+pub mod selection;
+
+pub use selection::{auto_pick_easy, expert_pool, pick_random, select_questions, SelectionError};
+
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::Duration;
