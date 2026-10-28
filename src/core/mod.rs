@@ -4,6 +4,7 @@ pub mod actions;
 pub mod artifacts;
 pub mod event_log;
 pub mod events;
+pub mod records;
 pub mod session;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -15,5 +16,5 @@ pub use events::{EventKind, SessionEvent};
 pub use session::Session;
 pub use types::{
     ApproachChoice, CoreError, Language, QuestionRef, QuestionSlot, QuestionSource, QuestionStatus,
-    SessionStatus,
+    SessionStatus, TestSummary,
 };

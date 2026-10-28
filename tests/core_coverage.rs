@@ -86,6 +86,8 @@ fn question_slot_new_starts_pending_and_empty() {
     assert!(!slot.re_question_pending);
     assert_eq!(slot.started_at_ms, None);
     assert_eq!(slot.finished_at_ms, None);
+    assert_eq!(slot.latest_test, None);
+    assert_eq!(slot.paste_flags, 0);
 }
 
 #[test]

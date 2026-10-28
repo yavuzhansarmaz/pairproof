@@ -15,6 +15,7 @@ impl Session {
     ) -> R {
         let p = self.active()?;
         self.ensure_no_requestion_pending(p)?;
+        self.ensure_connected()?;
         ensure(self.slots[p].approach.is_none(), ApproachAlreadySelected)?;
         ensure(expected_tokens > 0, InvalidExpectedTokens)?;
         let choice = choice.validated()?;
@@ -52,6 +53,7 @@ impl Session {
     pub fn change_approach(&mut self, at_ms: u64) -> R {
         let p = self.active()?;
         self.ensure_no_requestion_pending(p)?;
+        self.ensure_connected()?;
         ensure(self.slots[p].approach.is_some(), NoApproachSelected)?;
         let index = self.slots[p].index;
         self.slots[p].approach = None;
@@ -63,12 +65,15 @@ impl Session {
     /// Adds spent tokens to the active slot; emits no event.
     pub fn add_tokens(&mut self, n: u64) -> R {
         let p = self.active()?;
+        self.ensure_connected()?;
         self.slots[p].actual_tokens = self.slots[p].actual_tokens.saturating_add(n);
         Ok(())
     }
 
     pub fn request_requestion(&mut self, at_ms: u64) -> R {
         let p = self.active()?;
+        ensure(!self.slots[p].re_question_pending, ReQuestionAlreadyUsed)?;
+        self.ensure_connected()?;
         let s = &self.slots[p];
         ensure(s.source == QuestionSource::Expert, ReQuestionNotAllowed)?;
         ensure(s.approach.is_none(), ReQuestionNotAllowed)?;
@@ -125,6 +130,7 @@ impl Session {
     fn emit_active(&mut self, at_ms: u64, kind: impl Fn(usize) -> EventKind) -> R {
         let p = self.active()?;
         self.ensure_no_requestion_pending(p)?;
+        self.ensure_connected()?;
         let index = self.slots[p].index;
         self.push(at_ms, kind(index));
         Ok(())
@@ -133,6 +139,7 @@ impl Session {
     fn close(&mut self, skipped: bool, at_ms: u64) -> R {
         let p = self.active()?;
         self.ensure_no_requestion_pending(p)?;
+        self.ensure_connected()?;
         let index = self.slots[p].index;
         self.slots[p].status = if skipped { Skipped } else { Finished };
         self.slots[p].finished_at_ms = Some(at_ms);

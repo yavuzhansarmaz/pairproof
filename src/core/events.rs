@@ -54,6 +54,22 @@ pub enum EventKind {
     QuestionSkipped {
         index: usize,
     },
+    TestRunCompleted {
+        index: usize,
+        passed: u32,
+        failed: u32,
+    },
+    PasteFlagged {
+        index: usize,
+        inserted_bytes: u64,
+    },
+    ChatBoundaryViolated {
+        index: Option<usize>,
+    },
+    CandidateDisconnected,
+    CandidateReconnected {
+        downtime_ms: u64,
+    },
     ExpertEnded,
     TechnicalFailure,
     Completed,
