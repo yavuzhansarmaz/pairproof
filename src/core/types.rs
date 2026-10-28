@@ -65,6 +65,7 @@ pub enum CoreError {
 pub enum Language {
     Python,
     JavaScript,
+    Sql,
 }
 
 impl Language {
@@ -73,6 +74,7 @@ impl Language {
         match self {
             Language::Python => "py",
             Language::JavaScript => "js",
+            Language::Sql => "sql",
         }
     }
 
@@ -81,6 +83,7 @@ impl Language {
         match self {
             Language::Python => "python3",
             Language::JavaScript => "javascript",
+            Language::Sql => "mysql",
         }
     }
 }
@@ -91,6 +94,7 @@ pub struct QuestionRef {
     pub title_slug: String,
     pub title: String,
     pub difficulty: Difficulty,
+    pub acceptance_pct: Option<u32>,
 }
 
 /// Origin of a question slot.
@@ -251,6 +255,8 @@ mod tests {
         assert_eq!(Language::Python.leetcode_slug(), "python3");
         assert_eq!(Language::JavaScript.file_extension(), "js");
         assert_eq!(Language::JavaScript.leetcode_slug(), "javascript");
+        assert_eq!(Language::Sql.file_extension(), "sql");
+        assert_eq!(Language::Sql.leetcode_slug(), "mysql");
     }
 
     #[test]
