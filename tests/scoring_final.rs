@@ -12,11 +12,28 @@ fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
         title_slug: slug.to_string(),
         title: slug.to_string(),
         difficulty,
+        acceptance_pct: None,
     }
 }
 
 fn qs(prefix: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
     (0..n).map(|i| q(&format!("{prefix}{i}"), d)).collect()
+}
+
+fn q_acceptance(slug: &str, difficulty: Difficulty, acceptance_pct: Option<u32>) -> QuestionRef {
+    let mut question = q(slug, difficulty);
+    question.acceptance_pct = acceptance_pct;
+    question
+}
+
+fn started_easy_acceptance(acceptance_pct: Option<u32>) -> Session {
+    let mut questions = qs("e", 5, Difficulty::Easy);
+    questions[0] = q_acceptance("e0", Difficulty::Easy, acceptance_pct);
+    let mut s = Session::new("s1".into(), Language::Python, questions, 0).expect("session");
+    s.mark_waiting_for_candidate(1).expect("waiting");
+    s.candidate_connected(2).expect("connected");
+    s.start(3).expect("start");
+    s
 }
 
 fn base() -> Session {
@@ -309,4 +326,23 @@ fn final_rating_revalidates_struct_literal_grades() {
     }
     let ok = final_rating(&s, &BTreeMap::new(), &[literal(8.0, "solid", 0.1)]).unwrap();
     assert_eq!(ok.per_question[0].grade, Some(8.0));
+}
+
+#[test]
+fn skipped_token_settlement_uses_acceptance_factor() {
+    let mut s = started_easy_acceptance(Some(30));
+    s.select_approach(ApproachChoice::Preset(0), 100, 10)
+        .unwrap();
+    s.add_tokens(200).unwrap();
+    s.skip_question(11).unwrap();
+    let b = final_rating(&s, &BTreeMap::new(), &[]).unwrap();
+    let line = b
+        .lines
+        .iter()
+        .find(|l| l.slot_index == 0 && l.component == ScoreComponent::Tokens)
+        .expect("skipped settlement line");
+    close(line.delta, -0.30 * 0.5 * 1.25);
+    assert!(line.detail.contains("skipped"), "{}", line.detail);
+    assert!(line.detail.contains("200/100"), "{}", line.detail);
+    assert!(line.detail.contains("ac 30%"), "{}", line.detail);
 }

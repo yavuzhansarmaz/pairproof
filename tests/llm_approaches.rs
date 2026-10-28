@@ -1,13 +1,13 @@
-use pairproof::ai::approaches::{
+use pairproof::core::{Language, QuestionRef, Session};
+use pairproof::leetcode::Difficulty;
+use pairproof::llm::approaches::{
     build_approach_messages, build_other_grade_messages, generate_approaches, grade_other_approach,
     parse_approach_grade, parse_approach_set,
 };
-use pairproof::ai::coding::{
+use pairproof::llm::coding::{
     apply_usage, build_coding_messages, parse_coding_step, run_coding_step, CodingStepInput,
 };
-use pairproof::ai::{AiError, ChatOptions, Message, MetaApiError, MetaClient, Usage};
-use pairproof::core::{Language, QuestionRef, Session};
-use pairproof::leetcode::Difficulty;
+use pairproof::llm::{ChatOptions, LlmError, Message, MetaApiError, MetaClient, Usage};
 use pairproof::scoring::ApproachQuality;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -101,7 +101,7 @@ fn parse_approach_set_rejects_bad_quality_and_bad_tokens() {
     let mut bad_quality = valid_items();
     bad_quality[0] = approach_json("Brute force", "excellent", "100");
     let err = parse_approach_set(&set_json(&bad_quality), &mut rng(1));
-    assert!(matches!(err, Err(AiError::Parse(_))), "{err:?}");
+    assert!(matches!(err, Err(LlmError::Parse(_))), "{err:?}");
     for tokens in ["0", "-5", "3.5", "\"many\""] {
         let mut items = valid_items();
         items[1] = approach_json("Hash map", "best", tokens);
@@ -241,6 +241,7 @@ fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
         title_slug: slug.to_string(),
         title: slug.to_string(),
         difficulty,
+        acceptance_pct: None,
     }
 }
 
@@ -260,7 +261,7 @@ fn apply_usage_adds_tokens_and_errors_without_active_question() {
     };
     let mut idle = new_session();
     let err = apply_usage(&mut idle, &usage);
-    assert!(matches!(err, Err(AiError::Core(_))), "{err:?}");
+    assert!(matches!(err, Err(LlmError::Core(_))), "{err:?}");
     let mut session = new_session();
     session.mark_waiting_for_candidate(1).expect("waiting");
     session.candidate_connected(2).expect("connected");
@@ -285,7 +286,7 @@ async fn generate_approaches_unreachable_api_is_typed_error() {
         &mut rng(7),
     )
     .await;
-    assert!(matches!(err, Err(AiError::Api(_))), "{err:?}");
+    assert!(matches!(err, Err(LlmError::Api(_))), "{err:?}");
 }
 
 #[tokio::test]
@@ -297,7 +298,7 @@ async fn grade_other_approach_unreachable_api_is_typed_error() {
         "use a hash map",
     )
     .await;
-    assert!(matches!(err, Err(AiError::Api(_))), "{err:?}");
+    assert!(matches!(err, Err(LlmError::Api(_))), "{err:?}");
 }
 
 #[tokio::test]
@@ -308,7 +309,7 @@ async fn run_coding_step_unreachable_api_errors_and_books_no_tokens() {
     session.candidate_connected(2).expect("connected");
     session.start(3).expect("start");
     let err = run_coding_step(&client, &mut session, &coding_input(false)).await;
-    assert!(matches!(err, Err(AiError::Api(_))), "{err:?}");
+    assert!(matches!(err, Err(LlmError::Api(_))), "{err:?}");
     assert_eq!(session.current_slot().expect("slot").actual_tokens, 0);
 }
 
@@ -320,6 +321,18 @@ async fn chat_with_options_unreachable_api_is_typed_error() {
         .chat_with_options(&model, vec![Message::new("user", "hi")], ChatOptions::low())
         .await;
     assert!(matches!(err, Err(MetaApiError::Http(_))), "{err:?}");
+}
+
+#[test]
+fn sql_language_names_mysql_in_prompts() {
+    let approach = build_approach_messages("stmt", Language::Sql);
+    let approach_joined = format!("{}\n{}", approach[0].content, approach[1].content);
+    assert!(approach_joined.contains("SQL (MySQL)"), "{approach_joined}");
+    let mut input = coding_input(false);
+    input.language = Language::Sql;
+    let coding = build_coding_messages(&input);
+    let coding_joined = format!("{}\n{}", coding[0].content, coding[1].content);
+    assert!(coding_joined.contains("SQL (MySQL)"), "{coding_joined}");
 }
 
 #[tokio::test]

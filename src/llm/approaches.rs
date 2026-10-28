@@ -4,9 +4,9 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::Deserialize;
 
-use crate::ai::common::{language_name, parse_quality, strip_code_fences, AiError, AiOutcome};
-use crate::ai::{Message, MetaClient};
 use crate::core::Language;
+use crate::llm::common::{language_name, parse_quality, strip_code_fences, LlmError, LlmOutcome};
+use crate::llm::{Message, MetaClient};
 use crate::scoring::{ApproachGrade, ApproachOption, ApproachSet};
 
 #[derive(Debug, Deserialize)]
@@ -51,9 +51,9 @@ pub fn build_approach_messages(question_statement: &str, language: Language) -> 
 }
 
 /// Parses a model reply into a validated, shuffled approach set.
-pub fn parse_approach_set(content: &str, rng: &mut impl Rng) -> Result<ApproachSet, AiError> {
+pub fn parse_approach_set(content: &str, rng: &mut impl Rng) -> Result<ApproachSet, LlmError> {
     let wire: ApproachSetWire = serde_json::from_str(strip_code_fences(content))
-        .map_err(|e| AiError::Parse(e.to_string()))?;
+        .map_err(|e| LlmError::Parse(e.to_string()))?;
     let mut options: Vec<ApproachOption> = Vec::with_capacity(wire.approaches.len());
     for approach in wire.approaches {
         options.push(ApproachOption {
@@ -73,12 +73,12 @@ pub async fn generate_approaches(
     question_statement: &str,
     language: Language,
     rng: &mut impl Rng,
-) -> Result<AiOutcome<ApproachSet>, AiError> {
+) -> Result<LlmOutcome<ApproachSet>, LlmError> {
     let model = client.strong_model.clone();
     let messages = build_approach_messages(question_statement, language);
     let outcome = client.chat(&model, messages).await?;
     let value = parse_approach_set(&outcome.content, rng)?;
-    Ok(AiOutcome {
+    Ok(LlmOutcome {
         value,
         usage: outcome.usage,
     })
@@ -103,9 +103,9 @@ pub fn build_other_grade_messages(question_statement: &str, other_text: &str) ->
 }
 
 /// Parses a model reply into a validated approach grade.
-pub fn parse_approach_grade(content: &str) -> Result<ApproachGrade, AiError> {
+pub fn parse_approach_grade(content: &str) -> Result<ApproachGrade, LlmError> {
     let wire: ApproachGradeWire = serde_json::from_str(strip_code_fences(content))
-        .map_err(|e| AiError::Parse(e.to_string()))?;
+        .map_err(|e| LlmError::Parse(e.to_string()))?;
     let quality = parse_quality(&wire.quality)?;
     Ok(ApproachGrade::new(
         quality,
@@ -119,12 +119,12 @@ pub async fn grade_other_approach(
     client: &MetaClient,
     question_statement: &str,
     other_text: &str,
-) -> Result<AiOutcome<ApproachGrade>, AiError> {
+) -> Result<LlmOutcome<ApproachGrade>, LlmError> {
     let model = client.strong_model.clone();
     let messages = build_other_grade_messages(question_statement, other_text);
     let outcome = client.chat(&model, messages).await?;
     let value = parse_approach_grade(&outcome.content)?;
-    Ok(AiOutcome {
+    Ok(LlmOutcome {
         value,
         usage: outcome.usage,
     })

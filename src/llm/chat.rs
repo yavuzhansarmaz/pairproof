@@ -1,9 +1,9 @@
 //! Candidate chat assembly: live state, prompt, and boundary checks.
 
-use crate::ai::common::{AiError, AiOutcome};
-use crate::ai::{ChatOptions, Message, MetaClient};
 use crate::core::events::EventKind;
 use crate::core::{ApproachChoice, QuestionStatus, Session, TestSummary};
+use crate::llm::common::{LlmError, LlmOutcome};
+use crate::llm::{ChatOptions, Message, MetaClient};
 
 pub const MAX_SOLUTION_CHARS: usize = 4000;
 pub const MAX_HISTORY_MESSAGES: usize = 6;
@@ -177,7 +177,7 @@ pub fn log_boundary_violation_if_present(
     session: &mut Session,
     reply: &str,
     at_ms: u64,
-) -> Result<bool, AiError> {
+) -> Result<bool, LlmError> {
     if !detect_boundary_violation(reply) {
         return Ok(false);
     }
@@ -193,14 +193,14 @@ pub async fn run_chat(
     history: &[Message],
     user_message: &str,
     at_ms: u64,
-) -> Result<AiOutcome<String>, AiError> {
+) -> Result<LlmOutcome<String>, LlmError> {
     let model = client.light_model.clone();
     let messages = assemble_chat_messages(state, history, user_message);
     let outcome = client
         .chat_stream_with_options(&model, messages, ChatOptions::low())
         .await?;
     log_boundary_violation_if_present(session, &outcome.content, at_ms)?;
-    Ok(AiOutcome {
+    Ok(LlmOutcome {
         value: outcome.content,
         usage: outcome.usage,
     })

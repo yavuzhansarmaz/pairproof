@@ -7,6 +7,7 @@ pub fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
         title_slug: slug.to_string(),
         title: slug.to_string(),
         difficulty,
+        acceptance_pct: None,
     }
 }
 

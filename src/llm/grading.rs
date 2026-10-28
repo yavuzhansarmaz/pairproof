@@ -2,9 +2,9 @@
 
 use serde::Deserialize;
 
-use crate::ai::common::{strip_code_fences, AiError, AiOutcome};
-use crate::ai::{Message, MetaClient};
 use crate::core::{ApproachChoice, EventKind, QuestionStatus, Session, TestSummary};
+use crate::llm::common::{strip_code_fences, LlmError, LlmOutcome};
+use crate::llm::{Message, MetaClient};
 use crate::scoring::{GradeOutcome, QuestionGrade};
 
 /// Everything one per-question grading request needs for one slot.
@@ -160,9 +160,9 @@ struct QuestionGradeWire {
 }
 
 /// Parses a model reply into a validated grade for `slot_index`.
-pub fn parse_question_grade(content: &str, slot_index: usize) -> Result<QuestionGrade, AiError> {
+pub fn parse_question_grade(content: &str, slot_index: usize) -> Result<QuestionGrade, LlmError> {
     let wire: QuestionGradeWire = serde_json::from_str(strip_code_fences(content))
-        .map_err(|e| AiError::Parse(e.to_string()))?;
+        .map_err(|e| LlmError::Parse(e.to_string()))?;
     Ok(QuestionGrade::new(
         slot_index,
         wire.grade,
@@ -175,12 +175,12 @@ pub fn parse_question_grade(content: &str, slot_index: usize) -> Result<Question
 pub async fn grade_question(
     client: &MetaClient,
     input: &QuestionScoringInput,
-) -> Result<AiOutcome<QuestionGrade>, AiError> {
+) -> Result<LlmOutcome<QuestionGrade>, LlmError> {
     let model = client.strong_model.clone();
     let messages = build_question_grading_messages(input);
     let outcome = client.chat(&model, messages).await?;
     let value = parse_question_grade(&outcome.content, input.slot_index)?;
-    Ok(AiOutcome {
+    Ok(LlmOutcome {
         value,
         usage: outcome.usage,
     })

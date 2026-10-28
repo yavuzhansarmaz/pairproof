@@ -16,4 +16,4 @@ pub const API_KEY_ENV: &str = "MODEL_API_KEY";
 pub use client::{
     ChatOptions, ChatOutcome, Message, MetaApiError, MetaClient, ModelInfo, ReasoningEffort, Usage,
 };
-pub use common::{AiError, AiOutcome};
+pub use common::{LlmError, LlmOutcome};

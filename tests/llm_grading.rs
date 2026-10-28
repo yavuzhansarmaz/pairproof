@@ -1,10 +1,10 @@
-use pairproof::ai::grading::{
+use pairproof::core::{ApproachChoice, Language, QuestionRef, Session, TestSummary};
+use pairproof::leetcode::Difficulty;
+use pairproof::llm::grading::{
     build_question_grading_messages, grade_question, grade_questions, parse_question_grade,
     scorable_slots, QuestionScoringInput,
 };
-use pairproof::ai::{AiError, MetaClient};
-use pairproof::core::{ApproachChoice, Language, QuestionRef, Session, TestSummary};
-use pairproof::leetcode::Difficulty;
+use pairproof::llm::{LlmError, MetaClient};
 use pairproof::scoring::GradeOutcome;
 
 fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
@@ -12,6 +12,7 @@ fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
         title_slug: slug.to_string(),
         title: slug.to_string(),
         difficulty,
+        acceptance_pct: None,
     }
 }
 
@@ -179,7 +180,7 @@ fn scorable_slots_only_finished() {
 async fn grade_question_unreachable_api_is_typed_error() {
     let client = MetaClient::new("http://127.0.0.1:9/v1", "k");
     let err = grade_question(&client, &bare_input(0)).await;
-    assert!(matches!(err, Err(AiError::Api(_))), "{err:?}");
+    assert!(matches!(err, Err(LlmError::Api(_))), "{err:?}");
 }
 
 #[tokio::test]

@@ -1,17 +1,18 @@
-use pairproof::ai::chat::{
+use pairproof::core::{ApproachChoice, Language, QuestionRef, Session, TestSummary};
+use pairproof::leetcode::Difficulty;
+use pairproof::llm::chat::{
     assemble_chat_messages, build_live_state_block, detect_boundary_violation,
     log_boundary_violation_if_present, run_chat, ChatState, CHAT_SYSTEM_PROMPT,
     MAX_HISTORY_MESSAGES, MAX_SOLUTION_CHARS,
 };
-use pairproof::ai::{AiError, Message, MetaClient};
-use pairproof::core::{ApproachChoice, Language, QuestionRef, Session, TestSummary};
-use pairproof::leetcode::Difficulty;
+use pairproof::llm::{LlmError, Message, MetaClient};
 
 fn q(slug: &str) -> QuestionRef {
     QuestionRef {
         title_slug: slug.to_string(),
         title: slug.to_string(),
         difficulty: Difficulty::Easy,
+        acceptance_pct: None,
     }
 }
 
@@ -184,7 +185,7 @@ async fn run_chat_unreachable_api_is_typed_error() {
     let mut session = started();
     let state = ChatState::from_session(&session, "Q statement", "code");
     let err = run_chat(&client, &mut session, &state, &[], "hint please", 30).await;
-    assert!(matches!(err, Err(AiError::Api(_))), "{err:?}");
+    assert!(matches!(err, Err(LlmError::Api(_))), "{err:?}");
     assert_eq!(session.current_slot().expect("slot").actual_tokens, 0);
     assert_eq!(session.chat_boundary_violations(), 0);
 }

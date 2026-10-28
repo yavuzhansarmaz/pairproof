@@ -36,6 +36,7 @@ fn questions(prefix: &str, n: usize, difficulty: Difficulty) -> Vec<QuestionRef>
             title_slug: format!("{prefix}{i}"),
             title: format!("{prefix}{i}"),
             difficulty,
+            acceptance_pct: None,
         })
         .collect()
 }

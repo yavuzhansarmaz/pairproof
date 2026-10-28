@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::{QuestionStatus, Session, TestSummary};
 use crate::leetcode::Difficulty;
 use crate::scoring::live::{
-    difficulty_multiplier, live_rating, token_band_step, ScoreComponent, ScoreLine,
+    live_rating, multiplier_and_detail, token_band_step, ScoreComponent, ScoreLine,
 };
 use crate::scoring::types::{ApproachQuality, GradeOutcome, QuestionGrade, ScoringError};
 
@@ -92,13 +92,13 @@ fn basis_lines(
         let ratio = slot.actual_tokens as f64 / lock as f64;
         let step = token_band_step(ratio).min(0.0);
         if step != 0.0 {
-            let mult = difficulty_multiplier(slot.question.difficulty);
+            let (mult, ac) = multiplier_and_detail(&slot.question);
             lines.push(ScoreLine {
                 slot_index: slot.index,
                 component: ScoreComponent::Tokens,
                 delta: step * mult,
                 detail: format!(
-                    "tokens skipped {}/{} ratio {ratio:.3} step {step:+.2} x{mult:.1}",
+                    "tokens skipped {}/{} ratio {ratio:.3} step {step:+.2} x{mult:.2}{ac}",
                     slot.actual_tokens, lock
                 ),
             });

@@ -1,9 +1,8 @@
-pub mod ai;
-pub mod cli;
 pub mod connection;
 pub mod core;
 pub mod ingest;
 pub mod leetcode;
+pub mod llm;
 pub mod sandbox;
 pub mod scoring;
 pub mod sync;

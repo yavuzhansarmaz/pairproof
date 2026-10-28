@@ -2,7 +2,7 @@
 
 AI-native technical interviewing: a Rust CLI that evolves LeetCode-style interviews into a two-sided, judgment-based assessment.
 
-An expert configures a session from a job description and a candidate resume. A candidate connects into a disposable Docker sandbox on the expert machine and solves live LeetCode questions by directing an AI coding agent. The expert selects questions live, watches an explainable rating, and receives per-question graded evidence.
+An expert configures a session from a pasted job description and optional additional notes. A candidate connects into a disposable Docker sandbox on the expert machine and solves live LeetCode questions by directing an AI coding agent. The expert selects questions live, watches an explainable rating, and receives per-question graded evidence.
 
 ## Documents
 
