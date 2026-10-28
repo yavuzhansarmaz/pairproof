@@ -11,25 +11,25 @@ This file tracks the implementation phases for the PairProof MVP defined in [str
 
 ## Summary
 
-Snapshot at time of writing: `cargo test` reports **160 passed, 0 failed, 13 ignored** (52 unit tests in `src/lib.rs`; 16 in `tests/ai_approaches.rs`; 10 in `tests/ai_chat.rs`; 7 in `tests/ai_extraction.rs`; 8 in `tests/ai_grading.rs`; 10 in `tests/core_artifacts.rs`; 7 in `tests/core_coverage.rs`; 12 in `tests/core_event_log.rs`; 9 in `tests/core_records.rs`; 11 in `tests/leetcode_selection.rs`; 6 in `tests/phase3_phase4_compose.rs`; 7 in `tests/scoring_final.rs`; 3 in `tests/scoring_live.rs`; 2 in `tests/smoke.rs`; 7 + 3 + 3 live tests ignored in `tests/ai_live_smoke.rs`, `tests/leetcode_live.rs`, and `tests/meta_api_live.rs`). All 13 ignored live tests were run and passed on 2026-10-28 (meta 3, leetcode 3, ai smoke 7). `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean. The largest source file is 379 lines (`src/ai/client.rs`).
+Snapshot at time of writing: `cargo test` reports **214 passed, 0 failed, 16 ignored** (53 unit tests in `src/lib.rs`; 17 in `tests/llm_approaches.rs`; 10 in `tests/llm_chat.rs`; 15 in `tests/llm_extraction.rs`; 8 in `tests/llm_grading.rs`; 11 in `tests/core_artifacts.rs`; 7 in `tests/core_coverage.rs`; 12 in `tests/core_event_log.rs`; 9 in `tests/core_records.rs`; 15 in `tests/ingest_pipeline.rs`; 17 in `tests/ingest_raw.rs`; 8 in `tests/ingest_text.rs`; 12 in `tests/leetcode_selection.rs`; 6 in `tests/phase3_phase4_compose.rs`; 8 in `tests/scoring_final.rs`; 4 in `tests/scoring_live.rs`; 2 in `tests/smoke.rs`; 8 + 5 + 3 live tests ignored in `tests/llm_live_smoke.rs`, `tests/leetcode_live.rs`, and `tests/meta_api_live.rs`). All 16 ignored live tests were run and passed on 2026-10-28, including the SQL ones (`live_database_question_has_mysql_snippet` and `live_database_full_composition_selectable` in `tests/leetcode_live.rs`, `live_extract_sql_role_proposes_sql_and_database` in `tests/llm_live_smoke.rs`). `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean. The largest source file is 379 lines (`src/llm/client.rs`).
 
 | Phase | Name | Status | Evidence | Depends on |
 | --- | --- | --- | --- | --- |
 | 0 | Concept and specification | Done | [structure.md](structure.md) "Final"; [initial.md](initial.md); [must.md](must.md); commits `fe9f15c` (skeleton), `570a5ec`, `c2395a9` | — |
-| 1 | Validation spikes (LeetCode, Meta API) | Done | [src/leetcode/mod.rs](../src/leetcode/mod.rs), [src/ai/mod.rs](../src/ai/mod.rs); commit `281cd95`; model choice in commit `645581f` and [must.md](must.md) | 0 |
-| 2 | Core domain (session, events, artifacts) | Done | [src/core/](../src/core/) (8 modules); 60 core-related tests green | 0, 1 |
-| 3 | Scoring engine | Done | [src/scoring/types.rs](../src/scoring/types.rs), [src/scoring/live.rs](../src/scoring/live.rs), [src/scoring/final_merge.rs](../src/scoring/final_merge.rs); 28 tests green (18 unit + 10 integration) + composition tests in `tests/phase3_phase4_compose.rs` | 2 (merge also needs 4) |
-| 4 | AI orchestration and prompts | Done | [src/ai/](../src/ai/) (client, common, approaches, coding, chat, extraction, grading), [src/leetcode/selection.rs](../src/leetcode/selection.rs); 9 unit + 52 integration tests green, 7 live smoke run and passed 7/7 live on 2026-10-28 | 1, 2 |
-| 5 | Ingest (JD / resume) | Not started | [src/ingest/mod.rs](../src/ingest/mod.rs) is a 1-line doc stub | 2, 4 |
+| 1 | Validation spikes (LeetCode, Meta API) | Done | [src/leetcode/mod.rs](../src/leetcode/mod.rs), [src/llm/mod.rs](../src/llm/mod.rs); commit `281cd95`; model choice in commit `645581f` and [must.md](must.md) | 0 |
+| 2 | Core domain (session, events, artifacts) | Done | [src/core/](../src/core/) (8 modules); 60 core-related tests green at phase close (now 61) | 0, 1 |
+| 3 | Scoring engine | Done | [src/scoring/types.rs](../src/scoring/types.rs), [src/scoring/live.rs](../src/scoring/live.rs), [src/scoring/final_merge.rs](../src/scoring/final_merge.rs); 31 tests green (19 unit + 12 integration) + composition tests in `tests/phase3_phase4_compose.rs` | 2 (merge also needs 4) |
+| 4 | LLM orchestration and prompts | Done | [src/llm/](../src/llm/) (client, common, approaches, coding, chat, extraction, grading), [src/leetcode/selection.rs](../src/leetcode/selection.rs); 9 unit + 57 integration tests green at phase close (extraction integration now 15 with SQL/coherence tests; approaches now 17), 7 live smoke at phase close (now 8) run and passed live on 2026-10-28 | 1, 2 |
+| 5 | Ingest (JD / additional notes) | Done | [src/ingest/mod.rs](../src/ingest/mod.rs), [src/ingest/pipeline.rs](../src/ingest/pipeline.rs); 38 ingest tests green at phase close (now 40: 8 in `tests/ingest_text.rs`, 17 in `tests/ingest_raw.rs`, 15 in `tests/ingest_pipeline.rs`) plus `tests/llm_extraction.rs` now 15; product decision: paste-only, file-upload dropped, no new dependency | 2, 4 |
 | 6 | Connection (rotating-secret string) | Not started | [src/connection/mod.rs](../src/connection/mod.rs) is a 1-line doc stub | 2 |
 | 7 | Sandbox and sync (Docker, Mutagen) | Not started | [sandbox/Dockerfile](../sandbox/Dockerfile) exists; [src/sandbox/mod.rs](../src/sandbox/mod.rs), [src/sync/mod.rs](../src/sync/mod.rs) are 1-line stubs | 2, 6 |
-| 8 | TUI — expert | Not started | [src/tui/expert.rs](../src/tui/expert.rs) stub; [src/cli/mod.rs](../src/cli/mod.rs) prints "role selection is not implemented yet" | 2–7 |
+| 8 | TUI — expert | Not started | [src/tui/expert.rs](../src/tui/expert.rs) stub; [src/tui/mod.rs](../src/tui/mod.rs) prints "role selection is not implemented yet" | 2–7 |
 | 9 | TUI — candidate | Not started | [src/tui/candidate.rs](../src/tui/candidate.rs) stub | 2, 4, 6, 7 |
 | 10 | End-to-end integration and failure handling | Not started | No cross-module flow wired; only per-module tests exist | 3–9 |
 | 11 | Hardening and polish (P1) | Not started | fmt/clippy clean today, but no P1 items built | 10 |
 | 12 | Demo and submission | Not started | No demo or submission artifacts in repo | 10, 11 |
 
-**Phases 0–4 are Done; the project is ready for Phases 5, 6, and 7.** No later phase has implementation beyond stubs and one Dockerfile. Phases 5 (ingest), 6 (connection), and 7 (sandbox and sync) can proceed. See [Current state](#current-state).
+**Phases 0–5 are Done; the project is ready for Phases 6 and 7.** No later phase has implementation beyond stubs and one Dockerfile. Phases 6 (connection) and 7 (sandbox and sync) are independent next steps and can proceed. See [Current state](#current-state).
 
 Every phase inherits two standing rules from [must.md](must.md) (Project Engineering Standards): each endpoint — user-facing flow, external integration wrapper, and lifecycle operation — ships with maintained tests covering success, error, and edge cases, and an endpoint is not done until its tests pass; and no file may exceed 400 lines, with `rustfmt`/`clippy` clean before merging. The per-phase exit criteria name the concrete tests each phase owes.
 
@@ -61,13 +61,13 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 **Scope.**
 
 - LeetCode GraphQL client: topic/difficulty catalog, statement + snippet fetch, premium-locked detection, free filtering ([src/leetcode/mod.rs](../src/leetcode/mod.rs): `LeetCodeClient::list_questions`, `fetch_question`).
-- Meta Model API client: model listing, chat, streaming chat with token usage ([src/ai/mod.rs](../src/ai/mod.rs): `MetaClient::list_models`, `chat`, `chat_stream`); key from `MODEL_API_KEY`.
+- Meta Model API client: model listing, chat, streaming chat with token usage ([src/llm/mod.rs](../src/llm/mod.rs): `MetaClient::list_models`, `chat`, `chat_stream`); key from `MODEL_API_KEY`.
 - Settled model IDs: strong `muse-wonder-1.0`, light `muse-spark-1.3` (`STRONG_MODEL`/`LIGHT_MODEL`).
 
 **Exit criteria.**
 
 - [x] Live tests for: free catalog, statement+snippets, premium rejection ([tests/leetcode_live.rs](../tests/leetcode_live.rs)); model visibility, strong chat usage, light streaming usage ([tests/meta_api_live.rs](../tests/meta_api_live.rs)). `#[ignore]`d (network/key); run with `-- --ignored`.
-- [x] Offline parsing/error unit tests: 3 in `src/leetcode/mod.rs`, 3 in `src/ai/mod.rs`, green in the current `cargo test` run.
+- [x] Offline parsing/error unit tests: 3 in `src/leetcode/mod.rs`, 3 in `src/llm/mod.rs`, green in the current `cargo test` run.
 - [x] Model IDs confirmed via `GET /v1/models`, recorded with live token measurements in [must.md](must.md) (2026-10-28) and commit `645581f`.
 
 **Status: Done.** Evidence: commit `281cd95` "Add LeetCode and Meta Model API clients (validation spikes)"; [must.md](must.md) records live validation on 2026-10-28. Two caveats: (1) the live `#[ignore]`d tests were not re-run when this section was first written (network + key required), so "Done" rested on the committed clients, green unit tests, and that live-validation record — they have since been re-run and passed on 2026-10-28; (2) rate-limit behaviour (section 20 item 1) has no written findings and no retry/429 handling in code — it is carried as a residual risk into Phase 10. Randomized topic-pool selection (section 4) is **not** shipped here: the client lists/fetches, nothing selects yet.
@@ -83,7 +83,7 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 
 **Scope.**
 
-- Types/errors: `SessionStatus`, `QuestionSlot`, `ApproachChoice` (4 presets + `Other`), `Language` (Python/JavaScript), typed `CoreError` ([src/core/types.rs](../src/core/types.rs)).
+- Types/errors: `SessionStatus`, `QuestionSlot`, `ApproachChoice` (4 presets + `Other`), `Language` (Python/JavaScript/SQL), typed `CoreError` ([src/core/types.rs](../src/core/types.rs)).
 - State machine: exactly 5 easy at create; waiting/connect/start; expert 3+2 set once (validated); 1 extra (max 11); `WaitingForExpert` after the fifth question; expert-end / technical-failure / completed terminals ([src/core/session.rs](../src/core/session.rs)).
 - Candidate actions: select approach + lock expected tokens, continue, redirect, request tests, change approach, add tokens, re-question request/resolve (expert part only, before approach, same-difficulty replacement), finish, skip ([src/core/actions.rs](../src/core/actions.rs)).
 - Typed sequenced, timestamped events ([src/core/events.rs](../src/core/events.rs)); JSONL writer (create-new, sequence-checked, flush per event) + validating reader ([src/core/event_log.rs](../src/core/event_log.rs)).
@@ -91,7 +91,7 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 
 **Exit criteria.**
 
-- [x] Tests per must.md (success/error/edge) for every transition and action, event-log round-trip/gaps/malformed lines, artifact writes: 22 unit tests under `src/core/` (actions 9, session 6, types 5, events 2) plus [tests/core_artifacts.rs](../tests/core_artifacts.rs) (10), [tests/core_coverage.rs](../tests/core_coverage.rs) (7), [tests/core_event_log.rs](../tests/core_event_log.rs) (12), [tests/core_records.rs](../tests/core_records.rs) (9) — all green.
+- [x] Tests per must.md (success/error/edge) for every transition and action, event-log round-trip/gaps/malformed lines, artifact writes: 22 unit tests under `src/core/` (actions 9, session 6, types 5, events 2) plus [tests/core_artifacts.rs](../tests/core_artifacts.rs) (10 at phase close; now 11 with `solution_path_uses_sql_extension`), [tests/core_coverage.rs](../tests/core_coverage.rs) (7), [tests/core_event_log.rs](../tests/core_event_log.rs) (12), [tests/core_records.rs](../tests/core_records.rs) (9) — all green.
 - [x] Core work committed: initial core in `f45a6c4`, completion work in the commit carrying this update.
 - [x] Event schema covers everything later phases must log (test runs, paste flags, disconnect/reconnect, chat boundary violations).
 
@@ -108,7 +108,7 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 **Scope.**
 
 - Live rating from 6.0, clamped 3.0–10.0, with a live per-component breakdown.
-- Step table: difficulty multipliers (easy ×0.5, medium ×1.0, hard ×1.5); approach steps (+0.30/+0.10/−0.20, `Other` graded at selection); token-ratio bands vs the locked expectation (≤0.8 → +0.20, 0.8–1.2 → 0, 1.2–1.8 → −0.15, >1.8 → −0.30); intervention (+0.20/−0.10); paste flag −0.30; skip 0 with its tokens settled in the final token line; chat and test results score-neutral.
+- Step table: difficulty multipliers (easy ×0.5, medium ×1.0, hard ×1.5) times an acceptance factor from each question's LeetCode acceptance percent (>=50% ×1.0, 35–49% ×1.1, <35% ×1.25, unknown ×1.0); approach steps (+0.30/+0.10/−0.20, `Other` graded at selection); token-ratio bands vs the locked expectation (≤0.8 → +0.20, 0.8–1.2 → 0, 1.2–1.8 → −0.15, >1.8 → −0.30); intervention (+0.20/−0.10); paste flag −0.30; skip 0 with its tokens settled in the final token line; chat and test results score-neutral.
 - Hidden best-approach marker recorded at option generation (data from Phase 4; storage settled here — it is not in `core` today).
 - Final merge: per-question AI grades (Phase 4) → total correction capped at ±0.8, scaled down proportionally if over; skipped questions excluded from AI scoring; "not scored" = 0, never invented.
 - Final breakdown data for both screens: solved count, test/time summaries, skip/paste counts, per-dimension lines, evidence sentences (section 13).
@@ -118,21 +118,21 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 - [x] Table-driven tests for every step, band boundary (0.8/1.2/1.8), multiplier, clamp, cap scaling, skip settlement, and neutral chat/tests, per must.md.
 - [x] Golden scoring test over a scripted `Session` event history.
 
-**Status: Done.** Implemented in [src/scoring/types.rs](../src/scoring/types.rs) (shared Step-0 contract types: `ApproachQuality`/`ApproachSet` with hidden `best_index` and no `Serialize`, `ApproachGrade`, `QuestionGrade`, `GradeOutcome`, `ScoringError`), [src/scoring/live.rs](../src/scoring/live.rs) (`live_rating` step table), and [src/scoring/final_merge.rs](../src/scoring/final_merge.rs) (`final_rating`, ±0.8 cap with proportional scaling, `FinalBreakdown`/`PerQuestionFinal`). Tests: 18 unit (types 4, live 8, final_merge 6) plus 10 integration ([tests/scoring_live.rs](../tests/scoring_live.rs) 3, [tests/scoring_final.rs](../tests/scoring_final.rs) 7) = 28, all green. Settled decisions: the token ratio uses the **last** lock from `Session::token_locks`; skipped-token settlement maps the positive band to 0 (a skip is never rewarded); `solved_count` = finished slots graded >= 5.0; `final_rating` revalidates grades (struct-literal safe). Evidence: uncommitted working tree on branch `dev` — no commit hash exists for this work yet.
+**Status: Done.** Implemented in [src/scoring/types.rs](../src/scoring/types.rs) (shared Step-0 contract types: `ApproachQuality`/`ApproachSet` with hidden `best_index` and no `Serialize`, `ApproachGrade`, `QuestionGrade`, `GradeOutcome`, `ScoringError`), [src/scoring/live.rs](../src/scoring/live.rs) (`live_rating` step table), and [src/scoring/final_merge.rs](../src/scoring/final_merge.rs) (`final_rating`, ±0.8 cap with proportional scaling, `FinalBreakdown`/`PerQuestionFinal`). Tests: 19 unit (types 4, live 9, final_merge 6) plus 12 integration ([tests/scoring_live.rs](../tests/scoring_live.rs) 4, [tests/scoring_final.rs](../tests/scoring_final.rs) 8) = 31, all green, including the acceptance tests `acceptance_factor_bands_at_boundaries`, `acceptance_scales_approach_and_token_lines`, `skipped_token_settlement_uses_acceptance_factor`, and `to_question_ref_maps_and_clamps_acceptance` (in [tests/leetcode_selection.rs](../tests/leetcode_selection.rs)); the `None` acceptance default (×1.0) keeps prior golden scores unchanged. Settled decisions: the token ratio uses the **last** lock from `Session::token_locks`; skipped-token settlement maps the positive band to 0 (a skip is never rewarded); `solved_count` = finished slots graded >= 5.0; `final_rating` revalidates grades (struct-literal safe). Evidence: uncommitted working tree on branch `dev` — no commit hash exists for this work yet.
 
 **Remaining work.**
 
 - [ ] None.
 
-## Phase 4 — AI orchestration and prompts
+## Phase 4 — LLM orchestration and prompts
 
-**Goal.** Everything above the raw client that makes the two models do interview work (structure.md sections 10, 11, 14; `ai/`).
+**Goal.** Everything above the raw client that makes the two models do interview work (structure.md sections 10, 11, 14; `llm/`).
 
 **Scope.**
 
 - Strong model: 4+1 approach generation (shuffled, best approach marked internally, expected-token lock on selection); coding loop that writes solution code and checks runnability only, terminating only on the defined events (AI declares ready; candidate finish/skip/change; expert end) — no token cap. Tests created only on `Request tests / verify`.
 - Light-model chat per section 10: fixed no-solution system prompt; PairProof live-state block (question, approach/stage, size-bounded solution file, latest test result, recent actions; labelled as data; never marker, token expectation, or score); short history; verbatim candidate message. Boundary violations shown but logged, score-neutral. Low `reasoning_effort` per [must.md](must.md).
-- Extraction calls for Phase 5 (topics, level, language proposal: JD-first / resume-second / Python default, section 5) and per-question scoring calls (one separate request per non-skipped question; 0–10 grade, rationale, correction share; retry that question only, section 14).
+- Extraction calls for Phase 5 (topics, level, language proposal: JD and additional notes taken together, Python only when neither names one, section 5) and per-question scoring calls (one separate request per non-skipped question; 0–10 grade, rationale, correction share; retry that question only, section 14).
 - Cancellation plumbing so the expert kill switch (section 17) stops all in-flight calls; API key stays outside the container (section 9).
 - Randomized selection from the LeetCode topic pool on the Phase 1 client (section 4): auto-pick 5 easy; lists for expert 3+2 selection.
 
@@ -141,32 +141,38 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 - [x] Tests per must.md for each Meta API wrapper (approaches, coding step, chat, extraction, scoring): request assembly and response parsing vs fixtures/mocks, malformed-response and API-failure paths; live smoke tests `#[ignore]`d like Phase 1.
 - [x] Tests that hidden data never enters the chat live-state block and that chat sends low `reasoning_effort`.
 
-**Status: Done.** `src/ai` is split into [src/ai/client.rs](../src/ai/client.rs) (`ReasoningEffort`/`ChatOptions::low`, `chat*_with_options`, old signatures preserved), [src/ai/common.rs](../src/ai/common.rs) (`AiError`/`AiOutcome`), [src/ai/approaches.rs](../src/ai/approaches.rs) (4+1 generation with seeded-shuffle parsing, `Other` grading), [src/ai/coding.rs](../src/ai/coding.rs) (single coding-step prompt/interface, `apply_usage` via `Session::add_tokens`, tokens booked before parsing; **no** sandbox execution), [src/ai/chat.rs](../src/ai/chat.rs) (section 10 assembly, hidden-data-free live-state block, boundary-violation logging via `ChatBoundaryViolated`), [src/ai/extraction.rs](../src/ai/extraction.rs) (section 5 priority prompt plus normalization/unsupported surfacing), and [src/ai/grading.rs](../src/ai/grading.rs) (section 14 one request per question; `grade_questions` turns failures into `NotScored`); randomized topic-pool selection is in [src/leetcode/selection.rs](../src/leetcode/selection.rs) (`pick_random`/`expert_pool`/`select_questions`/`auto_pick_easy`). Tests: 9 new unit (client 7 incl. 3 moved from Phase 1, common 2) plus integration [tests/ai_approaches.rs](../tests/ai_approaches.rs) (16), [tests/ai_chat.rs](../tests/ai_chat.rs) (10), [tests/ai_extraction.rs](../tests/ai_extraction.rs) (7), [tests/ai_grading.rs](../tests/ai_grading.rs) (8), [tests/leetcode_selection.rs](../tests/leetcode_selection.rs) (11) — all green; live smoke tests in [tests/ai_live_smoke.rs](../tests/ai_live_smoke.rs) (7) are `#[ignore]`d by default and were run and passed 7/7 live on 2026-10-28. Evidence: uncommitted working tree on branch `dev` — no commit hash exists for this work yet.
+**Status: Done.** `src/llm` is split into [src/llm/client.rs](../src/llm/client.rs) (`ReasoningEffort`/`ChatOptions::low`, `chat*_with_options`, old signatures preserved), [src/llm/common.rs](../src/llm/common.rs) (`LlmError`/`LlmOutcome`), [src/llm/approaches.rs](../src/llm/approaches.rs) (4+1 generation with seeded-shuffle parsing, `Other` grading), [src/llm/coding.rs](../src/llm/coding.rs) (single coding-step prompt/interface, `apply_usage` via `Session::add_tokens`, tokens booked before parsing; **no** sandbox execution), [src/llm/chat.rs](../src/llm/chat.rs) (section 10 assembly, hidden-data-free live-state block, boundary-violation logging via `ChatBoundaryViolated`), [src/llm/extraction.rs](../src/llm/extraction.rs) (section 5 combined JD + additional-notes language priority, `KNOWN_TOPICS` allowlist with unknown slugs dropped in `parse_extraction`, plus normalization/unsupported surfacing), and [src/llm/grading.rs](../src/llm/grading.rs) (section 14 one request per question; `grade_questions` turns failures into `NotScored`); randomized topic-pool selection is in [src/leetcode/selection.rs](../src/leetcode/selection.rs) (`pick_random`/`expert_pool`/`select_questions`/`auto_pick_easy`). Tests: 9 new unit (client 7 incl. 3 moved from Phase 1, common 2) plus integration [tests/llm_approaches.rs](../tests/llm_approaches.rs) (16; now 17 with `sql_language_names_mysql_in_prompts`), [tests/llm_chat.rs](../tests/llm_chat.rs) (10), [tests/llm_extraction.rs](../tests/llm_extraction.rs) (7 at phase close; now 15 with topic-filter and SQL/coherence tests), [tests/llm_grading.rs](../tests/llm_grading.rs) (8), [tests/leetcode_selection.rs](../tests/leetcode_selection.rs) (11 at phase close; now 12 with the acceptance-mapping test) — all green; live smoke tests in [tests/llm_live_smoke.rs](../tests/llm_live_smoke.rs) (7 at phase close; now 8 with the live SQL-role extraction test) are `#[ignore]`d by default and were run and passed live on 2026-10-28. A live ML-engineer JD extraction check on 2026-10-28 produced exactly `matrix`, `math`, `dynamic-programming`, `graph`, `heap-priority-queue`. Evidence: uncommitted working tree on branch `dev` — no commit hash exists for this work yet.
 
 **Remaining work.**
 
 - [ ] Coding-loop sandbox execution + loop orchestration (Phase 7/10) — the single-step interface is delivered; execution was **not** faked here.
 - [ ] Expert kill-switch cancellation plumbing over in-flight calls (Phase 8/10).
 
-## Phase 5 — Ingest (JD / resume)
+## Phase 5 — Ingest (JD / additional notes)
 
-**Goal.** Turn expert documents into the non-personal context summary (structure.md sections 5, 9; `ingest/`).
+**Goal.** Turn expert pastes into the non-personal context summary (structure.md sections 5, 9; `ingest/`).
 
 **Scope.**
 
-- JD by paste or PDF; resume by PDF; text extraction on the expert side only; disclosure that extracted text goes to the Meta API (surfaced by Phase 8).
-- Result: topics, level, proposed language (call in Phase 4); unsupported language → explicit warning, never silent fallback.
-- Storage: raw files only in the session `raw/` folder, deleted at session end; leftover folder offered for cleanup on next launch; documents never reach candidate or container. The surviving `ContextSummary` type already exists in [src/core/artifacts.rs](../src/core/artifacts.rs).
+- Paste-only input by product decision: the expert pastes a job description (required) plus optional additional notes as a second source. No file upload anywhere; no new dependency was added and [Cargo.toml](../Cargo.toml) is unchanged. Disclosure that bounded text goes to the Meta API is surfaced by Phase 8.
+- Each field is bounded to 50,000 chars (`BoundedText` in [src/ingest/mod.rs](../src/ingest/mod.rs)), truncated on a char boundary with a visible `truncated` flag. A blank job description is rejected; blank additional notes are allowed.
+- Result: topics, level, proposed language via the strong-model extraction call in [src/llm/extraction.rs](../src/llm/extraction.rs) (prompt now says additional notes), wired through `propose_context`/`propose_from_extraction` → `ProposedContext` in [src/ingest/pipeline.rs](../src/ingest/pipeline.rs). Language priority (section 5): JD and additional notes taken together, Python only when neither names one. An explicit unsupported language surfaces as a typed warning (`LanguageProposal::Unsupported` / `IngestError::UnsupportedLanguage`), never a silent fallback.
+- Storage: raw pastes stored as fixed names `raw/jd.txt` + `raw/additional.txt`, deleted at session end via `ArtifactLayout::delete_raw_dir`; leftover scan/cleanup on next launch via `find_leftover_raw_dirs` / `delete_leftover_raw_dir` (symlink-safe); documents never reach candidate or container. Once a `Session` exists, `write_context_summary` writes the surviving `ContextSummary` via `ArtifactLayout::write_context`.
 
 **Exit criteria.**
 
-- [ ] Tests per must.md: PDF extraction on fixture PDFs (incl. empty/corrupt), paste path, extraction-call parsing, raw deletion at end, leftover-cleanup offer.
+- [x] Tests per must.md for the paste path incl. blank-JD rejection and blank additional notes allowed ([tests/ingest_text.rs](../tests/ingest_text.rs) 8; [tests/ingest_pipeline.rs](../tests/ingest_pipeline.rs) 13 at phase close, now 15, incl. `propose_context_rejects_blank_jd_without_api_call`).
+- [x] 50,000-char bound per field with char-boundary truncation and visible flag (`bound_*` tests in [tests/ingest_text.rs](../tests/ingest_text.rs), truncation-flag propagation in [tests/ingest_pipeline.rs](../tests/ingest_pipeline.rs)).
+- [x] Fixed filenames `jd.txt`/`additional.txt` in `raw/` and end-of-session deletion via `delete_raw_dir` ([tests/ingest_raw.rs](../tests/ingest_raw.rs) 17, incl. `stored_raw_documents_removed_by_delete_raw_dir`; `raw_documents_gone_after_cleanup_but_summary_stays` in [tests/ingest_pipeline.rs](../tests/ingest_pipeline.rs)).
+- [x] Leftover scan plus confirmed cleanup incl. symlink probes (symlinked raw dir/file/session rejected or link-only removal, outside-root rejection) in [tests/ingest_raw.rs](../tests/ingest_raw.rs).
+- [x] Extraction wiring, language priority (combined JD + additional notes, Python only when neither names one) and unsupported-language typed warning in [tests/ingest_pipeline.rs](../tests/ingest_pipeline.rs), with extraction parsing covered by [tests/llm_extraction.rs](../tests/llm_extraction.rs) (now 15, including the topic-filter tests `parse_extraction_filters_unknown_topics`, `parse_extraction_all_unknown_topics_yield_empty`, and `known_topics_are_normalized_slugs`).
+- [x] `ContextSummary` write once a `Session` exists, refusing an unsupported language (`write_context_summary_*` in [tests/ingest_pipeline.rs](../tests/ingest_pipeline.rs)).
 
-**Status: Not started.** [src/ingest/mod.rs](../src/ingest/mod.rs) is a 1-line doc stub and no PDF dependency is in [Cargo.toml](../Cargo.toml) yet, although the extraction call now exists in [src/ai/extraction.rs](../src/ai/extraction.rs) (Phase 4).
+**Status: Done.** Implemented in [src/ingest/mod.rs](../src/ingest/mod.rs) (bounds, fixed filenames, raw storage, symlink-safe leftover scan/cleanup) and [src/ingest/pipeline.rs](../src/ingest/pipeline.rs) (`propose_context`/`propose_from_extraction` → `ProposedContext`, `write_context_summary` via `ArtifactLayout::write_context`); the extraction call stays on the strong model in [src/llm/extraction.rs](../src/llm/extraction.rs). Tests: 38 new ingest tests green at phase close (now 40: [tests/ingest_text.rs](../tests/ingest_text.rs) 8, [tests/ingest_raw.rs](../tests/ingest_raw.rs) 17, [tests/ingest_pipeline.rs](../tests/ingest_pipeline.rs) 15 with `propose_maps_sql_language` and `write_context_summary_with_sql_session`) plus one added test in [tests/llm_extraction.rs](../tests/llm_extraction.rs) (8 at phase close; now 15 with the later topic-filter and SQL/coherence tests). Manager probe findings: a symlinked-file write escape was caught and fixed (store rejects symlinked `jd.txt`/`additional.txt`/raw dir), and blank-topics/blank-JD guards were added (`propose_rejects_empty_topics_and_blank_level`, `propose_rejects_all_blank_topics`, blank-JD rejection without an API call). Product decision recorded: paste-only ingest, file-upload dropped, no new dependency. Evidence: uncommitted working tree on branch `dev` — no commit hash exists for this work yet.
 
 **Remaining work.**
 
-- [ ] Pick and integrate PDF text extraction; implement `ingest/`; wire Phase 4 calls and `ContextSummary` production.
+- [ ] None. Phase 8 displays the Meta API disclosure and the unsupported-language warning UI.
 
 ## Phase 6 — Connection (rotating-secret string)
 
@@ -195,10 +201,10 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 
 **Scope.**
 
-- Docker as external processes: build the shipped image once (cached), one container per session (SSH, Python+Node, empty workspace), destroy on expert end (ephemeral user/string die with it). SSH only in-container; no host mounts (never home), no forwarded ports; API key never in the container.
+- Docker as external processes: build the shipped image once (cached), one container per session (SSH, Python+Node plus a MySQL runner for SQL sessions, empty workspace), destroy on expert end (ephemeral user/string die with it). SSH only in-container; no host mounts (never home), no forwarded ports; API key never in the container.
 - Preflight computations owned here, displayed by Phase 8: Docker ready, image ready, port listening, external IP visible, CGNAT suspicion; refuse to start without Docker; other failures show guidance, expert may proceed at own risk.
-- In-container execution: runnability checks for the coding loop; test runs on candidate request (Python/JavaScript).
-- Mutagen: availability check, both-ways session sync, removal at end; workspace layout `questions/01/question.md` + `solution.py|.js` (section 8); candidate keeps their local copy.
+- In-container execution: runnability checks for the coding loop; test runs on candidate request (Python/JavaScript/SQL). SQL execution is not built yet: this phase must add a MySQL runner to `sandbox/Dockerfile` and wire runnability/test execution for `.sql` solutions.
+- Mutagen: availability check, both-ways session sync, removal at end; workspace layout `questions/01/question.md` + `solution.py|.js|.sql` (section 8); candidate keeps their local copy.
 - Bulk-insert detection on synced changes feeding paste flags (sections 13, 16); artifacts copied out before destroy (Phase 2 layout).
 
 **Exit criteria.**
@@ -210,17 +216,18 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 **Remaining work.**
 
 - [ ] Implement `sandbox/` lifecycle + preflight + in-container test execution.
+- [ ] Add a MySQL runner to `sandbox/Dockerfile` and SQL (`.sql`) runnability/test execution in the sandbox — SQL language/coherence support is landed (see Current state), sandbox SQL execution is not.
 - [ ] Implement `sync/` Mutagen management + workspace layout + paste heuristic.
 
 ## Phase 8 — TUI, expert side
 
-**Goal.** Expert screens: preflight, setup, live selection and monitoring (structure.md sections 3, 7, 9, 12; `cli/`, `tui/expert`).
+**Goal.** Expert screens: preflight, setup, live selection and monitoring (structure.md sections 3, 7, 9, 12; `tui/` args/startup/role dispatch, `tui/expert`).
 
 **Scope.**
 
-- Role selection (`Expert`) in [src/cli/](../src/cli/); preflight checklist with concrete failure guidance.
+- Role selection (`Expert`) in [src/tui/](../src/tui/); preflight checklist with concrete failure guidance.
 - API key: user-private `0600` config, masked, deletable, env-var override, never logged (section 9).
-- Setup: JD/resume entry (Phase 5), topics/level/language proposal with confirm/override, unsupported-language warning, Meta API disclosure; system auto-selects the 5 easy (no expert preview).
+- Setup: JD/additional-notes entry (Phase 5), topics/level/language proposal with confirm/override, unsupported-language warning, Meta API disclosure; system auto-selects the 5 easy (no expert preview).
 - Connection screen with 60 s countdown (Phase 6); on connect, live selection: 3 medium then 2 hard on separate screens while the candidate works; approve/reject re-question and pick the same-difficulty replacement.
 - Live monitoring: current question, chosen approach, test results, elapsed time, live rating breakdown (Phase 3), paste-flag alerts; no live chat content.
 - Actions: add 1 extra question; global kill switch (cancel API calls, close connection, destroy container, section 17); fresh string after accidental disconnect; final breakdown + artifacts.
@@ -229,11 +236,11 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 
 - [ ] Tests per must.md for each screen transition/expert flow (preflight outcomes, setup, selection submit, re-question resolve, extra, kill switch) at the state/logic level beneath rendering, incl. error paths.
 
-**Status: Not started.** [src/cli/mod.rs](../src/cli/mod.rs) parses empty args and prints "pairproof: role selection is not implemented yet"; [src/tui/expert.rs](../src/tui/expert.rs) and [src/tui/shared.rs](../src/tui/shared.rs) are 1-line stubs.
+**Status: Not started.** [src/tui/mod.rs](../src/tui/mod.rs) (`run()`, args in [src/tui/args.rs](../src/tui/args.rs)) parses empty args and prints "pairproof: role selection is not implemented yet"; [src/tui/expert.rs](../src/tui/expert.rs) and [src/tui/shared.rs](../src/tui/shared.rs) are 1-line stubs.
 
 **Remaining work.**
 
-- [ ] Role dispatch in `cli/`; expert screens + shared widgets; API key storage (0600, masking, env override).
+- [ ] Role dispatch in `tui/`; expert screens + shared widgets; API key storage (0600, masking, env override).
 
 ## Phase 9 — TUI, candidate side
 
@@ -267,14 +274,14 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 - Service failure (section 18): LeetCode/Meta health checks; both screens name the unreachable service(s) with a 60 s retry countdown; resume where it stopped if back, else terminate as technical failure with a reschedule message and **no candidate evaluation**. Consumes the Phase 1 rate-limit risk.
 - Disconnect/resume (section 17): container + state survive; fresh string resumes at the same question; disconnects logged, never score-affecting.
 - Close-out: per-question scoring (Phase 4); failed-after-retries = "not scored", 0 correction, stated in the report; final merge (Phase 3); both sides see the breakdown.
-- Report generation from a real session: Markdown report (breakdown, per-question grades/rationales, follow-up suggestions, relevant chat excerpts only), solutions, `events.jsonl`, token record, context summary — copied out before container destruction; raw JD/resume, API key, string, secret never retained (section 15).
+- Report generation from a real session: Markdown report (breakdown, per-question grades/rationales, follow-up suggestions, relevant chat excerpts only), solutions, `events.jsonl`, token record, context summary — copied out before container destruction; raw pastes, API key, string, secret never retained (section 15).
 
 **Exit criteria.**
 
 - [ ] Integration tests per must.md for the full arc and each failure path (service-down pause/resume/terminate, disconnect/resume, kill switch mid-request, scoring failure → "not scored", report from a scripted session) in [tests/](../tests/).
 - [ ] One scripted session runs end to end producing all section 15 artifacts.
 
-**Status: Not started.** Nothing is wired across modules: the binary prints the not-implemented message ([src/cli/mod.rs](../src/cli/mod.rs)). Core models `TechnicalFailure`/`EndedByExpert`, but no health check, countdown, resume, or report generation exists.
+**Status: Not started.** Nothing is wired across modules: the binary prints the not-implemented message ([src/tui/mod.rs](../src/tui/mod.rs)). Core models `TechnicalFailure`/`EndedByExpert`, but no health check, countdown, resume, or report generation exists.
 
 **Remaining work.**
 
@@ -296,7 +303,7 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 
 - [ ] All gates green; P1 items present, with tests where they add behaviour (evidence-link generation, consistency harness).
 
-**Status: Not started.** The standing gates are incidentally green today (fmt/clippy clean; largest source file 342 lines); no P1 item is built.
+**Status: Not started.** The standing gates are incidentally green today (fmt/clippy clean; largest source file 379 lines, [src/llm/client.rs](../src/llm/client.rs)); no P1 item is built.
 
 **Remaining work.**
 
@@ -328,14 +335,14 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 Explicitly **not** MVP phases (structure.md section 2; initial.md P2). Do not build before submission; design only must not preclude them:
 
 - VPS reverse-tunnel relay mode (expert-supplied VPS).
-- More solution languages (Java first); MVP is Python + JavaScript only.
+- More solution languages (Java first); MVP is Python, JavaScript, and SQL only.
 - Additional difficulty/topic strategies and role-specific rubrics.
 - Multi-challenge comparability, team analytics, multi-candidate comparison.
 - Also out per structure.md: authored/snapshotted questions, in-app screen sharing, edit-authorship tracking, hard token caps, web UI/accounts/cloud backend.
 
 ## Current state
 
-**Phases 0–4 are Done.** The spec is Final (`fe9f15c` skeleton), both clients landed in `281cd95` with models settled in `645581f`, the core landed in `f45a6c4` and its completion work after that, the scoring engine (Phase 3) is in [src/scoring/](../src/scoring/), and AI orchestration plus LeetCode selection (Phase 4) are in [src/ai/](../src/ai/) and [src/leetcode/selection.rs](../src/leetcode/selection.rs); the Phase 3–4 work is uncommitted on branch `dev`, so no commit hash exists for it yet. Phase 3 × Phase 4 composition is proven offline by `tests/phase3_phase4_compose.rs` (6 tests, no adapters). `cargo test` reports 160 passed, 0 failed, 13 ignored (observed 2026-10-28); all 13 ignored live tests were run and passed on 2026-10-28 (meta 3, leetcode 3, ai smoke 7); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean, and the largest source file is 379 lines ([src/ai/client.rs](../src/ai/client.rs)). Phases 5–12 are Not started: the ingest, connection, sandbox, sync, and tui modules are stubs, the CLI still prints "role selection is not implemented yet", and the only later-phase artifact beyond stubs is [sandbox/Dockerfile](../sandbox/Dockerfile). No phase is Blocked; external risks (LeetCode rate limits, CGNAT in Direct mode) are carried in Phases 7 and 10. Next: Phase 5 (ingest) and Phase 6 (connection), then Phase 7 (sandbox and sync).
+**Phases 0–5 are Done.** The spec is Final (`fe9f15c` skeleton), both clients landed in `281cd95` with models settled in `645581f`, the core landed in `f45a6c4` and its completion work after that, the scoring engine (Phase 3) is in [src/scoring/](../src/scoring/), LLM orchestration plus LeetCode selection (Phase 4) are in [src/llm/](../src/llm/) and [src/leetcode/selection.rs](../src/leetcode/selection.rs), and paste-only ingest (Phase 5) is in [src/ingest/mod.rs](../src/ingest/mod.rs) and [src/ingest/pipeline.rs](../src/ingest/pipeline.rs); the Phase 3–5 work is uncommitted on branch `dev`, so no commit hash exists for it yet. Two mechanical refactors are also recorded: the former `cli` module was merged into `tui/` (args in [src/tui/args.rs](../src/tui/args.rs), `run()` in [src/tui/mod.rs](../src/tui/mod.rs)), and the former `ai` module was renamed to `llm/` (including the `LlmError`/`LlmOutcome` types, `IngestError::Llm`, and the `tests/llm_*.rs` test files). The paste-only product decision is recorded in Phase 5: a pasted job description (required) plus optional additional notes, file-upload dropped, no new dependency. Phase 3 × Phase 4 composition is proven offline by `tests/phase3_phase4_compose.rs` (6 tests, no adapters). Three later refinements are also landed: extraction now chooses the language from the JD and additional notes taken together (Python only when neither names one), maps the role domain to the closest slugs from the `KNOWN_TOPICS` allowlist (25 topics, including `database`) and drops unknown slugs (a live ML-engineer JD check on 2026-10-28 produced exactly `matrix`, `math`, `dynamic-programming`, `graph`, `heap-priority-queue`), and scoring applies an acceptance factor on top of the difficulty multiplier. SQL is now a supported solution language (`Language::Sql`, `.sql` files, LeetCode slug `mysql`; MSSQL/T-SQL stay unsupported): extraction maps the aliases `sql`/`mysql`/`postgresql`/`postgres`/`psql` to it, and `parse_extraction` enforces coherence — SQL sessions draw only from the `database` topic (forced to `["database"]` if needed) and non-SQL results drop `database`. Both live SQL checks passed on 2026-10-28: database questions carry a MySQL snippet and no `python3` snippet (`live_database_question_has_mysql_snippet` in `tests/leetcode_live.rs`), and a live MySQL data-role JD proposed `Sql` with `["database"]` (`live_extract_sql_role_proposes_sql_and_database` in `tests/llm_live_smoke.rs`). A third live check, `live_database_full_composition_selectable` in `tests/leetcode_live.rs`, proves the full 5 easy + 3 medium + 2 hard database composition is selectable live (free database pool: easy 51+, medium 23+, hard 7). `cargo test` reports 214 passed, 0 failed, 16 ignored; all 16 ignored live tests were run and passed on 2026-10-28, including the SQL ones; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean, and the largest source file is 379 lines ([src/llm/client.rs](../src/llm/client.rs)). Sandbox SQL execution is not built: Phase 7 must add a MySQL runner to `sandbox/Dockerfile`, so no SQL session can execute in-container yet. Phases 6–12 are Not started: the connection, sandbox, and sync modules and the tui screens are stubs, the binary still prints "role selection is not implemented yet" ([src/tui/mod.rs](../src/tui/mod.rs)), and the only later-phase artifact beyond stubs is [sandbox/Dockerfile](../sandbox/Dockerfile). No phase is Blocked; external risks (LeetCode rate limits, CGNAT in Direct mode) are carried in Phases 7 and 10. Next: Phase 6 (connection), then Phase 7 (sandbox and sync).
 
 ## How to update this file
 

@@ -177,3 +177,20 @@ fn to_question_ref_rejects_paid_and_unknown_and_maps_fields() {
     assert_eq!(question.title, "Two Sum");
     assert_eq!(question.difficulty, Difficulty::Easy);
 }
+
+#[test]
+fn to_question_ref_maps_and_clamps_acceptance() {
+    let cases = [
+        (58.06, Some(58)),
+        (100.4, Some(100)),
+        (-3.0, Some(0)),
+        (f64::NAN, None),
+        (f64::INFINITY, None),
+    ];
+    for (ac_rate, expected) in cases {
+        let mut catalog = entry("q", "Easy");
+        catalog.ac_rate = ac_rate;
+        let question = to_question_ref(&catalog).expect("free easy entry maps");
+        assert_eq!(question.acceptance_pct, expected, "ac_rate {ac_rate}");
+    }
+}

@@ -1,15 +1,15 @@
-//! Shared error, outcome, and response-parsing helpers for AI calls.
+//! Shared error, outcome, and response-parsing helpers for LLM calls.
 
-use crate::ai::{MetaApiError, Usage};
 use crate::core::{CoreError, Language};
+use crate::llm::{MetaApiError, Usage};
 use crate::scoring::{ApproachQuality, ScoringError};
 
-/// Errors returned by AI orchestration calls.
+/// Errors returned by LLM orchestration calls.
 #[derive(Debug, thiserror::Error)]
-pub enum AiError {
+pub enum LlmError {
     #[error("meta api error: {0}")]
     Api(#[from] MetaApiError),
-    #[error("ai response parse error: {0}")]
+    #[error("llm response parse error: {0}")]
     Parse(String),
     #[error("scoring error: {0}")]
     Scoring(#[from] ScoringError),
@@ -17,9 +17,9 @@ pub enum AiError {
     Core(#[from] CoreError),
 }
 
-/// A parsed AI result together with the tokens spent producing it.
+/// A parsed LLM result together with the tokens spent producing it.
 #[derive(Debug, Clone)]
-pub struct AiOutcome<T> {
+pub struct LlmOutcome<T> {
     pub value: T,
     pub usage: Usage,
 }
@@ -29,6 +29,7 @@ pub(crate) fn language_name(language: Language) -> &'static str {
     match language {
         Language::Python => "Python",
         Language::JavaScript => "JavaScript",
+        Language::Sql => "SQL (MySQL)",
     }
 }
 
@@ -49,12 +50,14 @@ pub(crate) fn strip_code_fences(text: &str) -> &str {
 }
 
 /// Parses a quality word case-insensitively.
-pub(crate) fn parse_quality(text: &str) -> Result<ApproachQuality, AiError> {
+pub(crate) fn parse_quality(text: &str) -> Result<ApproachQuality, LlmError> {
     match text.trim().to_ascii_lowercase().as_str() {
         "best" => Ok(ApproachQuality::Best),
         "workable" => Ok(ApproachQuality::Workable),
         "weak" => Ok(ApproachQuality::Weak),
-        other => Err(AiError::Parse(format!("unknown approach quality: {other}"))),
+        other => Err(LlmError::Parse(format!(
+            "unknown approach quality: {other}"
+        ))),
     }
 }
 
@@ -81,7 +84,7 @@ mod tests {
         );
         assert_eq!(parse_quality("weak").ok(), Some(ApproachQuality::Weak));
         let err = parse_quality("excellent").err();
-        assert!(matches!(err, Some(AiError::Parse(_))), "{err:?}");
+        assert!(matches!(err, Some(LlmError::Parse(_))), "{err:?}");
         assert!(parse_quality("").is_err());
     }
 }

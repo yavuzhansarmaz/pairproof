@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::core::{EventKind, QuestionStatus, Session};
+use crate::core::{EventKind, QuestionRef, QuestionStatus, Session};
 use crate::leetcode::Difficulty;
 use crate::scoring::types::ApproachQuality;
 
@@ -42,6 +42,25 @@ pub fn difficulty_multiplier(difficulty: Difficulty) -> f64 {
     }
 }
 
+/// Lower acceptance means a harder real-world question; returns its factor.
+pub fn acceptance_factor(acceptance_pct: Option<u32>) -> f64 {
+    match acceptance_pct {
+        Some(pct) if pct < 35 => 1.25,
+        Some(pct) if pct < 50 => 1.1,
+        _ => 1.0,
+    }
+}
+
+/// Returns the effective multiplier and acceptance detail suffix for a question.
+pub(crate) fn multiplier_and_detail(question: &QuestionRef) -> (f64, String) {
+    let mult =
+        difficulty_multiplier(question.difficulty) * acceptance_factor(question.acceptance_pct);
+    let ac = question
+        .acceptance_pct
+        .map_or(String::new(), |pct| format!(" ac {pct}%"));
+    (mult, ac)
+}
+
 /// Returns the unmultiplied token step for an actual/locked ratio.
 pub fn token_band_step(ratio: f64) -> f64 {
     if ratio <= 0.8 {
@@ -72,7 +91,7 @@ pub fn live_rating(
     let mut lines: Vec<ScoreLine> = Vec::new();
     for slot in session.slots() {
         let index = slot.index;
-        let mult = difficulty_multiplier(slot.question.difficulty);
+        let (mult, ac) = multiplier_and_detail(&slot.question);
         let empty: &[ApproachQuality] = &[];
         let qualities = approach_qualities
             .get(&index)
@@ -85,7 +104,7 @@ pub fn live_rating(
                     index,
                     ScoreComponent::Approach,
                     step * mult,
-                    format!("approach {quality:?} step {step:+.2} x{mult:.1}"),
+                    format!("approach {quality:?} step {step:+.2} x{mult:.2}{ac}"),
                 ));
             }
         }
@@ -99,7 +118,7 @@ pub fn live_rating(
                         ScoreComponent::Tokens,
                         step * mult,
                         format!(
-                            "tokens {}/{} ratio {ratio:.3} step {step:+.2} x{mult:.1}",
+                            "tokens {}/{} ratio {ratio:.3} step {step:+.2} x{mult:.2}{ac}",
                             slot.actual_tokens, lock
                         ),
                     ));
@@ -195,6 +214,17 @@ mod tests {
         close(token_band_step(1.8), -0.15);
         close(token_band_step(1.800_001), -0.30);
         close(token_band_step(9.5), -0.30);
+    }
+
+    #[test]
+    fn acceptance_factor_bands_at_boundaries() {
+        close(acceptance_factor(None), 1.0);
+        close(acceptance_factor(Some(100)), 1.0);
+        close(acceptance_factor(Some(50)), 1.0);
+        close(acceptance_factor(Some(49)), 1.1);
+        close(acceptance_factor(Some(35)), 1.1);
+        close(acceptance_factor(Some(34)), 1.25);
+        close(acceptance_factor(Some(0)), 1.25);
     }
 
     #[test]

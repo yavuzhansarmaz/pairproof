@@ -2,9 +2,9 @@
 
 use serde::Deserialize;
 
-use crate::ai::common::{language_name, strip_code_fences, AiError, AiOutcome};
-use crate::ai::{Message, MetaClient, Usage};
 use crate::core::{Language, Session};
+use crate::llm::common::{language_name, strip_code_fences, LlmError, LlmOutcome};
+use crate::llm::{Message, MetaClient, Usage};
 
 /// Inputs for one coding step on the active question.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,11 +75,11 @@ pub fn build_coding_messages(input: &CodingStepInput) -> Vec<Message> {
 }
 
 /// Parses a model reply into a coding step output.
-pub fn parse_coding_step(content: &str) -> Result<CodingStepOutput, AiError> {
+pub fn parse_coding_step(content: &str) -> Result<CodingStepOutput, LlmError> {
     let wire: CodingStepWire = serde_json::from_str(strip_code_fences(content))
-        .map_err(|e| AiError::Parse(e.to_string()))?;
+        .map_err(|e| LlmError::Parse(e.to_string()))?;
     if wire.code.trim().is_empty() {
-        return Err(AiError::Parse("coding step code must not be empty".into()));
+        return Err(LlmError::Parse("coding step code must not be empty".into()));
     }
     Ok(CodingStepOutput {
         code: wire.code,
@@ -89,7 +89,7 @@ pub fn parse_coding_step(content: &str) -> Result<CodingStepOutput, AiError> {
 }
 
 /// Adds the total spent tokens to the session's active question.
-pub fn apply_usage(session: &mut Session, usage: &Usage) -> Result<(), AiError> {
+pub fn apply_usage(session: &mut Session, usage: &Usage) -> Result<(), LlmError> {
     session.add_tokens(usage.total_tokens)?;
     Ok(())
 }
@@ -99,12 +99,12 @@ pub async fn run_coding_step(
     client: &MetaClient,
     session: &mut Session,
     input: &CodingStepInput,
-) -> Result<AiOutcome<CodingStepOutput>, AiError> {
+) -> Result<LlmOutcome<CodingStepOutput>, LlmError> {
     let model = client.strong_model.clone();
     let outcome = client.chat(&model, build_coding_messages(input)).await?;
     apply_usage(session, &outcome.usage)?;
     let value = parse_coding_step(&outcome.content)?;
-    Ok(AiOutcome {
+    Ok(LlmOutcome {
         value,
         usage: outcome.usage,
     })

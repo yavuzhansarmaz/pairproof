@@ -35,6 +35,7 @@ fn questions(prefix: &str, n: usize, difficulty: Difficulty) -> Vec<QuestionRef>
             title_slug: format!("{prefix}{i}"),
             title: format!("{prefix}{i}"),
             difficulty,
+            acceptance_pct: None,
         })
         .collect()
 }
@@ -74,6 +75,7 @@ fn question_slot_new_starts_pending_and_empty() {
         title_slug: "two-sum".to_string(),
         title: "Two Sum".to_string(),
         difficulty: Difficulty::Easy,
+        acceptance_pct: None,
     };
     let slot = QuestionSlot::new(3, QuestionSource::Expert, q);
     assert_eq!(slot.index, 3);

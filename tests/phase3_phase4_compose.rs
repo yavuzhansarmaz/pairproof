@@ -1,15 +1,15 @@
-//! Phase 3 (scoring) x Phase 4 (AI orchestration) composition tests, fully offline.
-//! AI parser outputs feed scoring/core inputs directly with no adapter code.
+//! Phase 3 (scoring) x Phase 4 (LLM orchestration) composition tests, fully offline.
+//! LLM parser outputs feed scoring/core inputs directly with no adapter code.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use pairproof::ai::approaches::{parse_approach_grade, parse_approach_set};
-use pairproof::ai::grading::{
-    grade_questions, parse_question_grade, scorable_slots, QuestionScoringInput,
-};
-use pairproof::ai::MetaClient;
 use pairproof::core::{ApproachChoice, Language, QuestionRef, Session, SessionStatus};
 use pairproof::leetcode::{pick_random, CatalogEntry, Difficulty};
+use pairproof::llm::approaches::{parse_approach_grade, parse_approach_set};
+use pairproof::llm::grading::{
+    grade_questions, parse_question_grade, scorable_slots, QuestionScoringInput,
+};
+use pairproof::llm::MetaClient;
 use pairproof::scoring::{
     difficulty_multiplier, final_rating, live_rating, ApproachQuality, ApproachSet, GradeOutcome,
     ScoreComponent,
@@ -26,6 +26,7 @@ fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
         title_slug: slug.to_string(),
         title: slug.to_string(),
         difficulty,
+        acceptance_pct: None,
     }
 }
 

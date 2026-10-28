@@ -1,18 +1,18 @@
-//! Live Phase 4 AI wrapper smoke checks. Ignored by default.
+//! Live Phase 4 LLM wrapper smoke checks. Ignored by default.
 //!
 //! Run with: MODEL_API_KEY=... cargo test --test ai_live_smoke -- --ignored
 
 use std::collections::BTreeSet;
 
-use pairproof::ai::approaches::{generate_approaches, grade_other_approach};
-use pairproof::ai::chat::{run_chat, ChatState};
-use pairproof::ai::coding::{run_coding_step, CodingStepInput};
-use pairproof::ai::extraction::extract_context;
-use pairproof::ai::grading::{grade_question, QuestionScoringInput};
-use pairproof::ai::MetaClient;
 use pairproof::core::{Language, QuestionRef, Session};
 use pairproof::leetcode::selection::select_questions;
 use pairproof::leetcode::{Difficulty, LeetCodeClient};
+use pairproof::llm::approaches::{generate_approaches, grade_other_approach};
+use pairproof::llm::chat::{run_chat, ChatState};
+use pairproof::llm::coding::{run_coding_step, CodingStepInput};
+use pairproof::llm::extraction::extract_context;
+use pairproof::llm::grading::{grade_question, QuestionScoringInput};
+use pairproof::llm::MetaClient;
 use pairproof::scoring::ApproachQuality;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -28,6 +28,7 @@ fn q(slug: &str) -> QuestionRef {
         title_slug: slug.to_string(),
         title: slug.to_string(),
         difficulty: Difficulty::Easy,
+        acceptance_pct: None,
     }
 }
 
@@ -113,12 +114,26 @@ async fn live_run_chat_replies_without_booking_tokens() {
 async fn live_extract_context_proposes_language() {
     let client = live_client();
     let jd = "Backend engineer role. Strong Python required; work with arrays and graphs.";
-    let resume = "Engineer with 3 years of Python and data processing experience.";
-    let outcome = extract_context(&client, jd, resume)
+    let additional = "Expert notes: focus on Python and data processing experience.";
+    let outcome = extract_context(&client, jd, additional)
         .await
         .expect("context extracted");
     assert_eq!(outcome.value.proposed_language, Some(Language::Python));
     assert!(!outcome.value.level.trim().is_empty());
+}
+
+#[tokio::test]
+#[ignore = "live network smoke, requires MODEL_API_KEY"]
+async fn live_extract_sql_role_proposes_sql_and_database() {
+    let client = live_client();
+    let jd = "Data analyst role writing MySQL queries against production databases. \
+        Strong SQL required; build reports by querying relational tables.";
+    let additional = "Expert notes: candidate must write MySQL queries.";
+    let outcome = extract_context(&client, jd, additional)
+        .await
+        .expect("context extracted");
+    assert_eq!(outcome.value.proposed_language, Some(Language::Sql));
+    assert_eq!(outcome.value.topics, ["database"]);
 }
 
 #[tokio::test]

@@ -36,6 +36,7 @@ fn questions(prefix: &str, n: usize, difficulty: Difficulty) -> Vec<QuestionRef>
             title_slug: format!("{prefix}{i}"),
             title: format!("{prefix}{i}"),
             difficulty,
+            acceptance_pct: None,
         })
         .collect()
 }
@@ -276,7 +277,7 @@ fn report_stored_verbatim_and_no_tmp_files_remain() {
 fn delete_raw_dir_removes_raw_only_and_second_call_is_ok() {
     let dir = TestDir::new("delete-raw");
     let layout = ArtifactLayout::create(dir.path("root"), "s1", Language::Python).expect("layout");
-    fs::write(layout.raw_dir().join("resume.pdf"), "raw").expect("write raw file");
+    fs::write(layout.raw_dir().join("jd.txt"), "raw").expect("write raw file");
     fs::create_dir(layout.raw_dir().join("sub")).expect("raw subdir");
     fs::write(layout.raw_dir().join("sub/jd.txt"), "jd").expect("write nested raw");
     layout.write_report("# keep").expect("report");
@@ -315,4 +316,17 @@ fn solution_path_extreme_index_does_not_panic() {
     assert_eq!(path.parent(), Some(layout.solutions_dir()));
     let file_name = path.file_name().expect("file name").to_string_lossy();
     assert!(file_name.ends_with(".py"), "got {file_name}");
+}
+
+#[test]
+fn solution_path_uses_sql_extension() {
+    let dir = TestDir::new("solution-sql");
+    let layout = ArtifactLayout::create(dir.path("root"), "s1", Language::Sql).expect("layout");
+    let path = layout.solutions_dir().join("01.sql");
+    assert_eq!(layout.solution_path(0), path);
+    assert!(path.to_string_lossy().ends_with("01.sql"));
+    layout
+        .write_solution(0, "SELECT 1;")
+        .expect("write solution");
+    assert_eq!(fs::read_to_string(&path).expect("read 01.sql"), "SELECT 1;");
 }

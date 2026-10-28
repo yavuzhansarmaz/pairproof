@@ -38,6 +38,11 @@ pub fn to_question_ref(entry: &CatalogEntry) -> Option<QuestionRef> {
         title_slug: entry.title_slug.clone(),
         title: entry.title.clone(),
         difficulty,
+        acceptance_pct: if entry.ac_rate.is_finite() {
+            Some(entry.ac_rate.round().clamp(0.0, 100.0) as u32)
+        } else {
+            None
+        },
     })
 }
 

@@ -46,7 +46,7 @@ The important distinction is no longer whether someone can produce code. It is w
 
 A CLI-based, two-sided interview environment:
 
-- The **expert** (interviewer) sets up the session with a job description and the candidate's resume, is charged on their own Meta Model API key, and actively steers the interview while it runs.
+- The **expert** (interviewer) sets up the session with a pasted job description and optional additional notes, is charged on their own Meta Model API key, and actively steers the interview while it runs.
 - The **candidate** connects to a disposable sandbox on the expert's machine, works inside a split-screen coding environment, chooses solution approaches, directs an AI coding agent, asks a support chat for thinking help, and is scored on judgment — not on typing code.
 
 The result is an evidence-based, football-player-style live rating the expert watches in real time, followed by a per-question AI evaluation and a human-readable report. The system supports the expert's decision; it never makes an automated hiring decision.
@@ -75,15 +75,15 @@ Every score movement has a named cause. Objective events use fixed steps; AI qua
 
 ### 4.6 Privacy and safety by construction
 
-Candidate code runs in a disposable Docker sandbox on the expert's machine. The expert's API key, files, and identity never reach the candidate. Raw resumes are deleted when the session ends.
+Candidate code runs in a disposable Docker sandbox on the expert's machine. The expert's API key, files, and identity never reach the candidate. Raw pastes are deleted when the session ends.
 
 ## 5. How It Works
 
 ### Setup (expert)
 
-The expert starts `pairproof`, selects `Expert`, passes a preflight checklist (Docker, sandbox image, port, connectivity), enters their Meta Model API key, and provides the job description (paste or PDF) plus the candidate's resume (PDF).
+The expert starts `pairproof`, selects `Expert`, passes a preflight checklist (Docker, sandbox image, port, connectivity), enters their Meta Model API key, and pastes the job description plus optional additional notes.
 
-The system extracts topics, level, and a proposed solution language (JD-first, resume-second, Python default; the expert confirms). It then auto-selects 5 easy questions matching the position. No expert preview or editing of this set is needed: they are warm-up questions the AI can solve and the candidate should navigate.
+The system extracts topics, level, and a proposed solution language (JD and additional notes taken together, Python default; the expert confirms). It then auto-selects 5 easy questions matching the position. No expert preview or editing of this set is needed: they are warm-up questions the AI can solve and the candidate should navigate.
 
 PairProof displays a **connection string** whose secret rotates every 60 seconds, authenticator-style. The expert shares it with the candidate.
 
@@ -142,12 +142,12 @@ Chat usage is deliberately excluded from all four dimensions. It is a support to
 
 - Single Rust binary, expert and candidate modes, split-screen TUI (Ratatui/crossterm/tokio).
 - Live LeetCode sourcing via its unofficial GraphQL endpoint (topic and difficulty catalog, statements). No bundled fallback.
-- JD/resume ingestion (JD paste or PDF, resume PDF), topic/level/language extraction.
+- JD/additional-notes ingestion (JD paste plus optional additional-notes paste), topic/level/language extraction.
 - Direct connection with rotating-secret connection string, disposable Docker sandbox, Mutagen sync.
-- Solution languages: Python and JavaScript.
+- Solution languages: Python, JavaScript, and SQL (MySQL).
 - Fixed question composition 5 easy + 3 medium + 2 hard, plus 1 optional expert extra. Re-question once per question in the expert-selected part.
 - Two Meta models: strong (approaches, code, scoring) and light (chat with live left-side context).
-- Live rating from 6.0 with fixed steps and difficulty multipliers; per-question AI grading in separate requests; capped AI correction; final Markdown report and artifacts.
+- Live rating from 6.0 with fixed steps and acceptance-adjusted difficulty multipliers; per-question AI grading in separate requests; capped AI correction; final Markdown report and artifacts.
 - Honesty controls: paste blocked in PairProof inputs, bulk code insertions flagged, candidate score hidden until the end.
 
 ### Out of scope
@@ -162,11 +162,11 @@ Chat usage is deliberately excluded from all four dimensions. It is a support to
 
 Full detail, module contracts, and every settled rule are in [structure.md](structure.md). In brief:
 
-- One Rust crate. `cli/` (startup, role dispatch) and `tui/` (expert/candidate screens) form the thin UI layer.
+- One Rust crate. `tui/` (startup, role dispatch, expert/candidate screens) forms the thin UI layer.
 - `core/` owns interview flow, session lifecycle, event log (JSONL), and artifacts. It never depends on the UI.
-- Service modules: `leetcode/` (GraphQL), `ai/` (Meta client and prompts), `connection/` (string, rotating secret), `sandbox/` (Docker), `sync/` (Mutagen), `ingest/` (JD/resume), `scoring/` (step table, token comparison, grade merge).
+- Service modules: `leetcode/` (GraphQL), `llm/` (Meta client and prompts), `connection/` (string, rotating secret), `sandbox/` (Docker), `sync/` (Mutagen), `ingest/` (JD/additional-notes pastes), `scoring/` (step table, token comparison, grade merge).
 - Candidate code runs only inside the Docker sandbox. The Meta API key stays on the expert machine, outside the container, in a `0600` config file, masked everywhere.
-- Storage is local files only on the expert machine. Raw JD/resume are deleted at session end.
+- Storage is local files only on the expert machine. Raw JD/additional-notes pastes are deleted at session end.
 
 ## 9. Evaluation Methodology
 
@@ -190,7 +190,7 @@ Full detail, module contracts, and every settled rule are in [structure.md](stru
 
 - [ ] Validation spikes: LeetCode GraphQL from Rust; Meta Model API key type, endpoints, strong/light model IDs.
 - [ ] Single-crate skeleton with module boundaries from structure.md; `rustfmt`/`clippy` clean.
-- [ ] Expert setup: preflight, API key handling, JD/resume ingestion and extraction.
+- [ ] Expert setup: preflight, API key handling, JD/additional-notes ingestion and extraction.
 - [ ] Connection string with 60-second rotating secret; Docker sandbox; Mutagen sync.
 - [ ] Candidate split-screen: question flow, 4+1 approaches, defined actions, chat with live state.
 - [ ] Expert live selection (3 medium + 2 hard), waiting state, re-question, extra question, kill switch.
@@ -236,7 +236,7 @@ Full detail, module contracts, and every settled rule are in [structure.md](stru
 ## 13. Demo Narrative (3 minutes)
 
 1. Frame the problem: memorized LeetCode answers tell us little; AI-era engineering is judgment.
-2. Expert view: enter API key, paste a JD, upload a resume. The system proposes topics and language and auto-picks 5 easy questions.
+2. Expert view: enter API key, paste a JD and optional additional notes. The system proposes topics and language and auto-picks 5 easy questions.
 3. The connection string counts down from 60 seconds. The candidate pastes it and is inside a sandbox on the expert's machine.
 4. Candidate view: pick an approach (or write `Other`), watch the AI code, request a test, redirect it when it drifts.
 5. Expert view, in parallel: choose 3 medium and 2 hard questions. The live rating ticks up and down with named reasons.
@@ -251,10 +251,10 @@ Full detail, module contracts, and every settled rule are in [structure.md](stru
 - **Assessment validity:** One session does not measure overall competence. Conclusions stay scoped to observed evidence; the product is decision support, never automated screening or hiring decisions.
 - **AI grader consistency:** Fixed steps carry the score; AI correction is capped and per-question. Repeated grading runs are a P1 check.
 - **Prompt gaming:** Candidates may try to extract solutions via chat. Mitigation: system-prompt boundary, violations logged, chat excluded from score.
-- **Privacy:** Resume handling is disclosed, minimized, and deleted at session end. API key never leaves the expert machine.
+- **Privacy:** Pasted documents are disclosed, minimized, and deleted at session end. API key never leaves the expert machine.
 - **Execution security:** Candidate code is container-confined with no host mounts and no forwarded ports.
-- **Scope creep:** One binary, two languages, one connection mode, ten questions. Everything else is P2.
+- **Scope creep:** One binary, three languages, one connection mode, ten questions. Everything else is P2.
 
 ## 15. Final Deliverable
 
-A working Rust CLI prototype of an AI-native technical interview: an expert configures a session from a JD and a resume; a candidate connects into a disposable sandbox and solves live LeetCode questions by directing an AI, not by typing every line; the expert actively steers question selection; and the system produces a live, explainable rating plus per-question graded evidence an interviewer can review and defend.
+A working Rust CLI prototype of an AI-native technical interview: an expert configures a session from a pasted JD and optional additional notes; a candidate connects into a disposable sandbox and solves live LeetCode questions by directing an AI, not by typing every line; the expert actively steers question selection; and the system produces a live, explainable rating plus per-question graded evidence an interviewer can review and defend.

@@ -13,11 +13,28 @@ fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
         title_slug: slug.to_string(),
         title: slug.to_string(),
         difficulty,
+        acceptance_pct: None,
     }
 }
 
 fn qs(prefix: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
     (0..n).map(|i| q(&format!("{prefix}{i}"), d)).collect()
+}
+
+fn q_acceptance(slug: &str, difficulty: Difficulty, acceptance_pct: Option<u32>) -> QuestionRef {
+    let mut question = q(slug, difficulty);
+    question.acceptance_pct = acceptance_pct;
+    question
+}
+
+fn started_easy_acceptance(acceptance_pct: Option<u32>) -> Session {
+    let mut questions = qs("e", 5, Difficulty::Easy);
+    questions[0] = q_acceptance("e0", Difficulty::Easy, acceptance_pct);
+    let mut s = Session::new("s1".into(), Language::Python, questions, 0).expect("session");
+    s.mark_waiting_for_candidate(1).expect("waiting");
+    s.candidate_connected(2).expect("connected");
+    s.start(3).expect("start");
+    s
 }
 
 fn started_easy() -> Session {
@@ -56,6 +73,13 @@ fn started_expert() -> Session {
 
 fn close(actual: f64, expected: f64) {
     assert!((actual - expected).abs() < 1e-9, "{actual} != {expected}");
+}
+
+fn find_line(b: &RatingBreakdown, component: ScoreComponent) -> &ScoreLine {
+    b.lines
+        .iter()
+        .find(|l| l.slot_index == 0 && l.component == component)
+        .expect("slot 0 line")
 }
 
 fn triples(b: &RatingBreakdown) -> Vec<(usize, ScoreComponent, f64)> {
@@ -179,4 +203,34 @@ fn golden_scripted_session_live_rating() {
         token_line.detail
     );
     assert!(token_line.detail.contains("0.700"), "{}", token_line.detail);
+}
+
+#[test]
+fn acceptance_scales_approach_and_token_lines() {
+    let run = |acceptance_pct: Option<u32>| {
+        let mut s = started_easy_acceptance(acceptance_pct);
+        s.select_approach(ApproachChoice::Preset(0), 1000, 10)
+            .unwrap();
+        s.add_tokens(700).unwrap();
+        s.finish_question(11).unwrap();
+        live_rating(&s, &BTreeMap::from([(0, vec![Best])]))
+    };
+    let base = run(None);
+    let scaled = run(Some(30));
+    close(find_line(&base, Approach).delta, 0.30 * 0.5);
+    close(find_line(&scaled, Approach).delta, 0.30 * 0.5 * 1.25);
+    close(find_line(&base, Tokens).delta, 0.20 * 0.5);
+    close(find_line(&scaled, Tokens).delta, 0.20 * 0.5 * 1.25);
+    assert!(
+        find_line(&scaled, Approach).detail.contains("ac 30%"),
+        "{}",
+        find_line(&scaled, Approach).detail
+    );
+    assert!(
+        find_line(&scaled, Tokens).detail.contains("ac 30%"),
+        "{}",
+        find_line(&scaled, Tokens).detail
+    );
+    assert!(!find_line(&base, Approach).detail.contains(" ac "));
+    assert!(!find_line(&base, Tokens).detail.contains(" ac "));
 }
