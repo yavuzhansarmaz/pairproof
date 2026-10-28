@@ -1,0 +1,311 @@
+//! Deterministic live rating from session state and approach qualities.
+
+use std::collections::BTreeMap;
+
+use crate::core::{EventKind, QuestionStatus, Session};
+use crate::leetcode::Difficulty;
+use crate::scoring::types::ApproachQuality;
+
+/// One component of a rating breakdown line, in display order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ScoreComponent {
+    Approach,
+    Tokens,
+    Intervention,
+    UnnecessaryChange,
+    Paste,
+}
+
+/// One explained rating movement for a single question slot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoreLine {
+    pub slot_index: usize,
+    pub component: ScoreComponent,
+    pub delta: f64,
+    pub detail: String,
+}
+
+/// Live rating with its unclamped value and per-slot breakdown.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RatingBreakdown {
+    pub rating: f64,
+    pub unclamped: f64,
+    pub lines: Vec<ScoreLine>,
+}
+
+/// Returns the approach/token multiplier for a difficulty.
+pub fn difficulty_multiplier(difficulty: Difficulty) -> f64 {
+    match difficulty {
+        Difficulty::Easy => 0.5,
+        Difficulty::Medium => 1.0,
+        Difficulty::Hard => 1.5,
+    }
+}
+
+/// Returns the unmultiplied token step for an actual/locked ratio.
+pub fn token_band_step(ratio: f64) -> f64 {
+    if ratio <= 0.8 {
+        0.20
+    } else if ratio <= 1.2 {
+        0.0
+    } else if ratio <= 1.8 {
+        -0.15
+    } else {
+        -0.30
+    }
+}
+
+fn line(slot_index: usize, component: ScoreComponent, delta: f64, detail: String) -> ScoreLine {
+    ScoreLine {
+        slot_index,
+        component,
+        delta,
+        detail,
+    }
+}
+
+/// Computes the provisional live rating (structure.md section 13).
+pub fn live_rating(
+    session: &Session,
+    approach_qualities: &BTreeMap<usize, Vec<ApproachQuality>>,
+) -> RatingBreakdown {
+    let mut lines: Vec<ScoreLine> = Vec::new();
+    for slot in session.slots() {
+        let index = slot.index;
+        let mult = difficulty_multiplier(slot.question.difficulty);
+        let empty: &[ApproachQuality] = &[];
+        let qualities = approach_qualities
+            .get(&index)
+            .map(Vec::as_slice)
+            .unwrap_or(empty);
+        if slot.status != QuestionStatus::Pending {
+            if let Some(quality) = qualities.last() {
+                let step = quality.step();
+                lines.push(line(
+                    index,
+                    ScoreComponent::Approach,
+                    step * mult,
+                    format!("approach {quality:?} step {step:+.2} x{mult:.1}"),
+                ));
+            }
+        }
+        if slot.status == QuestionStatus::Finished {
+            if let Some(lock) = session.token_locks(index).last().copied() {
+                let ratio = slot.actual_tokens as f64 / lock as f64;
+                let step = token_band_step(ratio);
+                if step != 0.0 {
+                    lines.push(line(
+                        index,
+                        ScoreComponent::Tokens,
+                        step * mult,
+                        format!(
+                            "tokens {}/{} ratio {ratio:.3} step {step:+.2} x{mult:.1}",
+                            slot.actual_tokens, lock
+                        ),
+                    ));
+                }
+            }
+        }
+        let mut redirects = 0usize;
+        let mut changes = 0usize;
+        let mut abandoned_best: Vec<usize> = Vec::new();
+        for event in session.events() {
+            match event.kind {
+                EventKind::Redirected { index: i, .. } if i == index => redirects += 1,
+                EventKind::ApproachChanged { index: i } if i == index => {
+                    if qualities.get(changes) == Some(&ApproachQuality::Best) {
+                        abandoned_best.push(changes);
+                    }
+                    changes += 1;
+                }
+                _ => {}
+            }
+        }
+        if slot.status == QuestionStatus::Finished && (redirects > 0 || changes > 0) {
+            lines.push(line(
+                index,
+                ScoreComponent::Intervention,
+                0.20,
+                format!(
+                    "interventions {} redirects {redirects} changes {changes}",
+                    redirects + changes
+                ),
+            ));
+        }
+        for k in abandoned_best {
+            lines.push(line(
+                index,
+                ScoreComponent::UnnecessaryChange,
+                -0.10,
+                format!("change {} abandoned Best selection {k}", k + 1),
+            ));
+        }
+        if slot.paste_flags > 0 {
+            let count = slot.paste_flags;
+            lines.push(line(
+                index,
+                ScoreComponent::Paste,
+                -0.30 * f64::from(count),
+                format!("paste flags {count} x-0.30"),
+            ));
+        }
+    }
+    let unclamped = 6.0 + lines.iter().map(|l| l.delta).sum::<f64>();
+    RatingBreakdown {
+        rating: unclamped.clamp(3.0, 10.0),
+        unclamped,
+        lines,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScoreComponent::*;
+    use super::*;
+    use crate::core::test_support::*;
+    use crate::core::types::ApproachChoice;
+    use ApproachQuality::*;
+
+    fn close(actual: f64, expected: f64) {
+        assert!((actual - expected).abs() < 1e-9, "{actual} != {expected}");
+    }
+
+    fn find(b: &RatingBreakdown, slot: usize, c: ScoreComponent) -> Vec<&ScoreLine> {
+        b.lines
+            .iter()
+            .filter(|l| l.slot_index == slot && l.component == c)
+            .collect()
+    }
+
+    #[test]
+    fn rating_starts_at_six_with_no_lines() {
+        let b = live_rating(&started(), &BTreeMap::new());
+        close(b.rating, 6.0);
+        close(b.unclamped, 6.0);
+        assert!(b.lines.is_empty());
+    }
+
+    #[test]
+    fn token_bands_at_exact_boundaries() {
+        close(token_band_step(0.0), 0.20);
+        close(token_band_step(0.8), 0.20);
+        close(token_band_step(0.800_001), 0.0);
+        close(token_band_step(1.2), 0.0);
+        close(token_band_step(1.200_001), -0.15);
+        close(token_band_step(1.8), -0.15);
+        close(token_band_step(1.800_001), -0.30);
+        close(token_band_step(9.5), -0.30);
+    }
+
+    #[test]
+    fn token_ratio_uses_last_lock_after_change_approach() {
+        let mut s = started();
+        s.select_approach(ApproachChoice::Preset(0), 100, 5)
+            .unwrap();
+        s.add_tokens(150).unwrap();
+        s.change_approach(6).unwrap();
+        s.select_approach(ApproachChoice::Preset(1), 200, 7)
+            .unwrap();
+        s.add_tokens(150).unwrap();
+        s.finish_question(8).unwrap();
+        let b = live_rating(&s, &BTreeMap::new());
+        let lines = find(&b, 0, Tokens);
+        assert_eq!(lines.len(), 1);
+        close(lines[0].delta, -0.15 * 0.5);
+        assert!(lines[0].detail.contains("300/200"), "{}", lines[0].detail);
+        assert!(lines[0].detail.contains("1.500"), "{}", lines[0].detail);
+    }
+
+    #[test]
+    fn live_token_line_only_for_finished() {
+        let mut s = started();
+        s.select_approach(ApproachChoice::Preset(0), 100, 5)
+            .unwrap();
+        s.add_tokens(300).unwrap();
+        assert!(find(&live_rating(&s, &BTreeMap::new()), 0, Tokens).is_empty());
+        s.finish_question(6).unwrap();
+        let b = live_rating(&s, &BTreeMap::new());
+        let lines = find(&b, 0, Tokens);
+        assert_eq!(lines.len(), 1);
+        close(lines[0].delta, -0.30 * 0.5);
+    }
+
+    #[test]
+    fn intervention_once_per_finished_slot() {
+        let mut s = started();
+        s.select_approach(ApproachChoice::Preset(0), 100, 5)
+            .unwrap();
+        s.redirect("use a heap", 6).unwrap();
+        s.redirect("handle empty input", 7).unwrap();
+        s.change_approach(8).unwrap();
+        s.select_approach(ApproachChoice::Preset(1), 100, 9)
+            .unwrap();
+        s.finish_question(10).unwrap();
+        s.redirect("not finished yet", 11).unwrap();
+        let b = live_rating(&s, &BTreeMap::new());
+        let lines = find(&b, 0, Intervention);
+        assert_eq!(lines.len(), 1);
+        close(lines[0].delta, 0.20);
+        assert!(find(&b, 1, Intervention).is_empty());
+    }
+
+    #[test]
+    fn unnecessary_change_only_when_abandoning_best() {
+        let mut s = started();
+        s.select_approach(ApproachChoice::Preset(0), 100, 5)
+            .unwrap();
+        s.change_approach(6).unwrap();
+        s.select_approach(ApproachChoice::Preset(1), 100, 7)
+            .unwrap();
+        s.change_approach(8).unwrap();
+        s.select_approach(ApproachChoice::Preset(2), 100, 9)
+            .unwrap();
+        s.finish_question(10).unwrap();
+        let map = BTreeMap::from([(0, vec![Best, Workable, Weak])]);
+        let b = live_rating(&s, &map);
+        let lines = find(&b, 0, UnnecessaryChange);
+        assert_eq!(lines.len(), 1);
+        close(lines[0].delta, -0.10);
+        let map = BTreeMap::from([(0, vec![Workable, Best, Weak])]);
+        assert_eq!(find(&live_rating(&s, &map), 0, UnnecessaryChange).len(), 1);
+        let map = BTreeMap::from([(0, vec![Best, Best, Weak])]);
+        assert_eq!(find(&live_rating(&s, &map), 0, UnnecessaryChange).len(), 2);
+        assert!(find(&live_rating(&s, &BTreeMap::new()), 0, UnnecessaryChange).is_empty());
+        let short = BTreeMap::from([(0, vec![Workable])]);
+        assert!(find(&live_rating(&s, &short), 0, UnnecessaryChange).is_empty());
+    }
+
+    #[test]
+    fn paste_flags_scale_without_multiplier() {
+        let mut s = with_expert();
+        for i in 0..8u64 {
+            s.finish_question(10 + i).unwrap();
+        }
+        assert_eq!(s.current_index(), Some(8));
+        s.record_paste_flag(500, 30).unwrap();
+        s.record_paste_flag(900, 31).unwrap();
+        let b = live_rating(&s, &BTreeMap::new());
+        let lines = find(&b, 8, Paste);
+        assert_eq!(lines.len(), 1);
+        close(lines[0].delta, -0.60);
+        close(b.rating, 5.40);
+    }
+
+    #[test]
+    fn chat_and_test_events_do_not_move_rating() {
+        let mut s = started();
+        s.select_approach(ApproachChoice::Preset(0), 100, 5)
+            .unwrap();
+        s.add_tokens(50).unwrap();
+        let map = BTreeMap::from([(0, vec![Best])]);
+        let before = live_rating(&s, &map);
+        s.record_test_result(0, 5, 6).unwrap();
+        s.record_chat_boundary_violation(7).unwrap();
+        s.request_tests(8).unwrap();
+        s.continue_work(9).unwrap();
+        let after = live_rating(&s, &map);
+        close(after.rating, before.rating);
+        close(after.unclamped, before.unclamped);
+        assert_eq!(after.lines, before.lines);
+    }
+}

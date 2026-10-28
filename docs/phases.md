@@ -11,15 +11,15 @@ This file tracks the implementation phases for the PairProof MVP defined in [str
 
 ## Summary
 
-Snapshot at time of writing: `cargo test` reports **68 passed, 0 failed, 6 ignored** (28 unit tests in `src/lib.rs`; 10 in `tests/core_artifacts.rs`; 7 in `tests/core_coverage.rs`; 12 in `tests/core_event_log.rs`; 9 in `tests/core_records.rs`; 2 in `tests/smoke.rs`; 3 + 3 live spike tests ignored). `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean.
+Snapshot at time of writing: `cargo test` reports **160 passed, 0 failed, 13 ignored** (52 unit tests in `src/lib.rs`; 16 in `tests/ai_approaches.rs`; 10 in `tests/ai_chat.rs`; 7 in `tests/ai_extraction.rs`; 8 in `tests/ai_grading.rs`; 10 in `tests/core_artifacts.rs`; 7 in `tests/core_coverage.rs`; 12 in `tests/core_event_log.rs`; 9 in `tests/core_records.rs`; 11 in `tests/leetcode_selection.rs`; 6 in `tests/phase3_phase4_compose.rs`; 7 in `tests/scoring_final.rs`; 3 in `tests/scoring_live.rs`; 2 in `tests/smoke.rs`; 7 + 3 + 3 live tests ignored in `tests/ai_live_smoke.rs`, `tests/leetcode_live.rs`, and `tests/meta_api_live.rs`). All 13 ignored live tests were run and passed on 2026-10-28 (meta 3, leetcode 3, ai smoke 7). `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean. The largest source file is 379 lines (`src/ai/client.rs`).
 
 | Phase | Name | Status | Evidence | Depends on |
 | --- | --- | --- | --- | --- |
 | 0 | Concept and specification | Done | [structure.md](structure.md) "Final"; [initial.md](initial.md); [must.md](must.md); commits `fe9f15c` (skeleton), `570a5ec`, `c2395a9` | — |
 | 1 | Validation spikes (LeetCode, Meta API) | Done | [src/leetcode/mod.rs](../src/leetcode/mod.rs), [src/ai/mod.rs](../src/ai/mod.rs); commit `281cd95`; model choice in commit `645581f` and [must.md](must.md) | 0 |
 | 2 | Core domain (session, events, artifacts) | Done | [src/core/](../src/core/) (8 modules); 60 core-related tests green | 0, 1 |
-| 3 | Scoring engine | Not started | [src/scoring/mod.rs](../src/scoring/mod.rs) is a 1-line doc stub | 2 (merge also needs 4) |
-| 4 | AI orchestration and prompts | Not started | [src/ai/mod.rs](../src/ai/mod.rs) client only (credited to Phase 1); no prompts or loops | 1, 2 |
+| 3 | Scoring engine | Done | [src/scoring/types.rs](../src/scoring/types.rs), [src/scoring/live.rs](../src/scoring/live.rs), [src/scoring/final_merge.rs](../src/scoring/final_merge.rs); 28 tests green (18 unit + 10 integration) + composition tests in `tests/phase3_phase4_compose.rs` | 2 (merge also needs 4) |
+| 4 | AI orchestration and prompts | Done | [src/ai/](../src/ai/) (client, common, approaches, coding, chat, extraction, grading), [src/leetcode/selection.rs](../src/leetcode/selection.rs); 9 unit + 52 integration tests green, 7 live smoke run and passed 7/7 live on 2026-10-28 | 1, 2 |
 | 5 | Ingest (JD / resume) | Not started | [src/ingest/mod.rs](../src/ingest/mod.rs) is a 1-line doc stub | 2, 4 |
 | 6 | Connection (rotating-secret string) | Not started | [src/connection/mod.rs](../src/connection/mod.rs) is a 1-line doc stub | 2 |
 | 7 | Sandbox and sync (Docker, Mutagen) | Not started | [sandbox/Dockerfile](../sandbox/Dockerfile) exists; [src/sandbox/mod.rs](../src/sandbox/mod.rs), [src/sync/mod.rs](../src/sync/mod.rs) are 1-line stubs | 2, 6 |
@@ -29,7 +29,7 @@ Snapshot at time of writing: `cargo test` reports **68 passed, 0 failed, 6 ignor
 | 11 | Hardening and polish (P1) | Not started | fmt/clippy clean today, but no P1 items built | 10 |
 | 12 | Demo and submission | Not started | No demo or submission artifacts in repo | 10, 11 |
 
-**Phase 2 is Done; the project is ready for Phases 3 and 4.** Phases 0–2 are Done, and no later phase has implementation beyond stubs and one Dockerfile. Phases 3 (scoring) and 4 (AI orchestration) can proceed in parallel. See [Current state](#current-state).
+**Phases 0–4 are Done; the project is ready for Phases 5, 6, and 7.** No later phase has implementation beyond stubs and one Dockerfile. Phases 5 (ingest), 6 (connection), and 7 (sandbox and sync) can proceed. See [Current state](#current-state).
 
 Every phase inherits two standing rules from [must.md](must.md) (Project Engineering Standards): each endpoint — user-facing flow, external integration wrapper, and lifecycle operation — ships with maintained tests covering success, error, and edge cases, and an endpoint is not done until its tests pass; and no file may exceed 400 lines, with `rustfmt`/`clippy` clean before merging. The per-phase exit criteria name the concrete tests each phase owes.
 
@@ -70,7 +70,7 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 - [x] Offline parsing/error unit tests: 3 in `src/leetcode/mod.rs`, 3 in `src/ai/mod.rs`, green in the current `cargo test` run.
 - [x] Model IDs confirmed via `GET /v1/models`, recorded with live token measurements in [must.md](must.md) (2026-10-28) and commit `645581f`.
 
-**Status: Done.** Evidence: commit `281cd95` "Add LeetCode and Meta Model API clients (validation spikes)"; [must.md](must.md) records live validation on 2026-10-28. Two caveats: (1) the live `#[ignore]`d tests were not re-run when this file was written (network + key required), so "Done" rests on the committed clients, green unit tests, and that live-validation record; (2) rate-limit behaviour (section 20 item 1) has no written findings and no retry/429 handling in code — it is carried as a residual risk into Phase 10. Randomized topic-pool selection (section 4) is **not** shipped here: the client lists/fetches, nothing selects yet.
+**Status: Done.** Evidence: commit `281cd95` "Add LeetCode and Meta Model API clients (validation spikes)"; [must.md](must.md) records live validation on 2026-10-28. Two caveats: (1) the live `#[ignore]`d tests were not re-run when this section was first written (network + key required), so "Done" rested on the committed clients, green unit tests, and that live-validation record — they have since been re-run and passed on 2026-10-28; (2) rate-limit behaviour (section 20 item 1) has no written findings and no retry/429 handling in code — it is carried as a residual risk into Phase 10. Randomized topic-pool selection (section 4) is **not** shipped here: the client lists/fetches, nothing selects yet.
 
 **Remaining work.**
 
@@ -115,15 +115,14 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 
 **Exit criteria.**
 
-- [ ] Table-driven tests for every step, band boundary (0.8/1.2/1.8), multiplier, clamp, cap scaling, skip settlement, and neutral chat/tests, per must.md.
-- [ ] Golden scoring test over a scripted `Session` event history.
+- [x] Table-driven tests for every step, band boundary (0.8/1.2/1.8), multiplier, clamp, cap scaling, skip settlement, and neutral chat/tests, per must.md.
+- [x] Golden scoring test over a scripted `Session` event history.
 
-**Status: Not started.** [src/scoring/mod.rs](../src/scoring/mod.rs) is a 1-line doc stub. Prerequisites already in `core`: locked vs actual tokens per slot and the full action event history.
+**Status: Done.** Implemented in [src/scoring/types.rs](../src/scoring/types.rs) (shared Step-0 contract types: `ApproachQuality`/`ApproachSet` with hidden `best_index` and no `Serialize`, `ApproachGrade`, `QuestionGrade`, `GradeOutcome`, `ScoringError`), [src/scoring/live.rs](../src/scoring/live.rs) (`live_rating` step table), and [src/scoring/final_merge.rs](../src/scoring/final_merge.rs) (`final_rating`, ±0.8 cap with proportional scaling, `FinalBreakdown`/`PerQuestionFinal`). Tests: 18 unit (types 4, live 8, final_merge 6) plus 10 integration ([tests/scoring_live.rs](../tests/scoring_live.rs) 3, [tests/scoring_final.rs](../tests/scoring_final.rs) 7) = 28, all green. Settled decisions: the token ratio uses the **last** lock from `Session::token_locks`; skipped-token settlement maps the positive band to 0 (a skip is never rewarded); `solved_count` = finished slots graded >= 5.0; `final_rating` revalidates grades (struct-literal safe). Evidence: uncommitted working tree on branch `dev` — no commit hash exists for this work yet.
 
 **Remaining work.**
 
-- [ ] Implement `scoring/` with tests.
-- [ ] Define where the best-approach marker and approach grades live (never candidate-visible, never in chat context).
+- [ ] None.
 
 ## Phase 4 — AI orchestration and prompts
 
@@ -139,17 +138,15 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 
 **Exit criteria.**
 
-- [ ] Tests per must.md for each Meta API wrapper (approaches, coding step, chat, extraction, scoring): request assembly and response parsing vs fixtures/mocks, malformed-response and API-failure paths; live smoke tests `#[ignore]`d like Phase 1.
-- [ ] Tests that hidden data never enters the chat live-state block and that chat sends low `reasoning_effort`.
+- [x] Tests per must.md for each Meta API wrapper (approaches, coding step, chat, extraction, scoring): request assembly and response parsing vs fixtures/mocks, malformed-response and API-failure paths; live smoke tests `#[ignore]`d like Phase 1.
+- [x] Tests that hidden data never enters the chat live-state block and that chat sends low `reasoning_effort`.
 
-**Status: Not started.** Only the Phase 1 client exists ([src/ai/mod.rs](../src/ai/mod.rs): `list_models`, `chat`, `chat_stream`); no prompts, no loops, and `chat`/`chat_stream` do not yet send `reasoning_effort`.
+**Status: Done.** `src/ai` is split into [src/ai/client.rs](../src/ai/client.rs) (`ReasoningEffort`/`ChatOptions::low`, `chat*_with_options`, old signatures preserved), [src/ai/common.rs](../src/ai/common.rs) (`AiError`/`AiOutcome`), [src/ai/approaches.rs](../src/ai/approaches.rs) (4+1 generation with seeded-shuffle parsing, `Other` grading), [src/ai/coding.rs](../src/ai/coding.rs) (single coding-step prompt/interface, `apply_usage` via `Session::add_tokens`, tokens booked before parsing; **no** sandbox execution), [src/ai/chat.rs](../src/ai/chat.rs) (section 10 assembly, hidden-data-free live-state block, boundary-violation logging via `ChatBoundaryViolated`), [src/ai/extraction.rs](../src/ai/extraction.rs) (section 5 priority prompt plus normalization/unsupported surfacing), and [src/ai/grading.rs](../src/ai/grading.rs) (section 14 one request per question; `grade_questions` turns failures into `NotScored`); randomized topic-pool selection is in [src/leetcode/selection.rs](../src/leetcode/selection.rs) (`pick_random`/`expert_pool`/`select_questions`/`auto_pick_easy`). Tests: 9 new unit (client 7 incl. 3 moved from Phase 1, common 2) plus integration [tests/ai_approaches.rs](../tests/ai_approaches.rs) (16), [tests/ai_chat.rs](../tests/ai_chat.rs) (10), [tests/ai_extraction.rs](../tests/ai_extraction.rs) (7), [tests/ai_grading.rs](../tests/ai_grading.rs) (8), [tests/leetcode_selection.rs](../tests/leetcode_selection.rs) (11) — all green; live smoke tests in [tests/ai_live_smoke.rs](../tests/ai_live_smoke.rs) (7) are `#[ignore]`d by default and were run and passed 7/7 live on 2026-10-28. Evidence: uncommitted working tree on branch `dev` — no commit hash exists for this work yet.
 
 **Remaining work.**
 
-- [ ] Prompt set + parsers for all five call types, with tests.
-- [ ] Coding loop with section 11 termination conditions, wired to core actions/token accounting (`add_tokens`).
-- [ ] Chat assembly with live-state block and boundary-violation logging (logs via the Phase 2 `ChatBoundaryViolated` event).
-- [ ] Topic-pool randomized selection flow.
+- [ ] Coding-loop sandbox execution + loop orchestration (Phase 7/10) — the single-step interface is delivered; execution was **not** faked here.
+- [ ] Expert kill-switch cancellation plumbing over in-flight calls (Phase 8/10).
 
 ## Phase 5 — Ingest (JD / resume)
 
@@ -165,7 +162,7 @@ Every phase inherits two standing rules from [must.md](must.md) (Project Enginee
 
 - [ ] Tests per must.md: PDF extraction on fixture PDFs (incl. empty/corrupt), paste path, extraction-call parsing, raw deletion at end, leftover-cleanup offer.
 
-**Status: Not started.** [src/ingest/mod.rs](../src/ingest/mod.rs) is a 1-line doc stub; no PDF dependency in [Cargo.toml](../Cargo.toml) yet.
+**Status: Not started.** [src/ingest/mod.rs](../src/ingest/mod.rs) is a 1-line doc stub and no PDF dependency is in [Cargo.toml](../Cargo.toml) yet, although the extraction call now exists in [src/ai/extraction.rs](../src/ai/extraction.rs) (Phase 4).
 
 **Remaining work.**
 
@@ -338,7 +335,7 @@ Explicitly **not** MVP phases (structure.md section 2; initial.md P2). Do not bu
 
 ## Current state
 
-**Phase 2 (core domain) is Done.** Phases 0–2 are Done: the spec is Final (`fe9f15c` skeleton), both clients landed in `281cd95` with models settled in `645581f`, the core landed in `f45a6c4`, and its completion work (test-result, paste-flag, disconnect/reconnect, and chat-boundary events plus evidence recording) lands in the commit carrying this update — 68 tests pass, 0 fail, 6 live ignored (`cargo test`, observed at time of writing), 60 of them covering `core` (22 unit + 38 integration). Phases 3–12 are Not started: every remaining module is a 1-line stub, the binary prints "role selection is not implemented yet", and the only later-phase artifact is [sandbox/Dockerfile](../sandbox/Dockerfile). No phase is Blocked; external risks (LeetCode rate limits, CGNAT in Direct mode) are carried in Phases 7 and 10. Next: Phases 3 (scoring) and 4 (AI orchestration), which can proceed in parallel.
+**Phases 0–4 are Done.** The spec is Final (`fe9f15c` skeleton), both clients landed in `281cd95` with models settled in `645581f`, the core landed in `f45a6c4` and its completion work after that, the scoring engine (Phase 3) is in [src/scoring/](../src/scoring/), and AI orchestration plus LeetCode selection (Phase 4) are in [src/ai/](../src/ai/) and [src/leetcode/selection.rs](../src/leetcode/selection.rs); the Phase 3–4 work is uncommitted on branch `dev`, so no commit hash exists for it yet. Phase 3 × Phase 4 composition is proven offline by `tests/phase3_phase4_compose.rs` (6 tests, no adapters). `cargo test` reports 160 passed, 0 failed, 13 ignored (observed 2026-10-28); all 13 ignored live tests were run and passed on 2026-10-28 (meta 3, leetcode 3, ai smoke 7); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean, and the largest source file is 379 lines ([src/ai/client.rs](../src/ai/client.rs)). Phases 5–12 are Not started: the ingest, connection, sandbox, sync, and tui modules are stubs, the CLI still prints "role selection is not implemented yet", and the only later-phase artifact beyond stubs is [sandbox/Dockerfile](../sandbox/Dockerfile). No phase is Blocked; external risks (LeetCode rate limits, CGNAT in Direct mode) are carried in Phases 7 and 10. Next: Phase 5 (ingest) and Phase 6 (connection), then Phase 7 (sandbox and sync).
 
 ## How to update this file
 
