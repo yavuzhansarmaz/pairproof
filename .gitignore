@@ -1,0 +1,15 @@
+/target
+debug/
+
+.env
+*.local.toml
+.pairproof/
+sessions/
+artifacts/
+
+*.pdf
+connection-string*.txt
+
+.DS_Store
+.idea/
+.vscode/
