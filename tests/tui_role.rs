@@ -18,16 +18,11 @@ fn role_selection_dispatches_expert() {
 #[test]
 fn candidate_role_does_not_enter_expert_flow() {
     assert_eq!(parse_role("candidate"), Some(Role::Candidate));
-    assert_eq!(
-        destination_for(Role::Candidate),
-        RoleDestination::CandidatePlaceholder
-    );
-    assert_eq!(
-        dispatch_role(Role::Candidate),
-        RoleDestination::CandidatePlaceholder
-    );
+    assert_eq!(destination_for(Role::Candidate), RoleDestination::Candidate);
+    assert_eq!(dispatch_role(Role::Candidate), RoleDestination::Candidate);
     assert_ne!(dispatch_role(Role::Candidate), RoleDestination::Expert);
-    assert!(placeholder_message().contains("Phase 9"));
+    assert!(!placeholder_message().contains("Phase 9"));
+    assert!(!placeholder_message().contains("not implemented"));
 }
 
 #[test]
@@ -49,8 +44,8 @@ fn candidate_sync_error_is_generic() {
 fn candidate_placeholder_state() {
     assert_eq!(
         placeholder_message(),
-        "Candidate flow is not implemented yet (Phase 9). \
-         Please use the expert flow or check back later."
+        "Candidate: run pairproof --role candidate in a terminal, \
+         then paste the connection string from the expert."
     );
 }
 
@@ -115,7 +110,7 @@ fn sanitize_display_preserves_printable() {
 }
 
 #[test]
-fn binary_candidate_role_shows_placeholder() {
+fn binary_candidate_role_shows_candidate_hint() {
     let output = Command::new(env!("CARGO_BIN_EXE_pairproof"))
         .args(["--role", "candidate"])
         .output()
@@ -123,7 +118,11 @@ fn binary_candidate_role_shows_placeholder() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
     assert!(stdout.contains("pairproof"));
-    assert!(stdout.contains("Phase 9"));
+    assert!(stdout.contains("Candidate"));
+    assert!(stdout.contains("connection string"));
+    assert!(!stdout.contains("Phase 9"));
+    assert!(!stdout.contains("not implemented"));
+    assert_eq!(stdout.lines().count(), 1);
 }
 
 #[test]

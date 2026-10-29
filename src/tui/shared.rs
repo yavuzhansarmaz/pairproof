@@ -11,7 +11,7 @@ pub enum Role {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoleDestination {
     Expert,
-    CandidatePlaceholder,
+    Candidate,
 }
 
 /// Parses a role from trimmed case-insensitive text.
@@ -27,7 +27,7 @@ pub fn parse_role(input: &str) -> Option<Role> {
 pub fn destination_for(role: Role) -> RoleDestination {
     match role {
         Role::Expert => RoleDestination::Expert,
-        Role::Candidate => RoleDestination::CandidatePlaceholder,
+        Role::Candidate => RoleDestination::Candidate,
     }
 }
 

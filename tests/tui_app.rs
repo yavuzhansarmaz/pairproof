@@ -187,7 +187,9 @@ fn candidate_selection_never_enters_expert_flow() {
     assert!(app.handle(AppEvent::SelectExpert).is_err());
     assert_eq!(app.screen(), AppScreen::Exited);
     let lines = screen_lines(&app).join("\n");
-    assert!(lines.contains("Phase 9"));
+    assert!(lines.contains("Candidate"));
+    assert!(!lines.contains("Phase 9"));
+    assert!(!lines.contains("not implemented"));
 }
 
 #[test]
