@@ -2,6 +2,12 @@
 pub mod app;
 pub mod args;
 pub mod candidate;
+pub mod candidate_actions;
+pub mod candidate_chat;
+pub mod candidate_final;
+pub mod candidate_run;
+pub mod candidate_sync;
+pub mod candidate_work;
 pub mod config;
 pub mod connection;
 pub mod expert;
@@ -26,8 +32,12 @@ pub fn run() -> anyhow::Result<()> {
     let args = args::Args::parse();
     match args.role {
         Some(Role::Candidate) => {
-            println!("pairproof: {}", candidate::placeholder_message());
-            Ok(())
+            if std::io::stdout().is_terminal() {
+                run_candidate_interactive()
+            } else {
+                println!("pairproof: {}", candidate::placeholder_message());
+                Ok(())
+            }
         }
         Some(Role::Expert) => {
             if std::io::stdout().is_terminal() {
@@ -80,8 +90,18 @@ fn run_interactive(initial: Option<Role>) -> anyhow::Result<()> {
     }
     if interactive_loop(&mut app, &mut preflight_done).is_err() {
         println!("pairproof: expert flow \u{2014} run preflight before starting a session");
+        return Ok(());
     }
     if app.is_candidate_placeholder() {
+        return run_candidate_interactive();
+    }
+    Ok(())
+}
+
+/// Starts the candidate loop, falling back to a hint on init failure.
+fn run_candidate_interactive() -> anyhow::Result<()> {
+    let mut state = candidate_run::CandidateRunState::new();
+    if candidate_run::candidate_loop(&mut state).is_err() {
         println!("pairproof: {}", candidate::placeholder_message());
     }
     Ok(())
