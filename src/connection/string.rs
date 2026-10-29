@@ -17,7 +17,8 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    /// Validates an IPv4 address or DNS hostname and a non-zero port.
+    /// Validates an IPv4 address or DNS hostname and a non-zero port (syntactic only).
+    /// Use [`Endpoint::public`] for the issuance-grade public-reachability check.
     pub fn new(host: &str, port: u16) -> Result<Self, ConnectionError> {
         if port == 0 {
             return Err(invalid_endpoint("port must not be zero"));
@@ -26,6 +27,32 @@ impl Endpoint {
             host: validate_host(host)?,
             port,
         })
+    }
+
+    /// Issuance-grade constructor: IPv4 literals must be globally routable.
+    /// DNS names are accepted without resolution, except `localhost` and numeric disguises.
+    pub fn public(host: &str, port: u16) -> Result<Self, ConnectionError> {
+        let endpoint = Self::new(host, port)?;
+        let validated = endpoint.host();
+        if let Ok(addr) = validated.parse::<Ipv4Addr>() {
+            if let Some(reason) = non_public_reason(addr) {
+                return Err(invalid_endpoint(format!(
+                    "endpoint host is not public: {addr} is {reason}"
+                )));
+            }
+            return Ok(endpoint);
+        }
+        if validated == "localhost" {
+            return Err(invalid_endpoint(
+                "endpoint host is not public: localhost is not publicly reachable",
+            ));
+        }
+        if is_numeric_ip_disguise(validated) {
+            return Err(invalid_endpoint(format!(
+                "endpoint host is not public: {validated} is a numeric IP disguise"
+            )));
+        }
+        Ok(endpoint)
     }
 
     pub fn host(&self) -> &str {
@@ -91,6 +118,54 @@ fn validate_hostname(host: &str) -> Result<(), ConnectionError> {
         }
     }
     Ok(())
+}
+
+/// Returns the non-public reason for `addr`, or `None` if globally routable.
+/// `Ipv4Addr::is_global` is unstable on this toolchain; replicated from stable predicates + explicit ranges.
+fn non_public_reason(addr: Ipv4Addr) -> Option<&'static str> {
+    let octets = addr.octets();
+    if addr.is_unspecified() {
+        Some("an unspecified address")
+    } else if addr.is_loopback() {
+        Some("a loopback address")
+    } else if addr.is_private() {
+        Some("a private address")
+    } else if addr.is_link_local() {
+        Some("a link-local address")
+    } else if addr.is_multicast() {
+        Some("a multicast address")
+    } else if addr.is_documentation() {
+        Some("a documentation address")
+    } else if addr.is_broadcast() {
+        Some("the broadcast address")
+    } else if octets[0] == 0 {
+        Some("a \"this host\" (0.0.0.0/8) address")
+    } else if octets[0] == 100 && (64..=127).contains(&octets[1]) {
+        Some("a shared/CGNAT (100.64.0.0/10) address")
+    } else if octets[0] == 198 && (18..=19).contains(&octets[1]) {
+        Some("a benchmarking (198.18.0.0/15) address")
+    } else if matches!(octets, [192, 0, 0, 9] | [192, 0, 0, 10]) {
+        None
+    } else if octets[0] == 192 && octets[1] == 0 && octets[2] == 0 {
+        Some("a special-purpose (192.0.0.0/24) address")
+    } else if octets[0] == 192 && octets[1] == 88 && octets[2] == 99 {
+        Some("a deprecated 6to4 relay (192.88.99.0/24) address")
+    } else if octets[0] >= 240 {
+        Some("a reserved (240.0.0.0/4) address")
+    } else {
+        None
+    }
+}
+
+/// True when every label reads as a number: decimal digits or a `0x` hex form.
+fn is_numeric_ip_disguise(host: &str) -> bool {
+    host.split('.').all(|label| {
+        if let Some(hex) = label.strip_prefix("0x") {
+            !hex.is_empty() && hex.bytes().all(|b| b.is_ascii_hexdigit())
+        } else {
+            !label.is_empty() && label.bytes().all(|b| b.is_ascii_digit())
+        }
+    })
 }
 
 /// A session-scoped username of the form `pp-` plus 8 chars from `[a-z0-9]`.

@@ -305,6 +305,76 @@ fn parse_malformed_variant_for_shape_errors() {
 }
 
 #[test]
+fn public_accepts_global_ipv4() {
+    for host in ["8.8.8.8", "1.1.1.1", "93.184.216.34"] {
+        let endpoint =
+            Endpoint::public(host, 22022).unwrap_or_else(|e| panic!("rejected {host}: {e}"));
+        assert_eq!(endpoint.host(), host);
+        assert_eq!(endpoint.port(), 22022);
+    }
+    let name = Endpoint::public("example.com", 443).expect("hostname");
+    assert_eq!(name.host(), "example.com");
+    assert_eq!(name.port(), 443);
+    assert!(matches!(
+        Endpoint::public("8.8.8.8", 0),
+        Err(ConnectionError::InvalidEndpoint(_))
+    ));
+}
+
+#[test]
+fn public_rejects_nonpublic_ipv4() {
+    for host in [
+        "127.0.0.1",
+        "10.0.0.5",
+        "172.16.0.9",
+        "192.168.1.10",
+        "169.254.1.1",
+        "100.64.0.1",
+        "100.127.255.255",
+        "192.0.2.1",
+        "198.51.100.1",
+        "203.0.113.10",
+        "198.18.0.1",
+        "224.0.0.1",
+    ] {
+        assert!(
+            matches!(
+                Endpoint::public(host, 22022),
+                Err(ConnectionError::InvalidEndpoint(_))
+            ),
+            "accepted non-public host {host}"
+        );
+    }
+}
+
+#[test]
+fn public_rejects_localhost_and_numeric_disguise() {
+    for host in [
+        "localhost",
+        "LOCALHOST",
+        "LocalHost",
+        "0x7f.0.0.1",
+        "0X7F.0.0.1",
+        "0x7f000001",
+        "2130706433",
+    ] {
+        assert!(
+            matches!(
+                Endpoint::public(host, 22022),
+                Err(ConnectionError::InvalidEndpoint(_))
+            ),
+            "accepted disguised/local host {host}"
+        );
+    }
+}
+
+#[test]
+fn new_stays_permissive_regression() {
+    assert!(Endpoint::new("127.0.0.1", 22022).is_ok());
+    assert!(Endpoint::new("203.0.113.10", 22022).is_ok());
+}
+
+#[test]
 fn parse_invalid_expiry_variant_for_bad_expiry() {
     for raw in [
         with_field(6, "01730000060000"),
