@@ -1,0 +1,369 @@
+//! In-container execution through one bounded user-level primitive.
+//! All commands run argv-only as the ephemeral user; code is file/stdin data.
+
+use std::time::{Duration, Instant};
+
+use crate::connection::EphemeralUsername;
+use crate::core::Language;
+
+use super::command::{exec_as, exec_root};
+use super::error::{bounded_stderr, SandboxError};
+use super::lifecycle::SandboxHandle;
+use super::process::{run_bounded, CommandOutcome, CommandSpec, EXEC_MAX_OUTPUT};
+use super::validate::WorkspacePath;
+use super::workspace::read_file;
+
+/// Programs the sandbox may execute; argv[0] must match exactly.
+const ALLOWLIST: [&str; 3] = ["python3", "node", "mariadb"];
+const TIMEOUT_GRACE: Duration = Duration::from_secs(5);
+const PPCHECK_USER: &str = "ppcheck";
+
+fn strs(parts: &[&str]) -> Vec<String> {
+    parts.iter().map(|p| (*p).to_string()).collect()
+}
+
+/// Rejects argv outside the allowlist (plus empty and NUL) before docker.
+fn validate_run_argv(argv: &[String]) -> Result<(), SandboxError> {
+    let first = argv.first().map(String::as_str).unwrap_or("");
+    if !ALLOWLIST.contains(&first) {
+        return Err(SandboxError::InvalidCommand(
+            argv.first().cloned().unwrap_or_default(),
+        ));
+    }
+    if argv.iter().any(|arg| arg.contains('\0')) {
+        return Err(SandboxError::InvalidCommand(first.to_string()));
+    }
+    Ok(())
+}
+
+/// Maps a missing docker binary to the docker-specific error.
+fn map_docker_not_found(err: SandboxError) -> SandboxError {
+    match err {
+        SandboxError::ExecutableNotFound { program } if program == "docker" => {
+            SandboxError::DockerNotFound
+        }
+        other => other,
+    }
+}
+
+/// Builds a bounded command-failure error from an outcome.
+fn failed(operation: &'static str, outcome: &CommandOutcome) -> SandboxError {
+    SandboxError::CommandFailed {
+        operation,
+        exit_code: outcome.exit_code,
+        stderr: bounded_stderr(&outcome.stderr),
+    }
+}
+
+fn timeout_ms(timeout: Duration) -> u64 {
+    u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Formats a duration as a GNU timeout seconds argument.
+fn timeout_duration_arg(timeout: Duration) -> String {
+    let ms = timeout.as_millis();
+    if ms.is_multiple_of(1000) {
+        return format!("{}", ms / 1000);
+    }
+    format!(
+        "{}.{}",
+        ms / 1000,
+        format!("{:03}", ms % 1000).trim_end_matches('0')
+    )
+}
+
+/// Wraps argv with in-container GNU timeout using SIGKILL.
+pub fn timeout_argv(argv: &[String], timeout: Duration) -> Vec<String> {
+    let mut wrapped = strs(&["timeout", "-s", "KILL"]);
+    wrapped.push(timeout_duration_arg(timeout));
+    wrapped.extend(argv.iter().cloned());
+    wrapped
+}
+
+/// Returns true when an outcome is the inner timeout firing.
+fn outcome_is_timeout(outcome: &CommandOutcome, elapsed: Duration, timeout: Duration) -> bool {
+    matches!(outcome.exit_code, Some(124) | Some(137))
+        && elapsed.saturating_add(Duration::from_millis(200)) >= timeout
+}
+
+/// Runs a spec with outer grace, mapping inner timeout to Timeout.
+async fn run_wrapped(
+    spec: &CommandSpec,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    program: &str,
+) -> Result<CommandOutcome, SandboxError> {
+    let outer = timeout.saturating_add(TIMEOUT_GRACE);
+    let started = Instant::now();
+    let outcome = match run_bounded(spec, stdin, outer, EXEC_MAX_OUTPUT).await {
+        Ok(outcome) => outcome,
+        Err(SandboxError::Timeout { .. }) => {
+            return Err(SandboxError::Timeout {
+                program: program.to_string(),
+                timeout_ms: timeout_ms(timeout),
+            })
+        }
+        Err(err) => return Err(map_docker_not_found(err)),
+    };
+    if outcome_is_timeout(&outcome, started.elapsed(), timeout) {
+        return Err(SandboxError::Timeout {
+            program: program.to_string(),
+            timeout_ms: timeout_ms(timeout),
+        });
+    }
+    Ok(outcome)
+}
+
+/// Builds root mariadb argv for a SQL string.
+fn root_mariadb_argv(sql: &str) -> Vec<String> {
+    let mut argv = strs(&["mariadb", "-u", "root", "-e"]);
+    argv.push(sql.to_string());
+    argv
+}
+
+/// Builds ppcheck mariadb argv via runuser with inner timeout.
+fn ppcheck_mariadb_argv(timeout: Duration) -> Vec<String> {
+    let mut argv = strs(&["runuser", "-u", PPCHECK_USER, "--", "timeout", "-s", "KILL"]);
+    argv.push(timeout_duration_arg(timeout));
+    argv.extend(strs(&["mariadb", "pp_runnable"]));
+    argv
+}
+
+/// Runs argv as root, mapping the inner timeout to Timeout.
+async fn run_root(
+    handle: &SandboxHandle,
+    argv: &[String],
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+) -> Result<CommandOutcome, SandboxError> {
+    let spec = exec_root(handle.container_name(), argv, stdin.is_some())?;
+    run_wrapped(&spec, stdin, timeout, "mariadb").await
+}
+
+/// Runs argv as the user; inner timeout kills the workload.
+pub async fn run_in_container(
+    handle: &SandboxHandle,
+    user: &EphemeralUsername,
+    argv: &[String],
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+) -> Result<CommandOutcome, SandboxError> {
+    validate_run_argv(argv)?;
+    let wrapped = timeout_argv(argv, timeout);
+    let spec = exec_as(handle.container_name(), user, &wrapped, stdin.is_some())?;
+    run_wrapped(&spec, stdin, timeout, &argv[0]).await
+}
+
+/// Compile-check argv for a solution file; sql has none (stdin path), empty.
+pub fn runnability_argv(language: Language, path: &WorkspacePath) -> Vec<String> {
+    let file = path.container_path();
+    match language {
+        Language::Python => vec![
+            "python3".to_string(),
+            "-m".to_string(),
+            "py_compile".to_string(),
+            file,
+        ],
+        Language::JavaScript => vec!["node".to_string(), "--check".to_string(), file],
+        Language::Sql => Vec::new(),
+    }
+}
+
+/// Test-run argv for a solution file; sql has none (stdin path), empty.
+pub fn test_argv(language: Language, path: &WorkspacePath) -> Vec<String> {
+    let file = path.container_path();
+    match language {
+        Language::Python => vec!["python3".to_string(), file],
+        Language::JavaScript => vec!["node".to_string(), file],
+        Language::Sql => Vec::new(),
+    }
+}
+
+/// Outcome of a runnability check, derived from exit status only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnabilityReport {
+    pub runnable: bool,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub truncated: bool,
+}
+
+/// Builds a runnability report from one finished outcome.
+fn report_from(outcome: &CommandOutcome) -> RunnabilityReport {
+    RunnabilityReport {
+        runnable: outcome.success(),
+        exit_code: outcome.exit_code,
+        stdout: outcome.stdout_text(),
+        stderr: outcome.stderr_text(),
+        truncated: outcome.stdout_truncated || outcome.stderr_truncated,
+    }
+}
+
+/// Checks a file runs; sql runs only as ppcheck in pp_runnable.
+pub async fn check_runnability(
+    handle: &SandboxHandle,
+    user: &EphemeralUsername,
+    path: &WorkspacePath,
+    language: Language,
+    timeout: Duration,
+) -> Result<RunnabilityReport, SandboxError> {
+    if language == Language::Sql {
+        return check_sql_runnability(handle, user, path, timeout).await;
+    }
+    let argv = runnability_argv(language, path);
+    let outcome = run_in_container(handle, user, &argv, None, timeout).await?;
+    Ok(report_from(&outcome))
+}
+
+/// Runs sql as ppcheck in pp_runnable, dropping it again best-effort.
+#[rustfmt::skip]
+async fn check_sql_runnability(handle: &SandboxHandle, user: &EphemeralUsername, path: &WorkspacePath, timeout: Duration) -> Result<RunnabilityReport, SandboxError> {
+    let content = read_file(handle, user, path).await?;
+    let setup = timeout_argv(&root_mariadb_argv("DROP DATABASE IF EXISTS pp_runnable; CREATE DATABASE pp_runnable"), timeout);
+    let setup_out = run_root(handle, &setup, None, timeout).await?;
+    if !setup_out.success() { return Err(failed("sql_scratch_setup", &setup_out)); }
+    let run = ppcheck_mariadb_argv(timeout);
+    let outcome = run_root(handle, &run, Some(&content), timeout).await?;
+    let drop = timeout_argv(&root_mariadb_argv("DROP DATABASE IF EXISTS pp_runnable"), timeout);
+    let _ = run_root(handle, &drop, None, timeout).await;
+    Ok(report_from(&outcome))
+}
+
+/// Test-run outcome; passed/failed counts are NOT derived here (Phase 4 seam).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestOutcome {
+    pub success: bool,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+}
+
+/// Runs a solution file; sql runs file bytes in the session db pairproof.
+pub async fn run_tests(
+    handle: &SandboxHandle,
+    user: &EphemeralUsername,
+    path: &WorkspacePath,
+    language: Language,
+    timeout: Duration,
+) -> Result<TestOutcome, SandboxError> {
+    let content;
+    let (argv, stdin): (Vec<String>, Option<&[u8]>) = match language {
+        Language::Sql => {
+            content = read_file(handle, user, path).await?;
+            (
+                vec!["mariadb".to_string(), "pairproof".to_string()],
+                Some(&content),
+            )
+        }
+        _ => (test_argv(language, path), None),
+    };
+    let outcome = run_in_container(handle, user, &argv, stdin, timeout).await?;
+    Ok(TestOutcome {
+        success: outcome.success(),
+        exit_code: outcome.exit_code,
+        stdout: outcome.stdout_text(),
+        stderr: outcome.stderr_text(),
+        stdout_truncated: outcome.stdout_truncated,
+        stderr_truncated: outcome.stderr_truncated,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn workspace(rel: &str) -> WorkspacePath {
+        WorkspacePath::new(rel).expect("valid workspace path")
+    }
+
+    fn outcome(exit_code: Option<i32>) -> CommandOutcome {
+        CommandOutcome {
+            exit_code,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+        }
+    }
+
+    #[test]
+    fn runnability_argv_shapes() {
+        let py = workspace("questions/01/solution.py");
+        assert_eq!(
+            runnability_argv(Language::Python, &py),
+            strs(&[
+                "python3",
+                "-m",
+                "py_compile",
+                "/workspace/questions/01/solution.py"
+            ])
+        );
+        let js = workspace("questions/02/solution.js");
+        assert_eq!(
+            runnability_argv(Language::JavaScript, &js),
+            strs(&["node", "--check", "/workspace/questions/02/solution.js"])
+        );
+        let sql = workspace("questions/03/query.sql");
+        assert!(runnability_argv(Language::Sql, &sql).is_empty());
+    }
+
+    #[test]
+    fn test_argv_shapes() {
+        let py = workspace("questions/01/solution.py");
+        assert_eq!(
+            test_argv(Language::Python, &py),
+            strs(&["python3", "/workspace/questions/01/solution.py"])
+        );
+        let js = workspace("questions/02/solution.js");
+        assert_eq!(
+            test_argv(Language::JavaScript, &js),
+            strs(&["node", "/workspace/questions/02/solution.js"])
+        );
+        let sql = workspace("questions/03/query.sql");
+        assert!(test_argv(Language::Sql, &sql).is_empty());
+    }
+
+    #[test]
+    fn run_argv_allowlist() {
+        assert!(validate_run_argv(&["python3".to_string()]).is_ok());
+        assert!(validate_run_argv(&["node".to_string(), "--check".to_string()]).is_ok());
+        assert!(validate_run_argv(&[]).is_err());
+        assert!(validate_run_argv(&["sh".to_string()]).is_err());
+        assert!(validate_run_argv(&["python3;rm".to_string()]).is_err());
+        assert!(validate_run_argv(&["python3".to_string(), "a\0b".to_string()]).is_err());
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn timeout_argv_wraps_with_kill() {
+        let argv = strs(&["python3", "-c", "pass"]);
+        assert_eq!(timeout_argv(&argv, Duration::from_secs(1)), strs(&["timeout", "-s", "KILL", "1", "python3", "-c", "pass"]));
+        assert_eq!(timeout_duration_arg(Duration::from_millis(1500)), "1.5");
+        assert_eq!(timeout_duration_arg(Duration::from_millis(1001)), "1.001");
+        assert_eq!(timeout_duration_arg(Duration::from_millis(1100)), "1.1");
+        assert_eq!(timeout_duration_arg(Duration::from_secs(30)), "30");
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn outcome_timeout_requires_elapsed() {
+        let req = Duration::from_secs(1);
+        for (code, ms, want) in [(137, 1000, true), (124, 900, true), (124, 10, false), (137, 10, false), (0, 2000, false)] {
+            assert_eq!(outcome_is_timeout(&outcome(Some(code)), Duration::from_millis(ms), req), want, "code {code} ms {ms}");
+        }
+        assert!(!outcome_is_timeout(&outcome(None), Duration::from_secs(2), req));
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn scratch_and_ppcheck_argv_shapes() {
+        assert_eq!(ppcheck_mariadb_argv(Duration::from_secs(30)), strs(&["runuser", "-u", "ppcheck", "--", "timeout", "-s", "KILL", "30", "mariadb", "pp_runnable"]));
+        assert_eq!(root_mariadb_argv("SELECT 1"), strs(&["mariadb", "-u", "root", "-e", "SELECT 1"]));
+        let setup = timeout_argv(&root_mariadb_argv("DROP DATABASE IF EXISTS pp_runnable; CREATE DATABASE pp_runnable"), Duration::from_secs(30));
+        assert_eq!(setup[..4], ["timeout", "-s", "KILL", "30"]);
+        assert!(setup[8].contains("CREATE DATABASE pp_runnable"));
+    }
+}

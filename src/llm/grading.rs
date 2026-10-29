@@ -1,11 +1,16 @@
 //! Per-question end-of-session grading, one request per question.
 
 use serde::Deserialize;
+use std::future::Future;
+use std::time::Duration;
 
 use crate::core::{ApproachChoice, EventKind, QuestionStatus, Session, TestSummary};
 use crate::llm::common::{strip_code_fences, LlmError, LlmOutcome};
 use crate::llm::{Message, MetaClient};
 use crate::scoring::{GradeOutcome, QuestionGrade};
+
+pub const GRADE_MAX_ATTEMPTS: usize = 3;
+const GRADE_RETRY_BASE_DELAY: Duration = Duration::from_millis(200);
 
 /// Everything one per-question grading request needs for one slot.
 #[derive(Debug, Clone, PartialEq)]
@@ -171,19 +176,56 @@ pub fn parse_question_grade(content: &str, slot_index: usize) -> Result<Question
     )?)
 }
 
-/// Grades exactly one question in one strong-model request.
+/// Retries an async attempt with backoff, returning first success.
+/// On exhaustion the last error is returned.
+async fn retry_grade_attempts<T, F, Fut>(
+    max_attempts: usize,
+    base_delay: Duration,
+    mut attempt: F,
+) -> Result<T, LlmError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, LlmError>>,
+{
+    let max_attempts = max_attempts.max(1);
+    let mut attempt_no = 0usize;
+    loop {
+        attempt_no += 1;
+        match attempt().await {
+            Ok(value) => return Ok(value),
+            Err(err) => {
+                if attempt_no >= max_attempts {
+                    return Err(err);
+                }
+                if !base_delay.is_zero() {
+                    tokio::time::sleep(base_delay * attempt_no as u32).await;
+                }
+            }
+        }
+    }
+}
+
+/// Grades exactly one question, retrying failed requests.
 pub async fn grade_question(
     client: &MetaClient,
     input: &QuestionScoringInput,
 ) -> Result<LlmOutcome<QuestionGrade>, LlmError> {
     let model = client.strong_model.clone();
     let messages = build_question_grading_messages(input);
-    let outcome = client.chat(&model, messages).await?;
-    let value = parse_question_grade(&outcome.content, input.slot_index)?;
-    Ok(LlmOutcome {
-        value,
-        usage: outcome.usage,
+    let slot_index = input.slot_index;
+    retry_grade_attempts(GRADE_MAX_ATTEMPTS, GRADE_RETRY_BASE_DELAY, || {
+        let model = model.clone();
+        let messages = messages.clone();
+        async move {
+            let outcome = client.chat(&model, messages).await?;
+            let value = parse_question_grade(&outcome.content, slot_index)?;
+            Ok(LlmOutcome {
+                value,
+                usage: outcome.usage,
+            })
+        }
     })
+    .await
 }
 
 /// Grades each input in its own request; failures become `NotScored`.
@@ -201,4 +243,66 @@ pub async fn grade_questions(
         }
     }
     outcomes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn retry_succeeds_after_two_failures_with_three_calls() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_inner = calls.clone();
+        let result = retry_grade_attempts(3, Duration::ZERO, move || {
+            let calls = calls_inner.clone();
+            async move {
+                let n = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                if n < 3 {
+                    Err(LlmError::Parse(format!("fail {n}")))
+                } else {
+                    Ok(42)
+                }
+            }
+        })
+        .await;
+        assert_eq!(result.expect("should succeed on third attempt"), 42);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn retry_returns_last_error_after_exhausting_attempts() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_inner = calls.clone();
+        let result: Result<i32, LlmError> = retry_grade_attempts(3, Duration::ZERO, move || {
+            let calls = calls_inner.clone();
+            async move {
+                let n = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                Err(LlmError::Parse(format!("fail {n}")))
+            }
+        })
+        .await;
+        match result {
+            Err(LlmError::Parse(msg)) => assert_eq!(msg, "fail 3"),
+            other => panic!("expected last Parse error, got {other:?}"),
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn retry_does_not_retry_after_success() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_inner = calls.clone();
+        let result = retry_grade_attempts(3, Duration::ZERO, move || {
+            let calls = calls_inner.clone();
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok::<i32, LlmError>(7)
+            }
+        })
+        .await;
+        assert_eq!(result.expect("should succeed"), 7);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
 }
