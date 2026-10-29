@@ -204,3 +204,110 @@ async fn grade_questions_empty_inputs_empty_output() {
     let outcomes = grade_questions(&client, &[]).await;
     assert!(outcomes.is_empty());
 }
+
+#[tokio::test]
+async fn grade_questions_retries_per_question_in_isolation() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    fn find_header_end(buf: &[u8]) -> Option<usize> {
+        buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4)
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind stub");
+    let addr = listener.local_addr().expect("stub addr");
+    let fail_count = Arc::new(AtomicUsize::new(0));
+    let success_count = Arc::new(AtomicUsize::new(0));
+    let fail_c = fail_count.clone();
+    let success_c = success_count.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = match listener.accept().await {
+                Ok(v) => v,
+                Err(_) => break,
+            };
+            let fail_c = fail_c.clone();
+            let success_c = success_c.clone();
+            tokio::spawn(async move {
+                let mut buffer: Vec<u8> = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let header_end = loop {
+                    let n = match stream.read(&mut chunk).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => n,
+                    };
+                    buffer.extend_from_slice(&chunk[..n]);
+                    if let Some(pos) = find_header_end(&buffer) {
+                        break pos;
+                    }
+                    if buffer.len() > 65536 {
+                        return;
+                    }
+                };
+                let header_text = String::from_utf8_lossy(&buffer[..header_end]).to_lowercase();
+                let mut content_length = 0usize;
+                for line in header_text.lines() {
+                    if let Some(v) = line.strip_prefix("content-length:") {
+                        content_length = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                while buffer.len() < header_end + content_length {
+                    let n = match stream.read(&mut chunk).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => n,
+                    };
+                    buffer.extend_from_slice(&chunk[..n]);
+                }
+                let body = String::from_utf8_lossy(&buffer[header_end..]).to_string();
+                let is_fail = body.contains("Slot index: 0");
+                let (status, status_text, resp_body) = if is_fail {
+                    fail_c.fetch_add(1, Ordering::SeqCst);
+                    (500, "Internal Server Error", "stub failure".to_string())
+                } else {
+                    success_c.fetch_add(1, Ordering::SeqCst);
+                    let grade = r#"{"grade":8,"rationale":"solid","correction":0.1}"#;
+                    let resp = serde_json::json!({
+                        "model": "muse-wonder-1.0",
+                        "choices": [{"message": {"role": "assistant", "content": grade}}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+                    });
+                    (200, "OK", resp.to_string())
+                };
+                let response = format!(
+                    "HTTP/1.1 {status} {status_text}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    resp_body.len(),
+                    resp_body
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.flush().await;
+            });
+        }
+    });
+
+    let client = MetaClient::new(&format!("http://{addr}/v1"), "k");
+    let inputs = vec![bare_input(0), bare_input(1)];
+    let outcomes = grade_questions(&client, &inputs).await;
+    assert_eq!(outcomes.len(), 2);
+    assert_eq!(outcomes[0], GradeOutcome::NotScored { slot_index: 0 });
+    match &outcomes[1] {
+        GradeOutcome::Graded(g) => {
+            assert_eq!(g.slot_index, 1);
+            assert_eq!(g.grade, 8.0);
+            assert_eq!(g.rationale, "solid");
+        }
+        other => panic!("expected Graded for slot 1, got {other:?}"),
+    }
+    assert_eq!(
+        fail_count.load(Ordering::SeqCst),
+        3,
+        "failing question should be requested exactly 3 times"
+    );
+    assert_eq!(
+        success_count.load(Ordering::SeqCst),
+        1,
+        "succeeding question should be requested exactly once"
+    );
+    server.abort();
+}

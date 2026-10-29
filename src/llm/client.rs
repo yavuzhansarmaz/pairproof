@@ -2,7 +2,7 @@
 
 use super::{API_KEY_ENV, DEFAULT_BASE_URL, LIGHT_MODEL, STRONG_MODEL};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{fmt, time::Duration};
 
 /// Provider reasoning effort, serialised lowercase on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,13 +186,23 @@ fn accumulate_stream(payloads: &[&str], model: &str) -> Result<ChatOutcome, Meta
     })
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MetaClient {
     http: reqwest::Client,
     base_url: String,
     api_key: String,
     pub strong_model: String,
     pub light_model: String,
+}
+impl fmt::Debug for MetaClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MetaClient")
+            .field("base_url", &self.base_url)
+            .field("api_key", &"[REDACTED]")
+            .field("strong_model", &self.strong_model)
+            .field("light_model", &self.light_model)
+            .finish_non_exhaustive()
+    }
 }
 
 impl MetaClient {
@@ -375,5 +385,15 @@ mod tests {
         let got = ChatOptions::low().reasoning_effort;
         assert_eq!(got, Some(ReasoningEffort::Low));
         assert_eq!(ChatOptions::default().reasoning_effort, None);
+    }
+    #[test]
+    fn debug_redacts_api_key() {
+        let client = MetaClient::new("http://127.0.0.1:9", "test-secret-key-123");
+        let debug = format!("{client:?}");
+        assert!(!debug.contains("test-secret-key-123"), "{debug}");
+        assert!(debug.contains("[REDACTED]"), "{debug}");
+        assert!(debug.contains("127.0.0.1:9"), "{debug}");
+        assert!(debug.contains(&client.strong_model), "{debug}");
+        assert!(debug.contains(&client.light_model), "{debug}");
     }
 }
