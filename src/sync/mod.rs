@@ -2,6 +2,7 @@
 
 pub mod command;
 pub mod error;
+pub mod failure;
 pub mod lifecycle;
 pub mod paste;
 
@@ -12,6 +13,7 @@ pub use command::{
     STATUS_TEMPLATE,
 };
 pub use error::SyncError;
+pub use failure::{classify_ssh_failure, FailureClassification, SshFailureKind};
 pub use lifecycle::{
     check_mutagen_available, create_sync, ensure_sync, flush_sync, resume_sync, sync_status,
     terminate_sync, EnsureOutcome, SYNC_TIMEOUT,
