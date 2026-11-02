@@ -1,7 +1,7 @@
 //! Candidate runtime: SSH auth, hello, isolated Mutagen sync, intents,
 //! and snapshot rendering. Candidate failures never carry secrets.
 #[rustfmt::skip] use crate::connection::ConnectionString;
-#[rustfmt::skip] use crate::orchestration::control::{final_ack_bytes, heartbeat_bytes, parse_session_binding, CandidateSnapshot, Intent, IntentKind, SnapshotFinal, SnapshotOption, SnapshotTest, FINAL_ACK_PATH, HEARTBEAT_PATH, SESSION_PATH};
+#[rustfmt::skip] use crate::orchestration::control::{final_ack_bytes, heartbeat_bytes, parse_session_binding, CandidateSnapshot, Intent, IntentKind, SnapshotFinal, SnapshotOption, SnapshotRecovery, SnapshotTest, FINAL_ACK_PATH, HEARTBEAT_PATH, SESSION_PATH};
 #[rustfmt::skip] use crate::orchestration::control_client::{CandidateControlClient, SshControlClient};
 #[rustfmt::skip] use crate::orchestration::mutagen_auth::{run_mutagen, MutagenAuthEnv, PasswordFeeder};
 #[rustfmt::skip] use crate::orchestration::ssh_auth::{run_ssh_command, run_ssh_command_with_stdin, verify_and_key_line, AskpassSession, SshAuthError};
@@ -55,13 +55,13 @@ pub trait CandidateTransport {
 pub struct CandidateView {
     pub phase: String, pub sync_phase: String, pub question_title: Option<String>, pub question_index: Option<usize>,
     pub statement: Option<String>, pub options: Vec<SnapshotOption>, pub selected: Option<String>,
-    pub latest_test: Option<SnapshotTest>, pub chat_replies: Vec<String>, pub final_breakdown: Option<SnapshotFinal>,
+    pub latest_test: Option<SnapshotTest>, pub chat_replies: Vec<String>, pub final_breakdown: Option<SnapshotFinal>, pub recovery: Option<SnapshotRecovery>,
 }
 #[rustfmt::skip]
 impl CandidateView {
     pub fn from_snapshot(snapshot: Option<&CandidateSnapshot>) -> Self {
-        let Some(s) = snapshot else { return Self { phase: String::new(), sync_phase: String::new(), question_title: None, question_index: None, statement: None, options: Vec::new(), selected: None, latest_test: None, chat_replies: Vec::new(), final_breakdown: None }; };
-        Self { phase: s.phase.clone(), sync_phase: s.sync_phase.clone(), question_title: s.current.as_ref().map(|q| q.title.clone()), question_index: s.current.as_ref().map(|q| q.index), statement: s.current.as_ref().and_then(|q| q.statement.clone()), options: s.options.clone(), selected: s.selected.clone(), latest_test: s.latest_test, chat_replies: s.chat_replies.clone(), final_breakdown: s.final_breakdown.clone() }
+        let Some(s) = snapshot else { return Self { phase: String::new(), sync_phase: String::new(), question_title: None, question_index: None, statement: None, options: Vec::new(), selected: None, latest_test: None, chat_replies: Vec::new(), final_breakdown: None, recovery: None }; };
+        Self { phase: s.phase.clone(), sync_phase: s.sync_phase.clone(), question_title: s.current.as_ref().map(|q| q.title.clone()), question_index: s.current.as_ref().map(|q| q.index), statement: s.current.as_ref().and_then(|q| q.statement.clone()), options: s.options.clone(), selected: s.selected.clone(), latest_test: s.latest_test, chat_replies: s.chat_replies.clone(), final_breakdown: s.final_breakdown.clone(), recovery: s.recovery.clone() }
     }
     pub fn is_terminal(&self) -> bool { matches!(self.phase.as_str(), "Completed" | "EndedByExpert" | "TechnicalFailure") }
     /// Sanitized lines; a rating renders only from a carried breakdown.
@@ -75,8 +75,9 @@ impl CandidateView {
         match self.latest_test { Some(t) => lines.push(format!("Latest test: {} passed, {} failed", t.passed, t.failed)), None => lines.push("Latest test: no test run yet".to_string()) }
         if !self.sync_phase.is_empty() { lines.push(self.sync_phase.clone()); }
         lines.push(format!("Phase: {}", self.phase)); for reply in &self.chat_replies { lines.push(format!("Coach: {reply}")); }
+        if let Some(r) = &self.recovery { if r.active { lines.push("Technical problem - service temporarily unavailable.".to_string()); lines.push(format!("Retrying... about {} seconds remaining.", r.remaining_ms.saturating_add(999) / 1000)); lines.push("Your progress is preserved.".to_string()); } }
         if let Some(f) = &self.final_breakdown { lines.push("Final breakdown".to_string()); lines.push(format!("Final rating: {:.2}", f.rating)); for q in &f.per_question { let grade = q.grade.map_or("not scored".to_string(), |g| format!("{g:.1}")); let mut line = format!("Q{}: grade {}", q.slot_index + 1, grade); if let Some(r) = &q.rationale { line.push_str(&format!(": {r}")); } lines.push(line); } }
-        else if self.phase == "TechnicalFailure" { lines.push("The session ended as a technical failure.".to_string()); lines.push("No evaluation was produced; the interview can be rescheduled.".to_string()); }
+        else if self.phase == "TechnicalFailure" || self.recovery.as_ref().is_some_and(|r| r.technical_failure) { lines.push("The session ended as a technical failure.".to_string()); lines.push("No evaluation was produced; the interview can be rescheduled.".to_string()); }
         else if self.is_terminal() { lines.push("Session ended.".to_string()); }
         lines.iter().map(|line| sanitize_display(line)).collect()
     }
@@ -85,13 +86,13 @@ impl CandidateView {
 #[rustfmt::skip]
 pub struct CandidateRuntime<T: CandidateTransport> {
     transport: T, session_id: String, workspace: PathBuf, sequencer: CandidateControlClient,
-    phase: CandidateRuntimePhase, last_snapshot: Option<CandidateSnapshot>, chat_seq: u64, ack_sent: bool, lost: bool, last_hb_ms: u64,
+    phase: CandidateRuntimePhase, last_snapshot: Option<CandidateSnapshot>, chat_seq: u64, ack_sent: bool, lost: bool, last_hb_ms: u64, recovery_view: Option<SnapshotRecovery>, last_recovery_generation: u64,
 }
 #[rustfmt::skip]
 impl<T: CandidateTransport> CandidateRuntime<T> {
     pub fn new(session_id: impl Into<String>, workspace: PathBuf, transport: T) -> Self {
         let session_id = session_id.into();
-        Self { sequencer: CandidateControlClient::new(&session_id), transport, session_id, workspace, phase: CandidateRuntimePhase::Disconnected, last_snapshot: None, chat_seq: 0, ack_sent: false, lost: false, last_hb_ms: 0 }
+        Self { sequencer: CandidateControlClient::new(&session_id), transport, session_id, workspace, phase: CandidateRuntimePhase::Disconnected, last_snapshot: None, chat_seq: 0, ack_sent: false, lost: false, last_hb_ms: 0, recovery_view: None, last_recovery_generation: 0 }
     }
     pub fn new_discovering(workspace: PathBuf, transport: T) -> Self { Self::new("", workspace, transport) }
     pub fn phase(&self) -> CandidateRuntimePhase { self.phase }
@@ -100,6 +101,7 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
     pub fn transport(&self) -> &T { &self.transport }
     pub fn transport_mut(&mut self) -> &mut T { &mut self.transport }
     pub fn last_snapshot(&self) -> Option<&CandidateSnapshot> { self.last_snapshot.as_ref() }
+    pub fn recovery_view(&self) -> Option<&SnapshotRecovery> { self.recovery_view.as_ref() } pub fn last_recovery_generation(&self) -> u64 { self.last_recovery_generation }
     pub fn final_ack_sent(&self) -> bool { self.ack_sent }
     pub fn connection_lost(&self) -> bool { self.lost }
     pub fn status_text(&self) -> Option<String> { self.lost.then(|| CONNECTION_LOST.to_string()) }
@@ -142,6 +144,7 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
             Ok(Some(snapshot)) => {
                 if snapshot.session_id != self.session_id { return Err(CandidateRuntimeError::WrongSession); }
                 self.lost = false;
+                match &snapshot.recovery { None => self.recovery_view = None, Some(r) if r.generation >= self.last_recovery_generation => { self.last_recovery_generation = r.generation; self.recovery_view = Some(r.clone()); } Some(_) => {} }
                 if snapshot.final_breakdown.is_some() && !self.ack_sent { self.ack_sent = true; let _ = self.transport.write_final_ack(&self.session_id); }
                 self.last_snapshot = Some(snapshot.clone());
                 Ok(Some(snapshot))
@@ -158,7 +161,7 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
     pub fn flush(&mut self) -> Result<(), CandidateRuntimeError> { if self.phase != CandidateRuntimePhase::Connected { return Err(CandidateRuntimeError::NotConnected); } self.transport.flush_sync(&self.session_id) }
     /// Terminates sync and ends; local files are preserved.
     pub fn end(&mut self) -> Result<(), CandidateRuntimeError> { if self.phase == CandidateRuntimePhase::Ended { return Ok(()); } let result = self.transport.terminate_sync(&self.session_id); self.phase = CandidateRuntimePhase::Ended; result }
-    pub fn view(&self) -> CandidateView { CandidateView::from_snapshot(self.last_snapshot.as_ref()) }
+    pub fn view(&self) -> CandidateView { let mut view = CandidateView::from_snapshot(self.last_snapshot.as_ref()); view.recovery = self.recovery_view.clone(); view }
 }
 /// Production transport: FIFO askpass SSH plus isolated Mutagen sync.
 #[rustfmt::skip]

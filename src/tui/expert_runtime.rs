@@ -17,13 +17,16 @@ use crate::llm::extraction::{extract_context, ExtractionResult};
 #[rustfmt::skip]
 use crate::orchestration::control::{parse_final_ack, parse_heartbeat, FinalAckOutcome};
 #[rustfmt::skip]
-use crate::orchestration::{build_snapshot, compute_final, generate_report, grade_session, publish_snapshot, run_cancellable, ApplyOutcome, ApplyReport, ApproachGenerator, ChatTransport, CleanupCoordinator, CleanupReport, CleanupSequence, Clock, CodingTransport, ConnectionGate, ConnectionGateError, ControlError, ControlExecutor, ControlIo, ControlTransports, FetchedStatement, GatePhase, HealthGate, KillReport, LifecycleError, Orchestrator, OrchestratorError, PipelineError, QuestionGrader, QuestionPipeline, RequestSupervisor, SandboxIo, SessionSyncPhase, StatementFetcher};
+use crate::orchestration::{build_snapshot_with_recovery, compute_final, generate_report, grade_session, publish_snapshot, run_cancellable, ApplyOutcome, ApplyReport, ApproachGenerator, ChatTransport, CleanupCoordinator, CleanupReport, CleanupSequence, Clock, CodingTransport, ConnectionGate, ConnectionGateError, ControlError, ControlExecutor, ControlIo, ControlTransports, FetchedStatement, GatePhase, HealthGate, KillReport, LeetCodeProbe, LifecycleError, MetaProbe, Orchestrator, OrchestratorError, PauseClock, PipelineError, QuestionGrader, QuestionPipeline, RecoveryController, RecoveryOutcome, RequestSupervisor, SandboxIo, SessionSyncPhase, StatementFetcher};
 use crate::sandbox::SandboxHandle;
 use crate::scoring::ApproachSet;
 use crate::tui::monitor::{monitor_view, MonitorView};
 
+#[path = "expert_recovery.rs"]
+mod expert_recovery;
 #[path = "hello.rs"]
 mod hello;
+pub use self::expert_recovery::RecoverySnapshot;
 pub use self::hello::{
     ConsumeFuture, DockerHelloSource, HelloFuture, HelloSource, LocalHelloSource,
     SessionPublishFuture,
@@ -104,7 +107,7 @@ pub(crate) async fn build_expert_runtime(now: u64, jd: &str, notes: &str) -> Res
             topics, level, sync_phase: SessionSyncPhase::NotStarted,
         };
         let spec = ExpertSessionSpec { session_id: session_id.clone(), language, easy, endpoint: endpoint.clone(), username: username.clone(), fingerprint };
-        let fresh_now = crate::orchestration::SystemClock.now_ms(); let mut runtime = ExpertRuntime::new(spec, deps, fresh_now).await.map_err(|e| e.to_string())?; runtime.set_clock(Arc::new(crate::orchestration::SystemClock));
+        let fresh_now = crate::orchestration::SystemClock.now_ms(); let mut runtime = ExpertRuntime::new(spec, deps, fresh_now).await.map_err(|e| e.to_string())?; runtime.set_clock(Arc::new(crate::orchestration::SystemClock)); if let Ok(meta) = meta_client() { runtime.set_health_probes(Arc::new(crate::orchestration::LeetCodeHealthProbe::new(LeetCodeClient::default())), Arc::new(crate::orchestration::MetaHealthProbe::new(meta))); }
         if let Some(docs) = &docs { store_raw_documents(runtime.layout(), docs).map_err(|e| e.to_string())?; }
         let current = runtime.current_string(fresh_now).map_err(|e| e.to_string())?;
         rotate_secret(&handle, &username, current.secret()).await.map_err(|e| e.to_string())?; runtime.pushed_window = Some(current.expires_at_ms());
@@ -154,7 +157,7 @@ pub struct ExpertRuntime {
     loaded_index: Option<usize>, cleanup_report: Option<CleanupReport>, last_kill: Option<KillReport>,
     final_ack_outcome: Option<FinalAckOutcome>, ack_waited: bool, hb_timeout_ms: u64, last_seen_ms: u64, clock: Option<Arc<dyn Clock>>,
     last_hb_at: Option<u64>, reissued: Option<ConnectionString>, username: EphemeralUsername,
-    selection_note: Option<String>, medium_failed_at: Option<u64>, hard_failed_at: Option<u64>, pushed_window: Option<u64>, secret_pusher: Option<Arc<dyn crate::orchestration::secret_push::SecretPush>>, hello_pending_consume: bool,
+    selection_note: Option<String>, medium_failed_at: Option<u64>, hard_failed_at: Option<u64>, pushed_window: Option<u64>, secret_pusher: Option<Arc<dyn crate::orchestration::secret_push::SecretPush>>, hello_pending_consume: bool, recovery: RecoveryController, pause_clock: PauseClock, recovery_rx: Option<(u64, tokio::sync::oneshot::Receiver<RecoveryOutcome>)>, recovery_cancel: Option<crate::orchestration::CancelToken>, leetcode_probe: Option<Arc<dyn LeetCodeProbe>>, meta_probe: Option<Arc<dyn MetaProbe>>, recovery_timed_out: bool,
 }
 
 #[rustfmt::skip]
@@ -173,7 +176,7 @@ impl ExpertRuntime {
             coding: deps.coding, sandbox_io: deps.sandbox_io, chat: deps.chat, grader: deps.grader, pool: deps.leetcode.map(|c| Arc::new(c) as Arc<dyn PoolClient>),
             sandbox_handle: deps.sandbox_handle, layout, topics: deps.topics, level: deps.level, sync_phase: deps.sync_phase,
             started: false, ended: false, pending_medium: None, pending_load: None, loaded_index: None, cleanup_report: None, last_kill: None, final_ack_outcome: None, ack_waited: false,
-            hb_timeout_ms: HEARTBEAT_TIMEOUT_MS, last_seen_ms: now_ms, last_hb_at: None, reissued: None, username: spec.username, selection_note: None, medium_failed_at: None, hard_failed_at: None, pushed_window: None, secret_pusher, hello_pending_consume: false, clock: None })
+            hb_timeout_ms: HEARTBEAT_TIMEOUT_MS, last_seen_ms: now_ms, last_hb_at: None, reissued: None, username: spec.username, selection_note: None, medium_failed_at: None, hard_failed_at: None, pushed_window: None, secret_pusher, hello_pending_consume: false, clock: None, recovery: RecoveryController::new(60_000), pause_clock: PauseClock::new(), recovery_rx: None, recovery_cancel: None, leetcode_probe: None, meta_probe: None, recovery_timed_out: false })
     }
 
     pub fn orchestrator(&self) -> &Orchestrator { &self.orch } pub fn gate_phase(&self) -> GatePhase { self.gate.phase() }
@@ -203,7 +206,7 @@ impl ExpertRuntime {
     /// session-bound hello locks the gate and starts the interview;
     /// polling without one never changes connection state.
     pub async fn poll_candidate(&mut self, now_ms: u64) -> PollOutcome {
-        self.apply_pending_load().await;
+        self.apply_pending_load(now_ms).await;
         if self.started && self.orch.is_connected() { return PollOutcome::AlreadyConnected; }
         // Persistent rm failure implies broken container exec, so snapshot
         // publish is broken too; expert End/cleanup paths never need hello.
@@ -247,11 +250,11 @@ impl ExpertRuntime {
     pub async fn drain_intents(&mut self, now_ms: u64) -> Result<Vec<ApplyReport>, ExpertRuntimeError> {
         if self.ended { return Ok(Vec::new()); }
         self.check_heartbeat(self.fresh_now(now_ms)).await;
-        self.apply_pending_load().await;
+        self.apply_pending_load(now_ms).await;
         let transports = ControlTransports { coding: &*self.coding, sandbox: &*self.sandbox_io, generator: &*self.generator, chat: &*self.chat };
         let reports = self.executor.drain(&*self.control_io, &mut self.orch, &mut self.pipeline, &transports, now_ms).await?;
         if reports.iter().any(|r| r.outcome == ApplyOutcome::Applied) { self.last_seen_ms = self.fresh_now(now_ms); }
-        let snapshot = build_snapshot(&self.orch, &self.pipeline, self.sync_phase, self.executor.chat_replies(), None); publish_snapshot(&*self.control_io, &snapshot).await?;
+        let snapshot = build_snapshot_with_recovery(&self.orch, &self.pipeline, self.sync_phase, self.executor.chat_replies(), None, self.snapshot_recovery()); publish_snapshot(&*self.control_io, &snapshot).await?;
         self.maybe_trigger_load();
         self.check_heartbeat(self.fresh_now(now_ms)).await;
         Ok(reports)
@@ -299,7 +302,9 @@ impl ExpertRuntime {
     pub fn set_pool(&mut self, pool: Arc<dyn PoolClient>) { self.pool = Some(pool); } pub fn set_secret_pusher(&mut self, pusher: Arc<dyn crate::orchestration::secret_push::SecretPush>) { self.secret_pusher = Some(pusher); } pub fn set_clock(&mut self, clock: Arc<dyn Clock>) { self.clock = Some(clock); }
 
     /// Live monitor data from permitted expert-side state only.
-    pub fn monitor_view(&self, now_ms: u64) -> MonitorView { monitor_view(self.orch.session(), &self.pipeline.approach_qualities(&self.orch), now_ms) }
+    /// Uses the pause-adjusted clock so elapsed freezes during recovery
+    /// and excludes recovery duration after resume.
+    pub fn monitor_view(&self, now_ms: u64) -> MonitorView { monitor_view(self.orch.session(), &self.pipeline.approach_qualities(&self.orch), self.adjusted_now_ms(now_ms)) }
     /// Ends the session with the production 60s final-ack wait.
     pub async fn end_session(&mut self, now_ms: u64) -> Result<CleanupReport, ExpertRuntimeError> { self.end_session_with_ack_deadline(now_ms, 60_000).await }
     /// Ends the session: publish the final snapshot, wait bounded
@@ -307,17 +312,14 @@ impl ExpertRuntime {
     /// proceeds anyway; a second call re-attempts nothing.
     pub async fn end_session_with_ack_deadline(&mut self, now_ms: u64, ack_deadline_ms: u64) -> Result<CleanupReport, ExpertRuntimeError> {
         if self.ended { return Ok(self.cleanup_report.clone().unwrap_or_default()); }
-        self.ended = true; let kill = self.supervisor.kill_switch().await; self.last_kill = Some(kill);
+        self.ended = true; if self.is_recovery_active() { self.cancel_recovery(); } let kill = self.supervisor.kill_switch().await; self.last_kill = Some(kill);
         if self.gate.phase() != GatePhase::Ended { let _ = self.gate.terminate(&mut self.orch, now_ms); }
         let mut statements: HashMap<String, String> = HashMap::new();
         if let (Some(question), Some(fetched)) = (self.orch.current_question().cloned(), self.pipeline.current_statement(&self.orch)) { statements.insert(question.title_slug.clone(), fetched.statement); }
         let codes: HashMap<usize, String> = (0..self.orch.session().slots().len()).filter_map(|index| self.pipeline.current_code(index).map(|code| (index, code.to_string()))).collect();
-        let grades = grade_session(&self.orch, &*self.grader, &statements, &codes).await?;
-        let breakdown = compute_final(&self.orch, &self.pipeline.approach_qualities(&self.orch), &grades)?;
-        let final_snapshot = build_snapshot(&self.orch, &self.pipeline, self.sync_phase, self.executor.chat_replies(), Some(&breakdown));
+        let (_grades, final_snapshot, report_md) = if self.is_technical_failure() { let snap = build_snapshot_with_recovery(&self.orch, &self.pipeline, self.sync_phase, self.executor.chat_replies(), None, self.snapshot_recovery()); (Vec::new(), snap, format!("# PairProof Session Report\n\nSession: {}\n\nStatus: TechnicalFailure\n\nSession ended due to technical failure.\n", self.orch.session_id())) } else { let grades = grade_session(&self.orch, &*self.grader, &statements, &codes).await?; let breakdown = compute_final(&self.orch, &self.pipeline.approach_qualities(&self.orch), &grades)?; let snap = build_snapshot_with_recovery(&self.orch, &self.pipeline, self.sync_phase, self.executor.chat_replies(), Some(&breakdown), self.snapshot_recovery()); let md = generate_report(self.orch.session(), &breakdown, &grades, &[]); (grades, snap, md) };
         let published = publish_snapshot(&*self.control_io, &final_snapshot).await;
         let ack_outcome = if published.is_ok() { Some(self.wait_for_final_ack(ack_deadline_ms).await) } else { None };
-        let report_md = generate_report(self.orch.session(), &breakdown, &grades, &[]);
         let context = ContextSummary::from_session(self.orch.session(), self.topics.clone(), self.level.clone());
         let token = self.supervisor.token();
         let gate_ended = self.gate.phase() == GatePhase::Ended;
@@ -364,17 +366,6 @@ impl ExpertRuntime {
         self.supervisor.spawn(format!("load-q{index}"), async move { let work = async move { let fetched = fetcher.fetch_statement(&slug, language).await?; let statement = fetched.statement.clone(); let set = generator.generate(&statement, language).await?; Ok((fetched, set)) }; let result = run_cancellable(&token, work).await; let _ = tx.send(LoadOutcome { session_id, index, result }); }); self.pending_load = Some((index, rx));
     }
 
-    async fn apply_pending_load(&mut self) {
-        let Some((index, mut rx)) = self.pending_load.take() else { return; };
-        let outcome = match rx.try_recv() { Ok(outcome) => outcome, Err(tokio::sync::oneshot::error::TryRecvError::Empty) => { self.pending_load = Some((index, rx)); return; } Err(_) => return, };
-        if self.supervisor.token().is_cancelled() { return; }
-        if outcome.session_id != self.orch.session_id() || self.orch.current_index() != Some(outcome.index) { return; }
-        let Ok(Ok((fetched, set))) = outcome.result else { return; };
-        let fetcher = CannedFetcher(fetched);
-        if self.pipeline.load_current_statement(&self.orch, &fetcher).await.is_err() { return; }
-        let generator = CannedGenerator(Mutex::new(Some(set)));
-        if self.pipeline.generate_current_approaches(&self.orch, &generator).await.is_ok() { self.loaded_index = Some(outcome.index); }
-    }
 }
 
 #[cfg(test)]

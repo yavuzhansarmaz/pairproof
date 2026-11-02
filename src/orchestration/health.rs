@@ -79,12 +79,13 @@ impl HealthError {
     }
 }
 
-/// Classifies a Meta API error: 429 is `RateLimited`, never success;
-/// every other status or transport failure is `Down`.
+/// Classifies a Meta API error via recoverability for compatibility.
+/// `RateLimited` stays distinct; all other failures map to `Down`.
 pub fn classify_meta_error(err: &MetaApiError) -> HealthFailure {
-    match err {
-        MetaApiError::Status { status: 429, .. } => HealthFailure::RateLimited,
-        _ => HealthFailure::Down,
+    match crate::orchestration::recovery::classify_meta_recoverability(err) {
+        crate::orchestration::recovery::Recoverability::RateLimited => HealthFailure::RateLimited,
+        crate::orchestration::recovery::Recoverability::Recoverable
+        | crate::orchestration::recovery::Recoverability::NonRecoverable => HealthFailure::Down,
     }
 }
 

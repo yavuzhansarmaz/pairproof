@@ -113,6 +113,7 @@ fn long_statement_does_not_hide_final_summary() {
                 rationale: Some("Solid".to_string()),
             }],
         }),
+        recovery: None,
     };
     let lines = view.lines();
     let visible = visible_with_pinned(&lines, 12);
