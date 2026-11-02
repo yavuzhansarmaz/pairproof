@@ -328,6 +328,16 @@ impl ExpertSetupPastes {
     pub fn focus(&self) -> ExpertSetupFocus { self.focus }
     pub fn jd_scroll(&self) -> usize { self.jd_scroll }
     pub fn notes_scroll(&self) -> usize { self.notes_scroll }
+    /// Syncs the Preflight disclosure acknowledgement into the controller.
+    pub fn acknowledge_disclosure(&mut self) { self.controller.acknowledge_disclosure(); }
+    /// Requests the proposal through the controller (Meta API call).
+    pub async fn request_proposal(&mut self, client: &MetaClient) -> Result<ProposedContext, SetupError> { self.controller.request_proposal(client).await }
+    /// Returns the stored proposal, if one has been applied.
+    pub fn proposal(&self) -> Option<&ProposedContext> { self.controller.proposal() }
+    /// Sanitized proposal lines for the Proposal screen; never raw pastes.
+    pub fn proposal_lines(&self) -> Vec<String> { self.controller.proposal_lines() }
+    /// Returns the language selected from the proposal, if any.
+    pub fn selected_language(&self) -> Option<Language> { self.controller.selected_language() }
     /// Pastes into the focused box, replacing its previous text so a
     /// wrong paste can be corrected by pasting again.
     pub fn apply_focused_paste(&mut self, text: &str) -> Result<(), String> {

@@ -375,3 +375,14 @@ fn other_and_redirect_text_accept_typed_bulk_and_single_chars() {
     work.push_redirect_char('b');
     assert_eq!(work.redirect_text(), "ab");
 }
+
+#[test]
+fn approach_options_are_numbered_from_one_matching_keys() {
+    let session = started();
+    let mut work = CandidateWork::new();
+    work.set_approaches(approach_set());
+    let lines = work_lines(&session, &work).join("\n");
+    assert!(lines.contains("1: Hash table lookup"), "{lines}");
+    assert!(lines.contains("4: Binary search"), "{lines}");
+    assert!(!lines.contains("0: Hash table lookup"), "{lines}");
+}

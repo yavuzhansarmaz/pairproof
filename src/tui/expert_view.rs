@@ -129,7 +129,15 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                 });
             }
             S::Proposal => {
-                lines.push("review the proposal. press enter to wait for the candidate.".into())
+                if app.proposal_lines.is_empty() {
+                    lines
+                        .push("review the proposal. press enter to wait for the candidate.".into());
+                } else {
+                    for line in &app.proposal_lines {
+                        lines.push(format!("  {line}"));
+                    }
+                    lines.push("press enter to wait for the candidate.".into());
+                }
             }
             S::ConnectionWait => lines.push(if app.connected {
                 "candidate connected.".into()
@@ -148,7 +156,13 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                 });
                 lines.push("press e to end the session.".into());
             }
-            S::Final => lines.push("session ended.".into()),
+            S::Final => {
+                if app.final_lines.is_empty() {
+                    lines.push("session ended.".into());
+                } else {
+                    lines.extend(app.final_lines.iter().cloned());
+                }
+            }
             S::Exited => lines.push("goodbye.".into()),
         }
     }

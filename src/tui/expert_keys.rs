@@ -88,6 +88,7 @@ pub(crate) fn handle_key(
             if let Some(active) = runtime.as_mut() {
                 match block_on(tokio_rt, active.end_session(now_ms())) {
                     Some(Ok(_)) => {
+                        app.set_final_lines(active.final_lines());
                         app.clear_status_message();
                         let _ = app.handle(AppEvent::EndSession);
                     }
@@ -105,12 +106,6 @@ pub(crate) fn handle_key(
                     Some(Err(err)) => set_error(app, "reissue failed", &err.to_string()),
                     None => set_error(app, "reissue failed", "runtime unavailable"),
                 }
-            }
-        }
-        K::Char('a') if app.screen() == AppScreen::Preflight => {
-            let _ = app.handle(AppEvent::DisclosureAcknowledged);
-            if app.disclosure_acknowledged {
-                expert_tty::save_disclosure_ack_default();
             }
         }
         K::Enter => advance(app, runtime, tokio_rt, pastes),
@@ -157,14 +152,34 @@ fn advance(
                 }
             }
             ExpertSetupFocus::AdditionalNotes => {
-                app.set_has_proposal(true);
-                let _ = app.handle(AppEvent::ProposalReady);
+                pastes.acknowledge_disclosure();
+                let requested = block_on(tokio_rt, async {
+                    let client = expert_runtime::meta_client()?;
+                    pastes
+                        .request_proposal(&client)
+                        .await
+                        .map_err(|e| e.to_string())
+                });
+                match requested {
+                    Some(Ok(_)) => {
+                        app.set_proposal_lines(pastes.proposal_lines());
+                        app.set_has_proposal(true);
+                        app.clear_status_message();
+                        let _ = app.handle(AppEvent::ProposalReady);
+                    }
+                    Some(Err(err)) => set_error(app, "proposal failed", &err),
+                    None => set_error(app, "proposal failed", "runtime unavailable"),
+                }
             }
         },
         AppScreen::Proposal => {
             if runtime.is_none() {
-                let build =
-                    expert_runtime::build_expert_runtime(now_ms(), pastes.jd(), pastes.notes());
+                let build = expert_runtime::build_expert_runtime(
+                    now_ms(),
+                    pastes.jd(),
+                    pastes.notes(),
+                    pastes.proposal(),
+                );
                 match block_on(tokio_rt, build) {
                     Some(Ok(built)) => *runtime = Some(built),
                     Some(Err(err)) => {

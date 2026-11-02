@@ -270,7 +270,7 @@ async fn flow(
     let rating = rating.ok_or("candidate never polled final snapshot with rating")?;
     chk(rating.is_finite(), "final rating not finite")?;
     chk(
-        lines.iter().any(|l| l.contains("Final rating")),
+        lines.iter().any(|l| l.contains("final rating")),
         "candidate view lacks final rating line",
     )?;
     println!("live10j candidate final rating={rating:.2} lines={lines:?}");

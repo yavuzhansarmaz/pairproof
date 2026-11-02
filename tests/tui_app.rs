@@ -244,6 +244,38 @@ fn back_is_rejected_past_the_runtime_commit_point() {
 }
 
 #[test]
+fn proposal_and_final_lines_render_on_their_screens() {
+    let mut app = ExpertApp::new();
+    advance_to_setup(&mut app);
+    app.set_has_proposal(true);
+    app.set_proposal_lines(vec![
+        "Level: mid".to_string(),
+        "Topics: array, hash-table".to_string(),
+        "Language: Python".to_string(),
+    ]);
+    assert_eq!(app.handle(AppEvent::ProposalReady), Ok(AppScreen::Proposal));
+    let proposal = screen_lines(&app).join("\n");
+    assert!(proposal.contains("Level: mid"), "{proposal}");
+    assert!(proposal.contains("Topics: array, hash-table"), "{proposal}");
+    assert!(proposal.contains("Language: Python"), "{proposal}");
+    assert!(
+        proposal.contains("press enter to wait for the candidate."),
+        "{proposal}"
+    );
+
+    let mut done = ExpertApp::new();
+    advance_to_monitor(&mut done);
+    done.set_final_lines(vec![
+        "Final breakdown".to_string(),
+        "final rating: 7.50".to_string(),
+    ]);
+    assert_eq!(done.handle(AppEvent::EndSession), Ok(AppScreen::Final));
+    let final_lines = screen_lines(&done).join("\n");
+    assert!(final_lines.contains("Final breakdown"), "{final_lines}");
+    assert!(final_lines.contains("final rating: 7.50"), "{final_lines}");
+}
+
+#[test]
 fn status_message_can_be_cleared() {
     let mut app = ExpertApp::new();
     app.set_status_message("Fresh string ready: pp1:stale");

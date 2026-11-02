@@ -104,6 +104,8 @@ pub struct ExpertApp {
     pub disconnected: bool,
     pub candidate_placeholder: bool,
     pub preflight_lines: Vec<String>,
+    pub proposal_lines: Vec<String>,
+    pub final_lines: Vec<String>,
     pub api_key_status: Option<String>,
     pub api_key_ready: bool,
     pub api_key_entry: bool,
@@ -129,6 +131,16 @@ impl ExpertApp {
     /// Records the compact per-check lines shown on Expert Setup.
     pub fn set_preflight_lines(&mut self, lines: Vec<String>) {
         self.preflight_lines = lines;
+    }
+
+    /// Records the proposal lines shown on the Proposal screen.
+    pub fn set_proposal_lines(&mut self, lines: Vec<String>) {
+        self.proposal_lines = lines;
+    }
+
+    /// Records the final breakdown lines shown on the Final screen.
+    pub fn set_final_lines(&mut self, lines: Vec<String>) {
+        self.final_lines = lines;
     }
 
     /// Records the API-key status line shown on Expert Setup.

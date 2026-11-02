@@ -32,31 +32,10 @@ pub fn run_preflight_check(app: &mut app::ExpertApp) {
         .map(|runtime| runtime.block_on(crate::sandbox::preflight::gather_preflight(port)));
     match report {
         Some(report) => {
-            app.set_preflight_passed(expert::can_proceed(&report));
-            app.set_preflight_lines(
-                report
-                    .checks
-                    .iter()
-                    .map(|check| {
-                        use crate::sandbox::preflight::{CheckKind, CheckStatus};
-                        let prefix = match check.status {
-                            CheckStatus::Pass => "[PASS]",
-                            CheckStatus::Warn => "[WARN]",
-                            CheckStatus::Fail => "[FAIL]",
-                        };
-                        let label = match check.kind {
-                            CheckKind::DockerInstalled => "Docker installed",
-                            CheckKind::DockerDaemon => "Docker daemon",
-                            CheckKind::SandboxImage => "Sandbox image",
-                            CheckKind::PortAvailable => "Port available",
-                            CheckKind::ExternalIp => "External IP",
-                            CheckKind::CgnatSuspicion => "CGNAT suspicion",
-                            CheckKind::MutagenInstalled => "Mutagen installed",
-                        };
-                        format!("{prefix} {label}")
-                    })
-                    .collect(),
-            );
+            // Single formatting source: detail and guidance are kept.
+            let view = expert::preflight_view(&report);
+            app.set_preflight_passed(view.can_start);
+            app.set_preflight_lines(view.lines);
         }
         None => {
             app.set_preflight_passed(false);
