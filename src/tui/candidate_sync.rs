@@ -8,44 +8,18 @@ use crate::core::Language;
 use crate::sandbox::validate::question_layout;
 use crate::sync::paste::Snapshot;
 use crate::sync::{SyncError, SyncSessionInfo};
-use crate::tui::candidate::candidate_sync_message;
 use crate::tui::shared::sanitize_display;
 
 /// Maximum bytes read for one local solution view.
 const MAX_SOLUTION_BYTES: u64 = 256 * 1024;
 
-/// Candidate-safe sync phase derived from lifecycle status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncPhase {
-    NotStarted,
-    Active,
-    Paused,
-    Conflict,
-    Problem,
-}
+/// Candidate-safe sync phase; the single canonical type lives in
+/// `crate::orchestration::sync_gate` (conflict-first).
+pub use crate::orchestration::sync_gate::SessionSyncPhase as SyncPhase;
 
-impl SyncPhase {
-    /// Returns the candidate-safe label for this phase.
-    pub fn label(self) -> &'static str {
-        match self {
-            SyncPhase::NotStarted => "Sync: not started",
-            SyncPhase::Active => "Sync: active",
-            SyncPhase::Paused => "Sync: paused",
-            SyncPhase::Conflict => "Sync: conflict needs attention \u{2014} ask the expert",
-            SyncPhase::Problem => candidate_sync_message(),
-        }
-    }
-}
-
-/// Maps optional session info to a candidate-safe phase.
-pub fn phase_for(info: Option<&SyncSessionInfo>) -> SyncPhase {
-    match info {
-        None => SyncPhase::NotStarted,
-        Some(info) if info.paused => SyncPhase::Paused,
-        Some(info) if info.conflicts > 0 => SyncPhase::Conflict,
-        Some(_) => SyncPhase::Active,
-    }
-}
+/// Maps optional session info to a candidate-safe phase; delegates to
+/// the canonical conflict-first mapping in `crate::orchestration::sync_gate`.
+pub use crate::orchestration::sync_gate::sync_phase_for as phase_for;
 
 /// Render-ready sync view holding only candidate-safe lines.
 #[derive(Debug, Clone, PartialEq, Eq)]

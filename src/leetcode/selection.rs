@@ -1,7 +1,7 @@
 //! Randomized selection of free LeetCode questions from topic pools.
 
-use super::{CatalogEntry, CatalogPage, Difficulty, LeetCodeClient, LeetCodeError};
-use crate::core::types::QuestionRef;
+use super::{CatalogEntry, CatalogPage, LeetCodeClient, LeetCodeError};
+use crate::core::types::{Difficulty, QuestionRef};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::collections::BTreeSet;
@@ -86,6 +86,19 @@ pub fn to_question_ref(entry: &CatalogEntry) -> Option<QuestionRef> {
             None
         },
     })
+}
+
+/// Filters a question-ref pool to one difficulty, preserving order.
+pub fn difficulty_filter(pool: &[QuestionRef], difficulty: Difficulty) -> Vec<QuestionRef> {
+    pool.iter()
+        .filter(|q| q.difficulty == difficulty)
+        .cloned()
+        .collect()
+}
+
+/// Converts catalog entries to question refs, dropping paid or unknown entries.
+pub fn pool_to_refs(entries: &[CatalogEntry]) -> Vec<QuestionRef> {
+    entries.iter().filter_map(to_question_ref).collect()
 }
 
 /// Picks up to `count` distinct valid entries at random order.

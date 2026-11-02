@@ -299,6 +299,10 @@ impl<'a> Probes<'a> {
 pub type ServiceProbes<'a> = Probes<'a>;
 
 /// Recovery gate driven by an injected clock and sleeper.
+///
+/// Implemented gate logic, NOT wired into TTY loop; wiring pending
+/// product/design decision on interception point + countdown
+/// propagation + non-blocking tick. See README Compatibility notes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HealthGate {
     policy: RetryPolicy,
@@ -323,6 +327,10 @@ impl HealthGate {
     /// Waits for recovery: returns the exact `interrupted` step as
     /// soon as both services are up, re-probing in bounded sleeper
     /// steps until the policy window (by `clock`) elapses.
+    ///
+    /// Implemented gate logic, NOT wired into TTY loop; wiring
+    /// pending product/design decision on interception point +
+    /// countdown propagation + non-blocking tick.
     pub async fn await_recovery(
         &self,
         probes: Probes<'_>,
@@ -357,6 +365,10 @@ impl Default for HealthGate {
 }
 
 /// Waits for recovery with the default 60-second policy.
+///
+/// Implemented gate logic, NOT wired into TTY loop; wiring pending
+/// product/design decision on interception point + countdown
+/// propagation + non-blocking tick.
 pub async fn await_recovery(
     probes: Probes<'_>,
     interrupted: InterruptedStep,

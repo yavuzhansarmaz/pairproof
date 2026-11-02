@@ -15,6 +15,6 @@ pub use event_log::{read_events, EventLogError, EventLogWriter};
 pub use events::{EventKind, SessionEvent};
 pub use session::Session;
 pub use types::{
-    ApproachChoice, CoreError, Language, QuestionRef, QuestionSlot, QuestionSource, QuestionStatus,
-    SessionStatus, TestSummary,
+    validate_session_id, ApproachChoice, CoreError, Difficulty, Language, QuestionRef,
+    QuestionSlot, QuestionSource, QuestionStatus, SessionStatus, TestSummary,
 };

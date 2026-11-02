@@ -228,72 +228,54 @@ fn candidate_controller_happy_path_uses_deterministic_fakes() {
     let mut app = CandidateApp::with_verifier(OkVerifier);
     app.push_text(&encoded_connection());
     assert_eq!(app.submit_connection(1_000), Ok(CandidateScreen::Rules));
-    app.attach_session(expert_started());
+    // Drive the session through its own public API and the work/chat
+    // controllers directly; CandidateApp only observes via attach/session.
+    let mut session = expert_started();
+    app.attach_session(session.clone());
     assert_eq!(app.accept_rules(), Ok(CandidateScreen::Solving));
     assert!(app.can_solve());
     let mut work = CandidateWork::new();
     work.set_approaches(approach_set());
     work.set_statement("e0", "Find two numbers that sum to target.");
     let mut coding = OkCodingRunner;
-    work.select_preset(app.session_mut().expect("session"), 0, &mut coding, 10)
+    work.select_preset(&mut session, 0, &mut coding, 10)
         .expect("preset");
     assert_eq!(work.current_code(), "print('fixed')");
-    work.continue_work(app.session_mut().expect("session"), &mut coding, 11)
+    work.continue_work(&mut session, &mut coding, 11)
         .expect("continue");
     let mut tests = FixedTestRunner;
-    work.request_tests(app.session_mut().expect("session"), &mut tests, 12)
+    work.request_tests(&mut session, &mut tests, 12)
         .expect("tests");
-    let latest = app
-        .session()
-        .expect("session")
-        .current_slot()
-        .expect("slot")
-        .latest_test;
+    let latest = session.current_slot().expect("slot").latest_test;
     assert_eq!(latest.map(|t| (t.passed, t.failed)), Some((3, 1)));
     let mut chat = ChatController::new(FakeChatService);
     chat.type_text("What should I consider?");
     let statement = work.statement_for("e0").expect("statement").to_string();
-    let chat_state = ChatState::from_session(
-        app.session().expect("session"),
-        &statement,
-        work.current_code(),
-    );
-    let reply = chat
-        .submit(app.session_mut().expect("session"), &chat_state, 13)
-        .expect("chat");
+    let chat_state = ChatState::from_session(&session, &statement, work.current_code());
+    let reply = chat.submit(&mut session, &chat_state, 13).expect("chat");
     assert_eq!(reply, "Consider invariants.");
     assert_eq!(chat.history().len(), 2);
-    let returned = work
-        .finish_question(app.session_mut().expect("session"), 14)
-        .expect("finish");
+    let returned = work.finish_question(&mut session, 14).expect("finish");
     assert_eq!(returned.map(|t| (t.passed, t.failed)), Some((3, 1)));
     assert_eq!(
-        app.session()
-            .expect("session")
-            .slot(0)
-            .expect("slot")
-            .status,
+        session.slot(0).expect("slot").status,
         QuestionStatus::Finished
     );
     for i in 1..10u64 {
-        let session = app.session_mut().expect("session");
         if i == 1 {
-            work.skip_question(session, 20 + i).expect("skip");
+            work.skip_question(&mut session, 20 + i).expect("skip");
         } else {
-            work.finish_question(session, 20 + i).expect("finish rest");
+            work.finish_question(&mut session, 20 + i)
+                .expect("finish rest");
         }
     }
-    assert_eq!(app.session().expect("session").slots().len(), 10);
-    assert_eq!(
-        app.session().expect("session").status(),
-        SessionStatus::Scoring
-    );
-    app.session_mut()
-        .expect("session")
-        .mark_completed(100)
-        .expect("completed");
-    let session = app.session().expect("session");
+    assert_eq!(session.slots().len(), 10);
+    assert_eq!(session.status(), SessionStatus::Scoring);
+    session.mark_completed(100).expect("completed");
     assert_eq!(session.status(), SessionStatus::Completed);
+    app.attach_session(session.clone());
+    assert_eq!(app.screen(), CandidateScreen::Final);
+    let session = &session;
     let grades = vec![GradeOutcome::Graded(
         QuestionGrade::new(0, 9.0, "rationale 0".into(), 0.2).expect("grade"),
     )];

@@ -22,6 +22,23 @@ fn session_id_accepts_and_rejects() {
 }
 
 #[test]
+fn canonical_session_id_table() {
+    for bad in ["", "..", "a/b", "-x", "net-x", "a.b"] {
+        assert_eq!(
+            validate_session_id(bad),
+            Err(SandboxError::InvalidSessionId(bad.to_string())),
+            "should reject {bad:?}"
+        );
+    }
+    let too_long = "a".repeat(41);
+    assert_eq!(
+        validate_session_id(&too_long),
+        Err(SandboxError::InvalidSessionId(too_long.clone()))
+    );
+    assert!(validate_session_id("e123x1699999999999").is_ok());
+}
+
+#[test]
 fn container_and_network_names_derived() {
     assert_eq!(container_name("s1").expect("container"), "pairproof-s1");
     assert_eq!(network_name("s1").expect("network"), "pairproof-net-s1");

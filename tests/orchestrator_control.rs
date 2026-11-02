@@ -128,7 +128,7 @@ async fn control_dirs_separate_candidate_and_expert_writes() {
     let (root, io, _ex) = setup("dirs").await;
     assert!(root.join("inbox").is_dir() && root.join("outbox").is_dir());
     assert_ne!(root.join("inbox"), root.join("outbox"));
-    let snap = build_snapshot(&started(), &QuestionPipeline::new(), "Sync: active", &[], None);
+    let snap = build_snapshot(&started(), &QuestionPipeline::new(), SessionSyncPhase::Active, &[], None);
     publish_snapshot(&io, &snap).await.unwrap();
     assert!(root.join(SNAPSHOT_REL).is_file());
     assert!(!root.join("inbox").join(SNAPSHOT_FILE).exists());
@@ -149,6 +149,42 @@ fn intent_schema_requires_id_session_seq_version() {
     assert_eq!(bad_id.validate("s1"), Err(ControlError::InvalidId));
     let mut zero_seq = intent.clone(); zero_seq.seq = 0;
     assert!(matches!(zero_seq.validate("s1"), Err(ControlError::InvalidPayload(_))));
+}
+
+#[test]
+#[rustfmt::skip]
+fn request_requestion_serializes_with_legacy_wire_name() {
+    assert_eq!(INTENT_VERSION, 1);
+    let intent = Intent::new("s1", 1, IntentKind::RequestReQuestion);
+    assert_eq!(intent.v, 1);
+    assert_eq!(intent.kind.name(), "RequestRequestion");
+    let line = intent.to_line().unwrap();
+    assert!(line.contains(r#""kind":"RequestRequestion""#), "{line}");
+    assert!(!line.contains("RequestReQuestion"), "{line}");
+    assert_eq!(parse_intent_line(&line, "s1"), Ok(intent));
+}
+
+#[test]
+#[rustfmt::skip]
+fn parse_accepts_both_request_requestion_spellings() {
+    for kind in ["RequestRequestion", "RequestReQuestion"] {
+        let raw = format!(r#"{{"v":1,"id":"{}","session_id":"s1","seq":1,"kind":"{kind}","payload":{{}}}}"#, "a".repeat(32));
+        let parsed = parse_intent_line(&raw, "s1").unwrap();
+        assert_eq!(parsed.kind, IntentKind::RequestReQuestion, "{kind}");
+        assert_eq!(parsed.v, INTENT_VERSION);
+        // Re-serializing either accepted spelling emits only the legacy wire name.
+        let line = parsed.to_line().unwrap();
+        assert!(line.contains(r#""kind":"RequestRequestion""#), "{line}");
+        assert_eq!(parse_intent_line(&line, "s1"), Ok(parsed));
+    }
+}
+
+#[test]
+#[rustfmt::skip]
+fn generate_intent_id_is_32_lowercase_hex() {
+    let a = generate_intent_id(); let b = generate_intent_id();
+    for id in [&a, &b] { assert_eq!(id.len(), 32); assert!(id.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')), "{id}"); }
+    assert_ne!(a, b);
 }
 
 #[test]
@@ -247,7 +283,7 @@ async fn crash_restart_does_not_reapply_intent() {
 #[rustfmt::skip]
 async fn snapshot_contains_only_candidate_safe_fields() {
     let orch = started(); let pipe = loaded_pipe(&orch).await;
-    let snap = build_snapshot(&orch, &pipe, "Sync: active", &["hint reply".into()], None);
+    let snap = build_snapshot(&orch, &pipe, SessionSyncPhase::Active, &["hint reply".into()], None);
     let json = serde_json::to_string(&snap).unwrap();
     assert!(json.contains("Hash map") && json.contains("Statement for e0") && json.contains("hint reply"));
     for hidden in ["424242", "111", "333", "444", "Best", "Workable", "Weak", "best_index", "expected_tokens", "quality", "locked"] {
@@ -256,12 +292,31 @@ async fn snapshot_contains_only_candidate_safe_fields() {
     assert_eq!(snap.options.len(), 4); assert_eq!(snap.current.as_ref().unwrap().slug, "e0");
 }
 
+#[test]
+#[rustfmt::skip]
+fn snapshot_sync_phase_labels_preserve_wire_format() {
+    let cases = [
+        (SessionSyncPhase::NotStarted, "Sync: not started"),
+        (SessionSyncPhase::Active, "Sync: active"),
+        (SessionSyncPhase::Paused, "Sync: paused"),
+        (SessionSyncPhase::Conflict, "Sync: conflict needs attention \u{2014} ask the expert"),
+    ];
+    for (phase, label) in cases {
+        let snap = build_snapshot(&started(), &QuestionPipeline::new(), phase, &[], None);
+        assert_eq!(snap.v, SNAPSHOT_VERSION);
+        assert_eq!(snap.sync_phase, label, "phase {phase:?}");
+        let wire: serde_json::Value = serde_json::to_value(&snap).unwrap();
+        assert_eq!(wire["sync_phase"], label);
+        assert_eq!(wire["v"], 1);
+    }
+}
+
 #[tokio::test]
 #[rustfmt::skip]
 async fn snapshot_published_atomically() {
     let (_root, io, _ex) = setup("atomic").await;
     let root = io.root().to_path_buf();
-    let snap = build_snapshot(&started(), &QuestionPipeline::new(), "Sync: active", &[], None);
+    let snap = build_snapshot(&started(), &QuestionPipeline::new(), SessionSyncPhase::Active, &[], None);
     publish_snapshot(&io, &snap).await.unwrap();
     let bytes = std::fs::read(root.join(SNAPSHOT_REL)).unwrap();
     assert_eq!(parse_snapshot(&bytes, "s1").unwrap(), snap);
@@ -277,14 +332,14 @@ async fn snapshot_published_atomically() {
 async fn snapshot_hidden_until_final_state() {
     let mut orch = started(); let pipe = QuestionPipeline::new();
     let breakdown = compute_final(&orch, &BTreeMap::new(), &[]).unwrap();
-    let before = build_snapshot(&orch, &pipe, "Sync: active", &[], Some(&breakdown));
+    let before = build_snapshot(&orch, &pipe, SessionSyncPhase::Active, &[], Some(&breakdown));
     assert_eq!(before.final_breakdown, None);
     orch.end_by_expert(50).unwrap();
-    let after = build_snapshot(&orch, &pipe, "Sync: active", &[], Some(&breakdown));
+    let after = build_snapshot(&orch, &pipe, SessionSyncPhase::Active, &[], Some(&breakdown));
     let final_snap = after.final_breakdown.expect("final visible after expert end");
     assert_eq!(final_snap.per_question.len(), 5);
     let mut failed = started(); failed.mark_technical_failure(60).unwrap();
-    let hidden = build_snapshot(&failed, &pipe, "Sync: active", &[], Some(&breakdown));
+    let hidden = build_snapshot(&failed, &pipe, SessionSyncPhase::Active, &[], Some(&breakdown));
     assert_eq!(hidden.final_breakdown, None);
 }
 
@@ -336,7 +391,7 @@ async fn wrong_session_intent_is_rejected() {
 }
 
 #[tokio::test]
-#[ignore = "live docker+ssh: provisions a real sandbox"]
+#[ignore = "live docker+ssh: provisions a real sandbox, requires ssh-keyscan on PATH"]
 #[rustfmt::skip]
 async fn live_control_channel_round_trip() {
     use pairproof::connection::{Endpoint, EphemeralUsername, Secret};
@@ -363,7 +418,7 @@ async fn live_control_channel_round_trip() {
         let mut pipe = QuestionPipeline::new(); let fakes = Fakes::new();
         client.send_next(IntentKind::Finish)?;
         let reports = executor.drain(&docker_io, &mut orch, &mut pipe, &fakes.transports(), 10).await?;
-        let snap = build_snapshot(&orch, &pipe, "Sync: active", executor.chat_replies(), None);
+        let snap = build_snapshot(&orch, &pipe, SessionSyncPhase::Active, executor.chat_replies(), None);
         publish_snapshot(&docker_io, &snap).await?;
         let read_back = client.fetch_snapshot()?;
         Ok((reports, read_back))

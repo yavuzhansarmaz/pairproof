@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use pairproof::connection::{Endpoint, EphemeralUsername};
 use pairproof::core::Language;
+use pairproof::orchestration::sync_gate::{sync_phase_for, SessionSyncPhase};
 use pairproof::sync::{SyncError, SyncSessionInfo};
 use pairproof::tui::candidate::candidate_sync_message;
 use pairproof::tui::candidate_sync::{
@@ -123,6 +124,20 @@ fn candidate_sync_conflict_is_not_reported_as_clean() {
     assert_eq!(
         sync_lines(Some(&conflicted)),
         vec![phase.label().to_string()]
+    );
+}
+
+#[test]
+fn candidate_sync_paused_conflict_prefers_conflict_and_agrees_with_gate() {
+    let paused_conflict = info("pairproof-sync-s1", "Watching", true, 1);
+    assert_eq!(phase_for(Some(&paused_conflict)), SyncPhase::Conflict);
+    assert_eq!(
+        sync_phase_for(Some(&paused_conflict)),
+        SessionSyncPhase::Conflict
+    );
+    assert_eq!(
+        phase_for(Some(&paused_conflict)),
+        sync_phase_for(Some(&paused_conflict))
     );
 }
 

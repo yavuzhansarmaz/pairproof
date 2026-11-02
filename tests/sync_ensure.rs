@@ -1,18 +1,14 @@
+mod common_mod;
+
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use common_mod::creds;
 use pairproof::connection::{Endpoint, EphemeralUsername};
 use pairproof::sandbox::process::{run_bounded, CommandSpec, DEFAULT_MAX_OUTPUT};
 use pairproof::sync::{
     ensure_sync, resume_sync, sync_status, terminate_sync, EnsureOutcome, SyncError,
 };
-
-fn creds() -> (Endpoint, EphemeralUsername) {
-    (
-        Endpoint::new("203.0.113.10", 2222).expect("endpoint"),
-        EphemeralUsername::parse("pp-abcd1234").expect("user"),
-    )
-}
 
 fn bogus_creds() -> (Endpoint, EphemeralUsername) {
     (
@@ -159,7 +155,7 @@ fn read_file(dir: &Path) -> String {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH (real local sync session)"]
 async fn live_ensure_running_is_already_running() {
     let pair = create_local("ens", "two-way-safe").await.expect("create");
     // Bogus endpoint proves AlreadyRunning touches no network.
@@ -180,7 +176,7 @@ async fn live_ensure_running_is_already_running() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH (real local sync session)"]
 async fn live_ensure_resumes_paused() {
     let pair = create_local("enp", "two-way-safe").await.expect("create");
     run_raw(vec!["sync".into(), "pause".into(), pair.name.clone()])
@@ -208,7 +204,7 @@ async fn live_ensure_resumes_paused() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH"]
 async fn live_ensure_missing_bogus_endpoint_fails_typed() {
     let pid = std::process::id();
     let session_id = format!("enb{pid}");
@@ -232,7 +228,7 @@ async fn live_ensure_missing_bogus_endpoint_fails_typed() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH (real local sync session)"]
 async fn live_resume_running_is_ok() {
     let pair = create_local("enr", "two-way-safe").await.expect("create");
     let result = resume_sync(&pair.session_id).await;
@@ -242,7 +238,7 @@ async fn live_resume_running_is_ok() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH"]
 async fn live_resume_missing_is_error() {
     let session_id = format!("enm{}", std::process::id());
     let result = resume_sync(&session_id).await;
@@ -301,7 +297,7 @@ async fn conflict_case(mode: &str, tag: &str) -> Result<ConflictObs, String> {
 //   ALPHA-VERSION and beta holds BETA-VERSION; both versions retrievable.
 // MODE DECISION: RESOLVED (two-way-safe shipped, two-way-resolved is lossy).
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH (real local sync sessions, conflict experiment)"]
 async fn live_conflict_modes_compared() {
     let start = Instant::now();
     let resolved = conflict_case("two-way-resolved", "cfr")

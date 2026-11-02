@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo test
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+
+  # Manual only: skipped on push/pull_request via the job-level `if`.
+  # Requires the MODEL_API_KEY repository secret plus Docker, Mutagen,
+  # and network access; a stock GitHub runner without those will fail.
+  # Ordinary CI (`check` above) stays hermetic and does not need them.
+  live:
+    name: Live (manual only, needs secrets/Docker/Mutagen/network)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo test -- --ignored
+        env:
+          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}

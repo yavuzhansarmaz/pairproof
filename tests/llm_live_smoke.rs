@@ -1,6 +1,6 @@
 //! Live Phase 4 LLM wrapper smoke checks. Ignored by default.
 //!
-//! Run with: MODEL_API_KEY=... cargo test --test ai_live_smoke -- --ignored
+//! Run with: MODEL_API_KEY=... cargo test --test llm_live_smoke -- --ignored
 
 use std::collections::BTreeSet;
 
@@ -159,7 +159,7 @@ async fn live_grade_question_returns_valid_grade() {
 }
 
 #[tokio::test]
-#[ignore = "live network smoke"]
+#[ignore = "live LeetCode network smoke"]
 async fn live_select_questions_picks_easy_five() {
     let client = LeetCodeClient::default();
     let mut rng = StdRng::seed_from_u64(42);

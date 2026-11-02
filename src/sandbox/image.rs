@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::command::{docker_info, docker_version, image_build, image_inspect};
-use super::error::{bounded_stderr, SandboxError};
+use super::error::{bounded_stderr, command_failed, map_docker_not_found, SandboxError};
 use super::parse::{parse_docker_server_version, parse_docker_version};
 use super::process::{run_bounded, CommandSpec, DEFAULT_MAX_OUTPUT, EXEC_MAX_OUTPUT};
 
@@ -50,16 +50,6 @@ pub fn effective_image_tag() -> String {
     )
 }
 
-/// Maps a docker spawn failure to the docker-specific error.
-fn map_docker_not_found(err: SandboxError) -> SandboxError {
-    match err {
-        SandboxError::ExecutableNotFound { program } if program == "docker" => {
-            SandboxError::DockerNotFound
-        }
-        other => other,
-    }
-}
-
 /// Runs a docker probe, mapping a missing binary to `DockerNotFound`.
 async fn run_docker(
     spec: &CommandSpec,
@@ -75,11 +65,7 @@ async fn run_docker(
 pub async fn check_docker_available() -> Result<String, SandboxError> {
     let version_out = run_docker(&docker_version(), PROBE_TIMEOUT, DEFAULT_MAX_OUTPUT).await?;
     if !version_out.success() {
-        return Err(SandboxError::CommandFailed {
-            operation: "docker_version",
-            exit_code: version_out.exit_code,
-            stderr: bounded_stderr(&version_out.stderr),
-        });
+        return Err(command_failed("docker_version", &version_out));
     }
     let client_version = parse_docker_version(&version_out.stdout_text())?;
     let info_out = run_docker(&docker_info(), PROBE_TIMEOUT, DEFAULT_MAX_OUTPUT).await?;
@@ -163,40 +149,7 @@ async fn build_from_dir(tag: &str, dir: &Path) -> Result<(), SandboxError> {
     )
     .await?;
     if !outcome.success() {
-        return Err(SandboxError::CommandFailed {
-            operation: "image_build",
-            exit_code: outcome.exit_code,
-            stderr: bounded_stderr(&outcome.stderr),
-        });
+        return Err(command_failed("image_build", &outcome));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn docker_missing_maps_to_docker_not_found() {
-        let e = SandboxError::ExecutableNotFound {
-            program: "docker".into(),
-        };
-        assert_eq!(map_docker_not_found(e), SandboxError::DockerNotFound);
-    }
-    #[test]
-    fn other_program_passes_through() {
-        let e = SandboxError::ExecutableNotFound {
-            program: "mutagen".into(),
-        };
-        assert_eq!(map_docker_not_found(e.clone()), e);
-    }
-    #[test]
-    fn other_variant_passes_through() {
-        let timeout = SandboxError::Timeout {
-            program: "docker".into(),
-            timeout_ms: 1,
-        };
-        for e in [SandboxError::DockerNotFound, timeout] {
-            assert_eq!(map_docker_not_found(e.clone()), e);
-        }
-    }
 }

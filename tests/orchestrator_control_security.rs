@@ -36,7 +36,7 @@ async fn candidate_cannot_modify_outbox_snapshot() {
             o
         },
         &QuestionPipeline::new(),
-        "Sync: active",
+        SessionSyncPhase::Active,
         &[],
         None,
     );
@@ -141,7 +141,13 @@ fn snapshot_reader_rejects_wrong_session_and_version() {
     orch.mark_waiting_for_candidate(1).unwrap();
     orch.attach_candidate(2).unwrap();
     orch.start(3).unwrap();
-    let snap = build_snapshot(&orch, &QuestionPipeline::new(), "Sync: active", &[], None);
+    let snap = build_snapshot(
+        &orch,
+        &QuestionPipeline::new(),
+        SessionSyncPhase::Active,
+        &[],
+        None,
+    );
     let bytes = serde_json::to_vec(&snap).unwrap();
     assert_eq!(
         parse_snapshot(&bytes, "other"),

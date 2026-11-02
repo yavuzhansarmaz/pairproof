@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use pairproof::core::{ApproachChoice, Language, QuestionRef, Session};
+use pairproof::core::{ApproachChoice, CoreError, Language, QuestionRef, Session};
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::approaches::parse_approach_set;
 use pairproof::llm::chat::{assemble_chat_messages, ChatState};
@@ -229,6 +229,41 @@ async fn candidate_chat_rejects_duplicate_inflight_submit() {
         .await
         .expect("after busy clears");
     assert_eq!(history_c.len(), 2);
+}
+
+/// Chat fake that ends the session mid-call, mirroring
+/// `FakeCoding { end_session: true }` in orchestrator_coding.
+struct EndingChat;
+impl ChatTransport for EndingChat {
+    fn chat<'a>(
+        &'a self,
+        session: &'a mut Session,
+        _state: &'a ChatState,
+        _history: &'a [Message],
+        _user_message: &'a str,
+        _at_ms: u64,
+    ) -> PipelineFuture<'a, String> {
+        Box::pin(async move {
+            let _ = session.end_by_expert(9_999);
+            Ok("late reply".into())
+        })
+    }
+}
+
+#[tokio::test]
+async fn chat_reply_after_session_ends_is_rejected_without_history() {
+    let mut orch = started();
+    let pipe = pipe_with_selection(&mut orch).await;
+    let mut history: Vec<Message> = vec![Message::new("user", "earlier")];
+    let before = history.clone();
+    let err = pipe
+        .submit_chat(&mut orch, &EndingChat, &mut history, "hint please", 20)
+        .await
+        .expect_err("late chat reply refused");
+    assert_eq!(err, PipelineError::Core(CoreError::Terminal.into()));
+    assert!(orch.is_terminal());
+    assert_eq!(history, before);
+    assert!(!pipe.is_chat_busy());
 }
 
 struct BoundaryChat;

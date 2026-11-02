@@ -1,64 +1,19 @@
 //! FIFO askpass SSH password authentication.
 //! The secret moves only through a private FIFO; never argv, env, or files.
 use crate::connection::{Endpoint, EphemeralUsername, Fingerprint, Secret};
-use crate::sandbox::parse::parse_host_key_fingerprint;
-use rand::rngs::OsRng;
-use rand::RngCore;
+use crate::orchestration::control::random_hex_16;
+use crate::orchestration::process_util::{
+    keyscan_verified_line, poll_child, read_capped, set_mode, FeederCore,
+};
 use std::fmt;
-use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::process::{Command, Stdio};
+use std::time::Duration;
 const MAX_STDOUT: usize = 64 * 1024;
-const O_NONBLOCK: i32 = 0o4000;
 
-/// Typed SSH-auth failure. Payloads are never shown by Debug or Display.
-#[derive(Clone, PartialEq, Eq, thiserror::Error)]
-pub enum SshAuthError {
-    #[error("ssh auth io error")]
-    Io(String),
-    #[error("ssh operation timed out")]
-    Timeout,
-    #[error("ssh authentication failed")]
-    AuthFailed,
-    #[error("host key mismatch")]
-    HostKeyMismatch,
-    #[error("host key unavailable")]
-    HostKeyUnavailable(String),
-    #[error("ssh could not be started")]
-    SpawnFailed(String),
-}
-impl fmt::Debug for SshAuthError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Io(_) => write!(f, "Io(\"[REDACTED]\")"),
-            Self::Timeout => write!(f, "Timeout"),
-            Self::AuthFailed => write!(f, "AuthFailed"),
-            Self::HostKeyMismatch => write!(f, "HostKeyMismatch"),
-            Self::HostKeyUnavailable(_) => write!(f, "HostKeyUnavailable(\"[REDACTED]\")"),
-            Self::SpawnFailed(_) => write!(f, "SpawnFailed(\"[REDACTED]\")"),
-        }
-    }
-}
-impl From<std::io::Error> for SshAuthError {
-    fn from(err: std::io::Error) -> Self {
-        Self::Io(err.kind().to_string())
-    }
-}
-fn set_mode(path: &Path, mode: u32) -> Result<(), SshAuthError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
-    Ok(())
-}
-fn random_suffix() -> String {
-    let mut bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut bytes);
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
+pub use crate::orchestration::process_util::SshAuthError;
 #[rustfmt::skip]
 fn sanitize_tag(tag: &str) -> String { let cleaned: String = tag.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).take(24).collect(); if cleaned.is_empty() { "session".to_string() } else { cleaned } }
 /// Builds the askpass helper text; contains the FIFO path, never a secret.
@@ -80,7 +35,7 @@ impl AskpassSession {
         let dir = std::env::temp_dir().join(format!(
             "pairproof-askpass-{}-{}",
             sanitize_tag(session_tag),
-            random_suffix()
+            random_hex_16()
         ));
         fs::create_dir(&dir)?;
         let session = Self {
@@ -129,15 +84,8 @@ impl AskpassSession {
     }
     /// Starts a one-shot feeder thread that writes the secret to the FIFO.
     pub fn feed_password(&self, secret: &Secret) -> FeederHandle {
-        let stop = Arc::new(AtomicBool::new(false));
-        let thread_stop = Arc::clone(&stop);
-        let fifo = self.fifo.clone();
-        let hex = secret.expose_hex();
         FeederHandle {
-            stop,
-            join: Some(std::thread::spawn(move || {
-                feeder_once(&fifo, &hex, &thread_stop)
-            })),
+            core: FeederCore::one_shot(self.fifo.clone(), secret.expose_hex()),
         }
     }
 }
@@ -153,69 +101,23 @@ impl Drop for AskpassSession {
         let _ = fs::remove_dir_all(&self.dir);
     }
 }
-fn feeder_once(fifo: &Path, hex: &str, stop: &AtomicBool) {
-    use std::io::Write;
-    while !stop.load(Ordering::SeqCst) {
-        match OpenOptions::new()
-            .write(true)
-            .custom_flags(O_NONBLOCK)
-            .open(fifo)
-        {
-            Ok(mut file) => {
-                let _ = file.write_all(hex.as_bytes());
-                let _ = file.write_all(b"\n");
-                return;
-            }
-            Err(err) if err.raw_os_error() == Some(6) => {
-                std::thread::sleep(Duration::from_millis(10))
-            }
-            Err(_) => return,
-        }
-    }
-}
-
 /// Handle for a one-shot feeder thread. Dropping it stops the thread.
 pub struct FeederHandle {
-    stop: Arc<AtomicBool>,
-    join: Option<JoinHandle<()>>,
+    core: FeederCore,
 }
 impl FeederHandle {
     /// Waits up to `timeout` for the feed to complete.
-    pub fn join_timeout(mut self, timeout: Duration) -> Result<(), SshAuthError> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if self.join.as_ref().is_some_and(JoinHandle::is_finished) {
-                if let Some(join) = self.join.take() {
-                    let _ = join.join();
-                }
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                self.stop.store(true, Ordering::SeqCst);
-                return Err(SshAuthError::Timeout);
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+    pub fn join_timeout(self, timeout: Duration) -> Result<(), SshAuthError> {
+        self.core.join_timeout(timeout)
     }
     /// Signals the feeder to stop without blocking indefinitely.
-    pub fn stop(mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        if let Some(join) = self.join.take() {
-            drop(join);
-        }
+    pub fn stop(self) {
+        self.core.stop();
     }
 }
 impl fmt::Debug for FeederHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "FeederHandle([REDACTED])")
-    }
-}
-impl Drop for FeederHandle {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        if let Some(join) = self.join.take() {
-            drop(join);
-        }
     }
 }
 
@@ -235,40 +137,6 @@ pub fn ssh_invocation(session: &AskpassSession, endpoint: &Endpoint, user: &Ephe
     args.push("-p".into()); args.push(endpoint.port().to_string()); args.push(format!("{}@{}", user.as_str(), endpoint.host()));
     args.extend(remote_argv.iter().map(|arg| (*arg).to_string()));
     SshInvocation { program: "ssh".into(), args, env: vec![("SSH_ASKPASS".into(), session.helper_path().to_string_lossy().into_owned()), ("SSH_ASKPASS_REQUIRE".into(), "force".into())] }
-}
-fn read_capped(mut pipe: impl Read + Send + 'static) -> JoinHandle<Vec<u8>> {
-    std::thread::spawn(move || {
-        let mut kept = Vec::new();
-        let mut buf = [0u8; 8192];
-        loop {
-            match pipe.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    let room = MAX_STDOUT.saturating_sub(kept.len());
-                    kept.extend_from_slice(&buf[..n][..room.min(n)]);
-                }
-            }
-        }
-        kept
-    })
-}
-fn poll_child(
-    child: &mut Child,
-    timeout: Duration,
-) -> Result<std::process::ExitStatus, SshAuthError> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return Ok(status),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(15)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(SshAuthError::Timeout);
-            }
-            Err(err) => return Err(err.into()),
-        }
-    }
 }
 /// Runs one remote command over password SSH with a pinned host key.
 /// Uses std::process with an explicit deadline (no shell, argv only).
@@ -326,8 +194,8 @@ pub fn run_ssh_command_with_stdin(
             let _ = pipe.write_all(&data);
         });
     }
-    let out_reader = read_capped(child.stdout.take().expect("stdout piped"));
-    let err_reader = read_capped(child.stderr.take().expect("stderr piped"));
+    let out_reader = read_capped(child.stdout.take().expect("stdout piped"), MAX_STDOUT);
+    let err_reader = read_capped(child.stderr.take().expect("stderr piped"), MAX_STDOUT);
     let status = match poll_child(&mut child, timeout) {
         Ok(status) => status,
         Err(err) => {
@@ -352,47 +220,14 @@ pub fn run_ssh_command_with_stdin(
 }
 /// Keyscans `endpoint`, verifies the ed25519 key against `expected`,
 /// and returns the verified keyscan line for use as known_hosts.
+/// Uses the shared keyscan with an 8 s outer timeout (the connection
+/// gate uses the same scan with 6 s; see `SshKeyscanVerifier`).
 pub fn verify_and_key_line(
     endpoint: &Endpoint,
     expected: &Fingerprint,
 ) -> Result<String, SshAuthError> {
-    let unavailable = |detail: &str| SshAuthError::HostKeyUnavailable(detail.to_string());
-    let mut child = Command::new("ssh-keyscan")
-        .args([
-            "-T",
-            "5",
-            "-p",
-            &endpoint.port().to_string(),
-            endpoint.host(),
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| unavailable("ssh-keyscan could not be started"))?;
-    poll_child(&mut child, Duration::from_secs(8)).map_err(|err| match err {
-        SshAuthError::Timeout => unavailable("ssh-keyscan timed out"),
-        _ => unavailable("ssh-keyscan could not be started"),
-    })?;
-    let output = child
-        .wait_with_output()
-        .map_err(|_| unavailable("ssh-keyscan output could not be read"))?;
-    if output.stdout.is_empty() {
-        return Err(unavailable("ssh-keyscan returned no host key"));
-    }
-    let text = String::from_utf8_lossy(&output.stdout).into_owned();
-    let line = text
-        .lines()
-        .find(|line| line.split_whitespace().any(|field| field == "ssh-ed25519"))
-        .ok_or_else(|| unavailable("no ed25519 host key was returned"))?;
-    let found = parse_host_key_fingerprint(line)
-        .map_err(|_| unavailable("the returned host key could not be parsed"))?;
-    if found == *expected {
-        Ok(line.trim().to_string())
-    } else {
-        Err(SshAuthError::HostKeyMismatch)
-    }
+    keyscan_verified_line(endpoint, expected, Duration::from_secs(8))
 }
 #[cfg(test)]
 #[rustfmt::skip]
-mod tests { use super::*; #[test] fn helper_script_gates_on_password_prompt() { let s = helper_script(Path::new("/tmp/x/password.fifo")); assert!(s.contains("*assword*") && s.contains("exit 1") && s.contains("exec cat")); assert!(!s.contains("0123456789abcdeffedcba9876543210")); } }
+mod tests { use super::*; #[test] fn helper_script_gates_on_password_prompt() { let s = helper_script(Path::new("/tmp/x/password.fifo")); assert!(s.contains("*assword*") && s.contains("exit 1") && s.contains("exec cat")); assert!(!s.contains("0123456789abcdeffedcba9876543210")); } #[test] fn ssh_auth_error_reexport_is_process_util_type() { let via_reexport: SshAuthError = crate::orchestration::process_util::SshAuthError::Timeout; assert_eq!(via_reexport, SshAuthError::Timeout); } }

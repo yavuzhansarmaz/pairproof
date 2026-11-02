@@ -160,6 +160,24 @@ fn invalid_session_ids_rejected_with_nothing_created() {
 }
 
 #[test]
+fn canonical_session_id_table() {
+    let dir = TestDir::new("canonical-ids");
+    let root = dir.path("root");
+    let too_long = "a".repeat(41);
+    for bad in ["", "..", "a/b", "-x", "net-x", "a.b", too_long.as_str()] {
+        let err = ArtifactLayout::create(&root, bad, Language::Python)
+            .expect_err("canonical rule must reject");
+        assert!(
+            matches!(err, ArtifactError::InvalidSessionId(ref s) if s == bad),
+            "id {bad:?} got {err:?}"
+        );
+    }
+    assert!(!root.exists(), "nothing created for invalid ids");
+    ArtifactLayout::create(&root, "e123x1699999999999", Language::Python)
+        .expect("valid production-style id");
+}
+
+#[test]
 fn token_records_capture_locked_and_actual_in_slot_order() {
     let dir = TestDir::new("tokens");
     let layout = ArtifactLayout::create(dir.path("root"), "s1", Language::Python).expect("layout");

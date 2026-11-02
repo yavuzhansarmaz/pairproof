@@ -1,6 +1,5 @@
 use crate::core::session::Session;
-use crate::core::types::{Language, QuestionRef};
-use crate::leetcode::Difficulty;
+use crate::core::types::{Difficulty, Language, QuestionRef};
 
 pub fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
     QuestionRef {

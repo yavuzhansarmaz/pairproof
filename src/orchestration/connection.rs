@@ -1,8 +1,7 @@
 //! Connection acceptance gate: host-key pinning before secret verification.
 
 use std::fmt;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::connection::{
     ConnectionError, ConnectionState, ConnectionString, Endpoint, EphemeralUsername, Fingerprint,
@@ -10,8 +9,9 @@ use crate::connection::{
 };
 use crate::core::{CoreError, EventKind, SessionStatus};
 use crate::orchestration::error::OrchestratorError;
+use crate::orchestration::process_util::keyscan_verified_line;
 use crate::orchestration::session::Orchestrator;
-use crate::sandbox::parse::parse_host_key_fingerprint;
+use crate::orchestration::ssh_auth::SshAuthError;
 
 /// Errors from the connection gate; payloads never carry secrets.
 #[derive(Clone, PartialEq, Eq, thiserror::Error)]
@@ -102,42 +102,13 @@ fn attach_precheck(orchestrator: &Orchestrator) -> Result<(), OrchestratorError>
     }
 }
 
-fn run_keyscan(endpoint: &Endpoint) -> Result<String, ConnectionGateError> {
-    let mut child = Command::new("ssh-keyscan")
-        .args([
-            "-T",
-            "5",
-            "-p",
-            &endpoint.port().to_string(),
-            endpoint.host(),
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| unavailable("ssh-keyscan could not be started"))?;
-    let deadline = Instant::now() + Duration::from_secs(6);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                let output = child
-                    .wait_with_output()
-                    .map_err(|_| unavailable("ssh-keyscan output could not be read"))?;
-                if output.stdout.is_empty() {
-                    return Err(unavailable("ssh-keyscan returned no host key"));
-                }
-                return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
-            }
-            Ok(None) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(unavailable("ssh-keyscan timed out"));
-            }
-            Err(_) => return Err(unavailable("ssh-keyscan could not be started")),
-        }
+/// Maps the shared keyscan error onto the gate error type, preserving
+/// the mismatch/unavailable distinction and the static detail text.
+fn map_keyscan_error(err: SshAuthError) -> ConnectionGateError {
+    match err {
+        SshAuthError::HostKeyMismatch => ConnectionGateError::HostKeyMismatch,
+        SshAuthError::HostKeyUnavailable(detail) => ConnectionGateError::HostKeyUnavailable(detail),
+        _ => unavailable("ssh-keyscan could not be started"),
     }
 }
 
@@ -147,18 +118,11 @@ impl HostKeyVerifier for SshKeyscanVerifier {
         endpoint: &Endpoint,
         expected: &Fingerprint,
     ) -> Result<(), ConnectionGateError> {
-        let output = run_keyscan(endpoint)?;
-        let line = output
-            .lines()
-            .find(|line| line.split_whitespace().any(|field| field == "ssh-ed25519"))
-            .ok_or_else(|| unavailable("no ed25519 host key was returned"))?;
-        let found = parse_host_key_fingerprint(line)
-            .map_err(|_| unavailable("the returned host key could not be parsed"))?;
-        if found == *expected {
-            Ok(())
-        } else {
-            Err(ConnectionGateError::HostKeyMismatch)
-        }
+        // Shared keyscan with a 6 s outer timeout (SSH auth uses the
+        // same scan with 8 s; see `verify_and_key_line`).
+        keyscan_verified_line(endpoint, expected, Duration::from_secs(6))
+            .map(|_| ())
+            .map_err(map_keyscan_error)
     }
 }
 
