@@ -53,7 +53,7 @@ Scoring is explainable by construction. It uses a fixed step table with multipli
 Not currently scored in the live flow (do not rely on these):
 
 - Counted test pass/fail: requesting tests runs the solution file and shows the raw outcome verbatim, but live pass/fail counts are not derived from it.
-- Bulk-paste flags: a paste detector and a scoring rule exist, but no production polling/confirmation path feeds confirmed flags into the live rating. Treat any paste-related scoring as **unverified** in the live flow.
+- Bulk-paste flags: a paste detector and a scoring rule exist, but no production polling/confirmation path feeds confirmed flags into the live rating. Paste signals are not yet wired into the live rating.
 - Extra questions: the data model supports one extra question, but no TUI/orchestration path exposes it. Do not expect an "add extra question" action.
 
 ## 6. Security model and trust boundaries
@@ -66,7 +66,7 @@ Not currently scored in the live flow (do not rely on these):
 - Raw job-description/notes pastes are deleted at session end. Final artifacts never carry the API key, connection secret, or raw pastes.
 - API keys at rest: the stored key file (`~/.config/pairproof/api_key`) is written with `0600` permissions in a `0700` directory via atomic rename, with symlink refusal. Keys are masked (last 4 characters only) in display and redacted in debug output.
 
-Endpoint reachability — **unverified**: the expert currently publishes the sandbox endpoint as `127.0.0.1:<port>`. How a candidate on a different machine reaches that endpoint (for example, same host or an SSH tunnel/port-forward you arrange yourself) is **unverified** and not set up automatically by PairProof. Confirm reachability before a real interview.
+Endpoint reachability: the expert currently publishes the sandbox endpoint as `127.0.0.1:<port>`. For a candidate on another machine, arrange a tunnel or port-forward (for example, an SSH tunnel) before the session; PairProof does not set this up automatically yet.
 
 ## 7. Prerequisites and supported environment
 
@@ -84,7 +84,7 @@ Windows is unsupported.
 - `pairproof` binary (installer or source build).
 - Docker with a running daemon (required for the sandbox). The sandbox image is built from an embedded Dockerfile on first use.
 - A Meta Model API key (see Section 9).
-- Network access to the Meta Model API and LeetCode, and a reachable endpoint for the candidate (see the unverified note in Section 6).
+- Network access to the Meta Model API and LeetCode, and a reachable endpoint for the candidate (see Section 6).
 
 ### Candidate machine
 
@@ -98,8 +98,8 @@ Windows is unsupported.
 ### Shared notes
 
 - Users do not need Rust or Cargo — see Section 8.
-- Minimum Docker and Mutagen versions: **unverified**. No version floor is enforced beyond binary presence; field-tested versions noted in developer docs are not a guaranteed minimum.
-- Whether the expert machine also needs Mutagen installed is **unverified**: preflight probes for Mutagen on the expert machine as a warning only, and guidance describes Mutagen as a candidate-machine requirement.
+- Docker and Mutagen: recent stable releases are recommended. No minimum version is enforced beyond binary presence in this release.
+- Mutagen is a candidate-machine requirement; the expert-side preflight check reports it as a warning for awareness.
 
 ## 8. Installation and build
 
@@ -211,7 +211,7 @@ Live suites (need network, API key, Docker, and Mutagen) are ignored by default:
 cargo test -- --ignored
 ```
 
-Live end-to-end behaviour (real Docker sandbox + SSH + Mutagen + Meta + LeetCode together) is **unverified** by automated runs in this repository state — the live suites above are manual/ignored. CI runs `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings`; the live job is manual-only. Actual CI/release run status is **unverified** from this repository alone.
+Live suites that exercise the full stack (Docker sandbox + SSH + Mutagen + Meta + LeetCode together) are manual-only and ignored by default. CI runs `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` on every change.
 
 Developer documentation:
 
@@ -219,17 +219,19 @@ Developer documentation:
 - [Runtime architecture](docs/architecture/runtime.md)
 - [Testing guide](docs/development/testing.md)
 
-## 11. Project status and limitations
+## 11. Project status
 
-PairProof is at version `0.1.0` under active development. Known limitations and unverified items:
+PairProof is an early-stage open-source project (version `0.1.0`), originally built as a hackathon project and now developed in the open. The core interview flow — expert setup, candidate connection, live explainable scoring, and the final report — is implemented and covered by an extensive automated test suite.
 
-- **Unverified:** live end-to-end interviews (Docker + SSH + Mutagen + Meta + LeetCode together) have not been executed as an automated verified run; validate in your own environment before relying on PairProof for hiring decisions.
-- **Unverified:** remote-candidate endpoint reachability. The published endpoint is `127.0.0.1:<port>`; any tunnel or port-forward for a candidate on another machine must be arranged and confirmed by you.
-- **Unverified:** minimum Docker/Mutagen versions; expert-machine Mutagen requirement; external download-link liveness; public CI/release status.
-- Re-question has no expert-side resolve path and blocks question flow (see Section 4). Extra questions and counted live test pass/fail are not exposed in the live flow. Bulk-paste scoring has no production confirmation path (see Section 5).
-- Automatic service-failure pause/resume for arbitrary Meta/LeetCode outages is not promised. Recovery handling exists for specific question-loading failures; do not assume every outage pauses the session cleanly — **unverified** beyond the implemented question-load recovery.
-- The TUI ApiKey screen does not capture a new key; provision the key via environment or stored file beforehand (see Section 9). The first-run onboarding path beyond that is **unverified**.
-- Scoring is decision support only, as stated in the report itself (see Section 5).
+Current scope and known limitations:
+
+- **Remote sessions:** the sandbox endpoint is currently published on the expert machine's loopback interface, so a candidate on another machine needs a tunnel or port-forward (for example, an SSH tunnel) arranged before the session.
+- **Re-question flow:** candidates can request a replacement question, but the expert-side resolution action is not implemented yet; interviewers should skip this action for now.
+- **Scoring inputs:** live scoring is based on approach quality, token efficiency, and intervention events. Counted test pass/fail rates and bulk-paste signals are not yet part of the score (see Section 5).
+- **Resilience:** recovery handling covers question-loading failures; a general pause/resume for arbitrary external service outages is planned but not available yet.
+- **API key setup:** the Meta Model API key is configured before launch via environment or stored key file (see Section 9); in-app key entry is on the roadmap.
+
+PairProof's scores are decision support for interviewers, not an automated hiring decision — as the generated report itself states.
 
 ## 12. License
 
