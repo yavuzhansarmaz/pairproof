@@ -4,6 +4,7 @@ use std::fmt;
 
 use crate::connection::ConnectionString;
 use crate::core::{Session, SessionStatus};
+use crate::tui::help::candidate_connect_message;
 use crate::tui::shared::sanitize_display;
 
 /// Returns the one-line hint shown when no terminal is available.
@@ -329,7 +330,7 @@ impl CandidateApp {
                     self.connect_line(),
                 ];
                 if let Some(error) = self.last_error {
-                    lines.push(format!("Error: {error}"));
+                    lines.push(format!("Error: {}", candidate_connect_message(&error)));
                 }
                 lines.push("Enter connect, Esc quit".to_string());
                 lines

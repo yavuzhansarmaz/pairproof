@@ -114,7 +114,7 @@ async fn make_failing_runtime(name: &str, fail: Arc<AtomicBool>, consumes: Arc<A
     let rt = build(control.clone(), root.join("artifacts"), Box::new(hello)).await; (root, control, rt)
 }
 
-#[rustfmt::skip] fn write_hello(control: &Path, session_id: &str) { let body = serde_json::json!({ "v": 1, "session_id": session_id }).to_string(); std::fs::write(control.join("inbox").join("hello.json"), body).unwrap(); }
+#[rustfmt::skip] fn write_hello(control: &Path, session_id: &str) { let body = serde_json::json!({ "v": 1, "session_id": session_id, "app_version": env!("CARGO_PKG_VERSION") }).to_string(); std::fs::write(control.join("inbox").join("hello.json"), body).unwrap(); }
 #[rustfmt::skip] fn hello_exists(control: &Path) -> bool { control.join("inbox").join("hello.json").exists() }
 #[rustfmt::skip] fn connects(rt: &ExpertRuntime) -> usize { rt.orchestrator().session().events().iter().filter(|e| e.kind == EventKind::CandidateConnected).count() }
 #[rustfmt::skip] fn reconnects(rt: &ExpertRuntime) -> usize { rt.orchestrator().session().events().iter().filter(|e| matches!(e.kind, EventKind::CandidateReconnected { .. })).count() }

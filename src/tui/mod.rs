@@ -13,9 +13,11 @@ pub mod config;
 pub mod expert;
 pub mod expert_runtime;
 pub mod expert_session;
+pub mod help;
 pub mod monitor;
 pub mod setup;
 pub mod shared;
+pub mod viewport;
 
 use std::future::Future;
 use std::io::IsTerminal;
@@ -35,33 +37,17 @@ pub fn dispatch_role(role: Role) -> RoleDestination {
 }
 
 /// Parses arguments and hands control to role dispatch.
+#[rustfmt::skip]
 pub fn run() -> anyhow::Result<()> {
+    let original: Vec<String> = std::env::args().skip(1).collect();
     let args = args::Args::parse();
+    if let Some(command) = &args.command { return args::run_command(command); }
+    // Startup auto-update only on interactive (TTY) launches; non-TTY keeps placeholder behaviour. --help/--version exit in parse above.
+    if std::io::stdout().is_terminal() && crate::distribution::startup::startup_gate(&original)? == crate::distribution::StartupGate::Reexec { return Ok(()); }
     match args.role {
-        Some(Role::Candidate) => {
-            if std::io::stdout().is_terminal() {
-                run_candidate_interactive()
-            } else {
-                println!("pairproof: {}", candidate::placeholder_message());
-                Ok(())
-            }
-        }
-        Some(Role::Expert) => {
-            if std::io::stdout().is_terminal() {
-                run_interactive(Some(Role::Expert))
-            } else {
-                println!("pairproof: expert flow \u{2014} run preflight before starting a session");
-                Ok(())
-            }
-        }
-        None => {
-            if std::io::stdout().is_terminal() {
-                run_interactive(None)
-            } else {
-                println!("pairproof: select a role with --role expert or --role candidate");
-                Ok(())
-            }
-        }
+        Some(Role::Candidate) => if std::io::stdout().is_terminal() { run_candidate_interactive() } else { println!("pairproof: {}", candidate::placeholder_message()); Ok(()) },
+        Some(Role::Expert) => if std::io::stdout().is_terminal() { run_interactive(Some(Role::Expert)) } else { println!("pairproof: expert flow \u{2014} run preflight before starting a session"); Ok(()) },
+        None => if std::io::stdout().is_terminal() { run_interactive(None) } else { println!("pairproof: select a role with --role expert or --role candidate"); Ok(()) },
     }
 }
 
@@ -124,6 +110,10 @@ fn now_ms() -> u64 {
     SystemClock.now_ms()
 }
 
+/// Sets a sanitized expert error status with a next step.
+#[rustfmt::skip]
+fn set_error(app: &mut app::ExpertApp, context: &str, detail: &str) { app.set_status_message(help::expert_error_message(context, detail)); }
+
 /// Runs one bounded async step on a lazily built current-thread runtime.
 #[rustfmt::skip]
 fn block_on<T>(slot: &mut Option<tokio::runtime::Runtime>, future: impl Future<Output = T>) -> Option<T> { if slot.is_none() { *slot = tokio::runtime::Builder::new_current_thread().enable_all().build().ok(); } slot.as_ref().map(|runtime| runtime.block_on(future)) }
@@ -143,6 +133,7 @@ fn interactive_loop(
     let mut runtime: Option<ExpertRuntime> = None;
     let mut tokio_rt: Option<tokio::runtime::Runtime> = None;
     let mut pastes = ExpertSetupPastes::new();
+    let mut show_help = false;
     while app.screen() != app::AppScreen::Exited {
         if app.screen() == app::AppScreen::Preflight && !*preflight_done {
             *preflight_done = true;
@@ -157,22 +148,28 @@ fn interactive_loop(
                 app::AppScreen::ConnectionWait => {
                     if let Ok(current) = active.current_string(now) {
                         lines.push(format!("Connection: {}", current.encode()));
-                        lines.push(format!("Expires in {}s.", active.countdown_secs(now)));
+                        lines.push(help::countdown_line(active.countdown_secs(now)));
                     }
                     lines.push("Waiting for candidate SSH login (no manual lock).".to_string());
                 }
                 #[rustfmt::skip]
                 app::AppScreen::Monitor => {
                     lines.extend(monitor::render_monitor_lines(&active.monitor_view(now)));
-                    if let Some(fresh) = active.reissue_string() { lines.push(format!("Reissue: {}", fresh.encode())); lines.push(format!("Expires in {}s.", active.countdown_secs(now))); }
+                    lines.extend(active.recovery_lines());
+                    if let Some(fresh) = active.reissue_string() { lines.push(format!("Reissue: {}", fresh.encode())); lines.push(help::countdown_line(active.countdown_secs(now))); }
                     if active.is_disconnected() { lines.push("Press R to reissue a fresh connection string.".to_string()); }
                     lines.push("Press e to end the session.".to_string());
                 }
                 _ => {}
             }
         }
+        if show_help {
+            lines = help::expert_help_lines(app.screen());
+        }
+        let height = terminal.size().map(|s| s.height as usize).unwrap_or(24);
+        let visible = viewport::visible_with_pinned(&lines, height.saturating_sub(2));
         let _ = terminal.draw(|frame| {
-            let widget = ratatui::widgets::Paragraph::new(lines.join("\n")).block(
+            let widget = ratatui::widgets::Paragraph::new(visible.join("\n")).block(
                 ratatui::widgets::Block::default()
                     .title(title)
                     .borders(ratatui::widgets::Borders::ALL),
@@ -183,7 +180,13 @@ fn interactive_loop(
             match crossterm::event::read() {
                 Ok(crossterm::event::Event::Key(key)) => {
                     if key.kind != crossterm::event::KeyEventKind::Release {
-                        handle_key(app, &mut runtime, &mut tokio_rt, &mut pastes, key.code);
+                        match help::expert_key_action(key.code, show_help) {
+                            help::ExpertKeyAction::ToggleHelp => show_help = !show_help,
+                            help::ExpertKeyAction::Ignore => {}
+                            help::ExpertKeyAction::Dispatch => {
+                                handle_key(app, &mut runtime, &mut tokio_rt, &mut pastes, key.code)
+                            }
+                        }
                     }
                 }
                 Ok(crossterm::event::Event::Paste(text)) => handle_paste(app, &mut pastes, &text),
@@ -208,16 +211,24 @@ fn tick_runtime(
     match app.screen() {
         AppScreen::ConnectionWait => {
             let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
-            if let Some(PollOutcome::Connected) =
-                block_on(tokio_rt, active.poll_candidate(now_ms()))
-            {
-                app.set_connected(true);
-                let _ = app.handle(AppEvent::ConnectionLocked);
+            let _ = block_on(tokio_rt, active.poll_recovery(now_ms()));
+            match block_on(tokio_rt, active.poll_candidate(now_ms())) {
+                Some(PollOutcome::Connected) => {
+                    app.set_connected(true);
+                    let _ = app.handle(AppEvent::ConnectionLocked);
+                }
+                Some(PollOutcome::VersionMismatch) => {
+                    if let Some((c, e)) = active.version_mismatch() {
+                        app.set_status_message(format!("Version mismatch: candidate {c}, you {e}. Candidate must update/restart PairProof; session not started."));
+                    }
+                }
+                _ => {}
             }
         }
         AppScreen::SelectMedium | AppScreen::SelectHard | AppScreen::Monitor => {
             let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
             let outcome = block_on(tokio_rt, active.poll_candidate(now_ms()));
+            let _ = block_on(tokio_rt, active.poll_recovery(now_ms()));
             let _ = block_on(tokio_rt, active.drain_intents(now_ms()));
             let _ = block_on(tokio_rt, active.check_heartbeat(now_ms()));
             if active.is_disconnected() {
@@ -270,8 +281,8 @@ fn handle_key(
                     Some(Ok(_)) => {
                         let _ = app.handle(AppEvent::EndSession);
                     }
-                    Some(Err(err)) => app.set_status_message(format!("End failed: {err}")),
-                    None => app.set_status_message("End failed: runtime unavailable"),
+                    Some(Err(err)) => set_error(app, "End failed", &err.to_string()),
+                    None => set_error(app, "End failed", "runtime unavailable"),
                 }
             }
         }
@@ -281,8 +292,8 @@ fn handle_key(
                     Some(Ok(fresh)) => {
                         app.set_status_message(format!("Fresh string ready: {}", fresh.encode()))
                     }
-                    Some(Err(err)) => app.set_status_message(err.to_string()),
-                    None => app.set_status_message("Reissue failed: runtime unavailable"),
+                    Some(Err(err)) => set_error(app, "Reissue failed", &err.to_string()),
+                    None => set_error(app, "Reissue failed", "runtime unavailable"),
                 }
             }
         }
@@ -321,11 +332,11 @@ fn advance(
                 match block_on(tokio_rt, build) {
                     Some(Ok(built)) => *runtime = Some(built),
                     Some(Err(err)) => {
-                        app.set_status_message(format!("Session setup failed: {err}"));
+                        set_error(app, "Session setup failed", &err.to_string());
                         return;
                     }
                     None => {
-                        app.set_status_message("Session setup failed: runtime unavailable");
+                        set_error(app, "Session setup failed", "runtime unavailable");
                         return;
                     }
                 }
@@ -348,8 +359,8 @@ fn advance(
                         }
                         let _ = app.handle(AppEvent::MediumSelected);
                     }
-                    Some(Err(err)) => app.set_status_message(format!("Selection failed: {err}")),
-                    None => app.set_status_message("Selection failed: runtime unavailable"),
+                    Some(Err(err)) => set_error(app, "Selection failed", &err.to_string()),
+                    None => set_error(app, "Selection failed", "runtime unavailable"),
                 }
             }
         }
@@ -366,8 +377,8 @@ fn advance(
                         app.set_expert_selection_done(true);
                         let _ = app.handle(AppEvent::ExpertSelectionDone);
                     }
-                    Some(Err(err)) => app.set_status_message(format!("Selection failed: {err}")),
-                    None => app.set_status_message("Selection failed: runtime unavailable"),
+                    Some(Err(err)) => set_error(app, "Selection failed", &err.to_string()),
+                    None => set_error(app, "Selection failed", "runtime unavailable"),
                 }
             }
         }

@@ -28,6 +28,7 @@ struct FakeTransport {
     sent: Vec<Intent>,
     terminated: bool, acks: Vec<String>,
     read_err: Option<CandidateRuntimeError>,
+    expert_version: Option<String>,
 }
 
 impl CandidateTransport for FakeTransport {
@@ -46,6 +47,9 @@ impl CandidateTransport for FakeTransport {
         self.discover
             .clone()
             .unwrap_or_else(|| Ok("s1".to_string()))
+    }
+    fn expert_version(&self) -> Option<String> {
+        self.expert_version.clone()
     }
     fn write_hello(&mut self, _session_id: &str) -> Result<(), CandidateRuntimeError> {
         self.ops.push("write_hello".to_string());
@@ -108,7 +112,7 @@ fn snapshot(session_id: &str, phase: &str, final_breakdown: Option<SnapshotFinal
     CandidateSnapshot { v: 1, session_id: session_id.to_string(), phase: phase.to_string(), sync_phase: "Sync: active".to_string(),
         current: Some(SnapshotQuestion { index: 0, title: "Two Sum".to_string(), slug: "two-sum".to_string(), statement: Some("Find two numbers that sum to target.".to_string()) }),
         options: vec![SnapshotOption { title: "Hash map".to_string(), summary: "One pass lookup".to_string() }], selected: Some("preset 0".to_string()),
-        latest_test: Some(SnapshotTest { passed: 3, failed: 1, at_ms: 10 }), chat_replies: vec!["Try a hash map.".to_string()], final_breakdown }
+        latest_test: Some(SnapshotTest { passed: 3, failed: 1, at_ms: 10 }), chat_replies: vec!["Try a hash map.".to_string()], final_breakdown, recovery: None }
 }
 
 fn workspace(name: &str) -> PathBuf {
@@ -387,5 +391,18 @@ fn candidate_acks_final_snapshot_once() {
     value.poll_snapshot().expect("poll final again"); value.poll_snapshot().expect("poll final third");
     assert_eq!(value.transport().acks.len(), 1, "ack must be written exactly once: {:?}", value.transport().ops);
     assert!(value.view().lines().join("\n").contains("Final rating: 7.50"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[rustfmt::skip]
+fn version_mismatch_prevents_session_start() {
+    let fake = FakeTransport { expert_version: Some("9.9.9".to_string()), ..FakeTransport::default() };
+    let (dir, mut value) = runtime("ver-mismatch", fake); let (conn, _s) = connection();
+    let err = value.connect(&conn).expect_err("version mismatch must fail");
+    match &err { CandidateRuntimeError::VersionMismatch { candidate, expert } => { assert_eq!(candidate, env!("CARGO_PKG_VERSION")); assert_eq!(expert, "9.9.9"); } other => panic!("expected VersionMismatch, got {other:?}") }
+    assert!(err.to_string().contains("9.9.9") && err.to_string().contains("update/restart"), "{err}");
+    assert_eq!(value.phase(), CandidateRuntimePhase::Disconnected);
+    assert_eq!(value.transport().ops, vec!["authenticate".to_string(), "discover_session".to_string()], "write_hello/start_sync must never run: {:?}", value.transport().ops);
     let _ = std::fs::remove_dir_all(dir);
 }

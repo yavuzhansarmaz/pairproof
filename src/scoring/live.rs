@@ -83,7 +83,7 @@ fn line(slot_index: usize, component: ScoreComponent, delta: f64, detail: String
     }
 }
 
-/// Computes the provisional live rating (structure.md section 13).
+/// Computes the provisional live rating.
 pub fn live_rating(
     session: &Session,
     approach_qualities: &BTreeMap<usize, Vec<ApproachQuality>>,

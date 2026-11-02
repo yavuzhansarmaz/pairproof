@@ -1,7 +1,7 @@
 //! Candidate runtime: SSH auth, hello, isolated Mutagen sync, intents,
 //! and snapshot rendering. Candidate failures never carry secrets.
 #[rustfmt::skip] use crate::connection::ConnectionString;
-#[rustfmt::skip] use crate::orchestration::control::{final_ack_bytes, heartbeat_bytes, parse_session_binding, CandidateSnapshot, Intent, IntentKind, SnapshotFinal, SnapshotOption, SnapshotTest, FINAL_ACK_PATH, HEARTBEAT_PATH, SESSION_PATH};
+#[rustfmt::skip] use crate::orchestration::control::{final_ack_bytes, heartbeat_bytes, hello_bytes, parse_session_binding_full, CandidateSnapshot, Intent, IntentKind, SnapshotFinal, SnapshotOption, SnapshotRecovery, SnapshotTest, FINAL_ACK_PATH, HEARTBEAT_PATH, SESSION_PATH};
 #[rustfmt::skip] use crate::orchestration::control_client::{CandidateControlClient, SshControlClient};
 #[rustfmt::skip] use crate::orchestration::mutagen_auth::{run_mutagen, MutagenAuthEnv, PasswordFeeder};
 #[rustfmt::skip] use crate::orchestration::ssh_auth::{run_ssh_command, run_ssh_command_with_stdin, verify_and_key_line, AskpassSession, SshAuthError};
@@ -32,6 +32,7 @@ pub enum CandidateRuntimeError {
     #[error("candidate is not connected")] NotConnected,
     #[error("session has ended")] Ended,
     #[error("Connection problem \u{2014} ask the expert")] Transport,
+    #[error("PairProof version mismatch: candidate is running {candidate}, expert is running {expert}; both must run the same version - update/restart PairProof and reconnect")] VersionMismatch { candidate: String, expert: String },
 }
 /// Maps any SSH-auth failure to generic rejection; payloads are dropped.
 #[rustfmt::skip] pub fn candidate_connect_error_for_ssh(_err: &SshAuthError) -> CandidateConnectError { CandidateConnectError::Rejected }
@@ -40,6 +41,7 @@ pub enum CandidateRuntimeError {
 pub trait CandidateTransport {
     fn authenticate(&mut self, connection: &ConnectionString) -> Result<(), CandidateRuntimeError>;
     fn discover_session_id(&mut self) -> Result<String, CandidateRuntimeError> { Err(CandidateRuntimeError::Transport) }
+    fn expert_version(&self) -> Option<String> { None }
     fn write_hello(&mut self, session_id: &str) -> Result<(), CandidateRuntimeError>;
     fn start_sync(&mut self, session_id: &str, alpha: &Path) -> Result<(), CandidateRuntimeError>;
     fn send_intent(&mut self, intent: &Intent) -> Result<(), CandidateRuntimeError>;
@@ -55,13 +57,13 @@ pub trait CandidateTransport {
 pub struct CandidateView {
     pub phase: String, pub sync_phase: String, pub question_title: Option<String>, pub question_index: Option<usize>,
     pub statement: Option<String>, pub options: Vec<SnapshotOption>, pub selected: Option<String>,
-    pub latest_test: Option<SnapshotTest>, pub chat_replies: Vec<String>, pub final_breakdown: Option<SnapshotFinal>,
+    pub latest_test: Option<SnapshotTest>, pub chat_replies: Vec<String>, pub final_breakdown: Option<SnapshotFinal>, pub recovery: Option<SnapshotRecovery>,
 }
 #[rustfmt::skip]
 impl CandidateView {
     pub fn from_snapshot(snapshot: Option<&CandidateSnapshot>) -> Self {
-        let Some(s) = snapshot else { return Self { phase: String::new(), sync_phase: String::new(), question_title: None, question_index: None, statement: None, options: Vec::new(), selected: None, latest_test: None, chat_replies: Vec::new(), final_breakdown: None }; };
-        Self { phase: s.phase.clone(), sync_phase: s.sync_phase.clone(), question_title: s.current.as_ref().map(|q| q.title.clone()), question_index: s.current.as_ref().map(|q| q.index), statement: s.current.as_ref().and_then(|q| q.statement.clone()), options: s.options.clone(), selected: s.selected.clone(), latest_test: s.latest_test, chat_replies: s.chat_replies.clone(), final_breakdown: s.final_breakdown.clone() }
+        let Some(s) = snapshot else { return Self { phase: String::new(), sync_phase: String::new(), question_title: None, question_index: None, statement: None, options: Vec::new(), selected: None, latest_test: None, chat_replies: Vec::new(), final_breakdown: None, recovery: None }; };
+        Self { phase: s.phase.clone(), sync_phase: s.sync_phase.clone(), question_title: s.current.as_ref().map(|q| q.title.clone()), question_index: s.current.as_ref().map(|q| q.index), statement: s.current.as_ref().and_then(|q| q.statement.clone()), options: s.options.clone(), selected: s.selected.clone(), latest_test: s.latest_test, chat_replies: s.chat_replies.clone(), final_breakdown: s.final_breakdown.clone(), recovery: s.recovery.clone() }
     }
     pub fn is_terminal(&self) -> bool { matches!(self.phase.as_str(), "Completed" | "EndedByExpert" | "TechnicalFailure") }
     /// Sanitized lines; a rating renders only from a carried breakdown.
@@ -75,8 +77,9 @@ impl CandidateView {
         match self.latest_test { Some(t) => lines.push(format!("Latest test: {} passed, {} failed", t.passed, t.failed)), None => lines.push("Latest test: no test run yet".to_string()) }
         if !self.sync_phase.is_empty() { lines.push(self.sync_phase.clone()); }
         lines.push(format!("Phase: {}", self.phase)); for reply in &self.chat_replies { lines.push(format!("Coach: {reply}")); }
+        if let Some(r) = &self.recovery { if r.active { lines.push("Technical problem - service temporarily unavailable.".to_string()); lines.push(format!("Retrying... about {} seconds remaining.", r.remaining_ms.saturating_add(999) / 1000)); lines.push("Your progress is preserved.".to_string()); } }
         if let Some(f) = &self.final_breakdown { lines.push("Final breakdown".to_string()); lines.push(format!("Final rating: {:.2}", f.rating)); for q in &f.per_question { let grade = q.grade.map_or("not scored".to_string(), |g| format!("{g:.1}")); let mut line = format!("Q{}: grade {}", q.slot_index + 1, grade); if let Some(r) = &q.rationale { line.push_str(&format!(": {r}")); } lines.push(line); } }
-        else if self.phase == "TechnicalFailure" { lines.push("The session ended as a technical failure.".to_string()); lines.push("No evaluation was produced; the interview can be rescheduled.".to_string()); }
+        else if self.phase == "TechnicalFailure" || self.recovery.as_ref().is_some_and(|r| r.technical_failure) { lines.push("The session ended as a technical failure.".to_string()); lines.push("No evaluation was produced; the interview can be rescheduled.".to_string()); }
         else if self.is_terminal() { lines.push("Session ended.".to_string()); }
         lines.iter().map(|line| sanitize_display(line)).collect()
     }
@@ -85,13 +88,13 @@ impl CandidateView {
 #[rustfmt::skip]
 pub struct CandidateRuntime<T: CandidateTransport> {
     transport: T, session_id: String, workspace: PathBuf, sequencer: CandidateControlClient,
-    phase: CandidateRuntimePhase, last_snapshot: Option<CandidateSnapshot>, chat_seq: u64, ack_sent: bool, lost: bool, last_hb_ms: u64,
+    phase: CandidateRuntimePhase, last_snapshot: Option<CandidateSnapshot>, chat_seq: u64, ack_sent: bool, lost: bool, last_hb_ms: u64, recovery_view: Option<SnapshotRecovery>, last_recovery_generation: u64,
 }
 #[rustfmt::skip]
 impl<T: CandidateTransport> CandidateRuntime<T> {
     pub fn new(session_id: impl Into<String>, workspace: PathBuf, transport: T) -> Self {
         let session_id = session_id.into();
-        Self { sequencer: CandidateControlClient::new(&session_id), transport, session_id, workspace, phase: CandidateRuntimePhase::Disconnected, last_snapshot: None, chat_seq: 0, ack_sent: false, lost: false, last_hb_ms: 0 }
+        Self { sequencer: CandidateControlClient::new(&session_id), transport, session_id, workspace, phase: CandidateRuntimePhase::Disconnected, last_snapshot: None, chat_seq: 0, ack_sent: false, lost: false, last_hb_ms: 0, recovery_view: None, last_recovery_generation: 0 }
     }
     pub fn new_discovering(workspace: PathBuf, transport: T) -> Self { Self::new("", workspace, transport) }
     pub fn phase(&self) -> CandidateRuntimePhase { self.phase }
@@ -100,6 +103,7 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
     pub fn transport(&self) -> &T { &self.transport }
     pub fn transport_mut(&mut self) -> &mut T { &mut self.transport }
     pub fn last_snapshot(&self) -> Option<&CandidateSnapshot> { self.last_snapshot.as_ref() }
+    pub fn recovery_view(&self) -> Option<&SnapshotRecovery> { self.recovery_view.as_ref() } pub fn last_recovery_generation(&self) -> u64 { self.last_recovery_generation }
     pub fn final_ack_sent(&self) -> bool { self.ack_sent }
     pub fn connection_lost(&self) -> bool { self.lost }
     pub fn status_text(&self) -> Option<String> { self.lost.then(|| CONNECTION_LOST.to_string()) }
@@ -110,6 +114,7 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
         self.phase = CandidateRuntimePhase::Authenticating;
         if let Err(err) = self.transport.authenticate(connection) { self.phase = CandidateRuntimePhase::Disconnected; return Err(err); }
         match self.transport.discover_session_id() { Ok(id) if !id.trim().is_empty() && crate::sandbox::validate::validate_session_id(&id).is_ok() && (self.session_id.is_empty() || self.session_id == id) => { self.session_id = id.clone(); self.sequencer = CandidateControlClient::new(&id); } _ => { self.phase = CandidateRuntimePhase::Disconnected; return Err(CandidateRuntimeError::Transport); } }
+        if let Some(ev) = self.transport.expert_version() { if ev.trim() != env!("CARGO_PKG_VERSION") { self.phase = CandidateRuntimePhase::Disconnected; return Err(CandidateRuntimeError::VersionMismatch { candidate: env!("CARGO_PKG_VERSION").to_string(), expert: ev.trim().to_string() }); } }
         if let Err(err) = self.transport.write_hello(&self.session_id) { self.phase = CandidateRuntimePhase::Disconnected; return Err(err); }
         self.phase = CandidateRuntimePhase::Syncing; self.transport.start_sync(&self.session_id, &self.workspace)?; self.phase = CandidateRuntimePhase::Connected; Ok(())
     }
@@ -142,6 +147,7 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
             Ok(Some(snapshot)) => {
                 if snapshot.session_id != self.session_id { return Err(CandidateRuntimeError::WrongSession); }
                 self.lost = false;
+                match &snapshot.recovery { None => self.recovery_view = None, Some(r) if r.generation >= self.last_recovery_generation => { self.last_recovery_generation = r.generation; self.recovery_view = Some(r.clone()); } Some(_) => {} }
                 if snapshot.final_breakdown.is_some() && !self.ack_sent { self.ack_sent = true; let _ = self.transport.write_final_ack(&self.session_id); }
                 self.last_snapshot = Some(snapshot.clone());
                 Ok(Some(snapshot))
@@ -158,18 +164,18 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
     pub fn flush(&mut self) -> Result<(), CandidateRuntimeError> { if self.phase != CandidateRuntimePhase::Connected { return Err(CandidateRuntimeError::NotConnected); } self.transport.flush_sync(&self.session_id) }
     /// Terminates sync and ends; local files are preserved.
     pub fn end(&mut self) -> Result<(), CandidateRuntimeError> { if self.phase == CandidateRuntimePhase::Ended { return Ok(()); } let result = self.transport.terminate_sync(&self.session_id); self.phase = CandidateRuntimePhase::Ended; result }
-    pub fn view(&self) -> CandidateView { CandidateView::from_snapshot(self.last_snapshot.as_ref()) }
+    pub fn view(&self) -> CandidateView { let mut view = CandidateView::from_snapshot(self.last_snapshot.as_ref()); view.recovery = self.recovery_view.clone(); view }
 }
 /// Production transport: FIFO askpass SSH plus isolated Mutagen sync.
 #[rustfmt::skip]
 pub struct SshCandidateTransport {
     connection: Option<ConnectionString>, key_line: Option<String>, client: Option<SshControlClient>,
-    askpass: Option<AskpassSession>, sync_env: Option<MutagenAuthEnv>, feeder: Option<PasswordFeeder>,
+    askpass: Option<AskpassSession>, sync_env: Option<MutagenAuthEnv>, feeder: Option<PasswordFeeder>, expert_version: Option<String>,
 }
 #[rustfmt::skip]
 impl SshCandidateTransport {
-    pub fn new() -> Self { Self { connection: None, key_line: None, client: None, askpass: None, sync_env: None, feeder: None } }
-    pub fn from_verified(connection: &ConnectionString, key_line: String) -> Self { Self { connection: Some(connection.clone()), key_line: Some(key_line), client: None, askpass: None, sync_env: None, feeder: None } }
+    pub fn new() -> Self { Self { connection: None, key_line: None, client: None, askpass: None, sync_env: None, feeder: None, expert_version: None } }
+    pub fn from_verified(connection: &ConnectionString, key_line: String) -> Self { Self { connection: Some(connection.clone()), key_line: Some(key_line), client: None, askpass: None, sync_env: None, feeder: None, expert_version: None } }
     fn stored(&self) -> Result<(&ConnectionString, &str), CandidateRuntimeError> { match (&self.connection, &self.key_line) { (Some(c), Some(k)) => Ok((c, k.as_str())), _ => Err(CandidateRuntimeError::Transport) } }
 }
 #[rustfmt::skip] impl Default for SshCandidateTransport { fn default() -> Self { Self::new() } }
@@ -191,14 +197,15 @@ impl CandidateTransport for SshCandidateTransport {
     fn discover_session_id(&mut self) -> Result<String, CandidateRuntimeError> {
         let (conn, key_line) = self.stored()?; let conn = conn.clone(); let key_line = key_line.to_string();
         let text = run_ssh_command(conn.endpoint(), conn.username(), conn.secret(), &key_line, &["cat", SESSION_PATH], SSH_TIMEOUT).map_err(|_| CandidateRuntimeError::Transport)?;
-        parse_session_binding(text.as_bytes()).map_err(|_| CandidateRuntimeError::Transport)
+        let binding = parse_session_binding_full(text.as_bytes()).map_err(|_| CandidateRuntimeError::Transport)?; self.expert_version = binding.app_version.clone(); Ok(binding.session_id)
     }
+    fn expert_version(&self) -> Option<String> { self.expert_version.clone() }
     fn write_hello(&mut self, session_id: &str) -> Result<(), CandidateRuntimeError> {
         let (conn, key_line) = self.stored()?;
         let key_line = key_line.to_string();
         let client = SshControlClient::new(session_id, conn.endpoint().clone(), conn.username().clone(), conn.secret().clone(), key_line.clone());
-        let body = serde_json::json!({ "v": 1, "session_id": session_id }).to_string();
-        run_ssh_command_with_stdin(conn.endpoint(), conn.username(), conn.secret(), &key_line, &["tee", HELLO_PATH], Some(body.as_bytes()), SSH_TIMEOUT).map_err(|_| CandidateRuntimeError::Transport)?;
+        let body = hello_bytes(session_id, env!("CARGO_PKG_VERSION"));
+        run_ssh_command_with_stdin(conn.endpoint(), conn.username(), conn.secret(), &key_line, &["tee", HELLO_PATH], Some(&body), SSH_TIMEOUT).map_err(|_| CandidateRuntimeError::Transport)?;
         self.client = Some(client);
         Ok(())
     }
@@ -275,7 +282,7 @@ impl ConnectionVerifier for SshAuthVerifier {
 #[rustfmt::skip] fn pop_last(text: &str) -> String { let mut owned = text.to_string(); owned.pop(); owned }
 #[rustfmt::skip]
 fn apply(status: &mut Option<String>, result: Result<Intent, CandidateRuntimeError>) -> bool {
-    match result { Ok(_) => { *status = None; true }, Err(err) => { *status = Some(err.to_string()); false } }
+    match result { Ok(_) => { *status = None; true }, Err(err) => { *status = Some(crate::tui::help::candidate_error_message(&err).to_string()); false } }
 }
 #[rustfmt::skip]
 fn live_lines(state: &CandidateRunState, runtime: &CandidateRuntime<SshCandidateTransport>, status: &Option<String>) -> Vec<String> {
@@ -292,6 +299,8 @@ fn live_lines(state: &CandidateRunState, runtime: &CandidateRuntime<SshCandidate
 fn handle_live_key(state: &mut CandidateRunState, runtime: &mut CandidateRuntime<SshCandidateTransport>, key: KeyEvent, status: &mut Option<String>) {
     let control = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code { K::Esc => { state.app.quit(); return; } K::Char('c') if control => { state.app.quit(); return; } _ => {} }
+    if key.code == K::Char('?') && !control && !crate::tui::help::candidate_is_typing(state.app.screen(), state.focus) { state.show_help = !state.show_help; return; }
+    if state.show_help { return; }
     if runtime.view().is_terminal() { match key.code { K::Enter => { state.app.quit(); }, K::Char('q') if !control => { state.app.quit(); }, _ => {} } return; }
     match state.focus {
         CandidateFocus::Work => match key.code {
@@ -300,7 +309,7 @@ fn handle_live_key(state: &mut CandidateRunState, runtime: &mut CandidateRuntime
                 '1'..='4' => { apply(status, runtime.send_intent(IntentKind::SelectPreset { preset: c as u8 - b'1' })); } '5' | 'o' => state.focus = CandidateFocus::Other,
                 'c' => { apply(status, runtime.send_intent(IntentKind::Continue)); } 'd' => state.focus = CandidateFocus::Redirect,
                 't' => { apply(status, runtime.send_intent(IntentKind::RequestTests)); } 's' => { apply(status, runtime.send_intent(IntentKind::Skip)); }
-                'f' => { if apply(status, runtime.send_intent(IntentKind::Finish)) { if let Err(err) = runtime.flush() { *status = Some(err.to_string()); } } }
+                'f' => { if apply(status, runtime.send_intent(IntentKind::Finish)) { if let Err(err) = runtime.flush() { *status = Some(crate::tui::help::candidate_error_message(&err).to_string()); } } }
                 'r' => { apply(status, runtime.send_intent(IntentKind::RequestReQuestion)); } 'q' => { state.app.quit(); }, _ => {}
             }, _ => {}
         },
@@ -338,12 +347,13 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut live = false;
     let mut status: Option<String> = None;
     while state.app.screen() != CandidateScreen::Exited {
-        if live { if let Some(active) = runtime.as_mut() { if let Err(err) = active.poll_snapshot() { status = Some(err.to_string()); } } }
+        if live { if let Some(active) = runtime.as_mut() { if let Err(err) = active.poll_snapshot() { status = Some(crate::tui::help::candidate_error_message(&err).to_string()); } } }
         let (title, lines) = if live {
-            match runtime.as_ref() { Some(active) => (screen_title(CandidateScreen::Solving), live_lines(state, active, &status)), None => (screen_title(state.app.screen()), candidate_screen_lines(state)) }
+            match runtime.as_ref() { Some(active) => (screen_title(CandidateScreen::Solving), if state.show_help { crate::tui::help::candidate_help_lines_for(state.app.screen(), state.focus) } else { live_lines(state, active, &status) }), None => (screen_title(state.app.screen()), candidate_screen_lines(state)) }
         } else { let mut lines = candidate_screen_lines(state); if let Some(text) = &status { lines.push(text.clone()); } (screen_title(state.app.screen()), lines) };
+        let visible = crate::tui::viewport::visible_with_pinned(&lines, terminal.size().map(|s| s.height as usize).unwrap_or(24).saturating_sub(2));
         let _ = terminal.draw(|frame| {
-            let widget = ratatui::widgets::Paragraph::new(lines.join("\n")).block(ratatui::widgets::Block::default().title(title).borders(ratatui::widgets::Borders::ALL));
+            let widget = ratatui::widgets::Paragraph::new(visible.join("\n")).block(ratatui::widgets::Block::default().title(title).borders(ratatui::widgets::Borders::ALL));
             frame.render_widget(widget, frame.area());
         });
         if crossterm::event::poll(Duration::from_millis(250)).unwrap_or(false) {
@@ -363,13 +373,13 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                             match material {
                                 Some((conn, key_line)) => {
                                     if let Some(existing) = runtime.as_mut() {
-                                        match existing.reconnect(&conn) { Ok(()) => { status = None; }, Err(err) => { status = Some(err.to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); } }
+                                        match existing.reconnect(&conn) { Ok(()) => { status = None; }, Err(err) => { status = Some(crate::tui::help::candidate_error_message(&err).to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); } }
                                     } else {
                                         let mut built = CandidateRuntime::new_discovering(default_workspace(), SshCandidateTransport::from_verified(&conn, key_line));
-                                        match built.connect(&conn) { Ok(()) => { runtime = Some(built); status = None; }, Err(err) => { status = Some(err.to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); } }
+                                        match built.connect(&conn) { Ok(()) => { runtime = Some(built); status = None; }, Err(err) => { status = Some(crate::tui::help::candidate_error_message(&err).to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); } }
                                     }
                                 }
-                                None => { status = Some(CandidateRuntimeError::Transport.to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); }
+                                None => { status = Some(crate::tui::help::candidate_error_message(&CandidateRuntimeError::Transport).to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); }
                             }
                         }
                         if runtime.is_some() && state.app.rules_accepted() { live = true; }

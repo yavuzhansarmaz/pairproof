@@ -3,6 +3,9 @@
 //! rendered solely from the supplied breakdown and session state.
 
 use crate::core::{QuestionStatus, Session};
+use crate::orchestration::evidence::{
+    per_question_evidence, render_evidence, score_line_evidence, summary_evidence,
+};
 use crate::scoring::{FinalBreakdown, GradeOutcome, PerQuestionFinal};
 
 /// One caller-supplied chat excerpt that may be quoted in the report.
@@ -62,11 +65,16 @@ fn per_question_line(session: &Session, q: &PerQuestionFinal) -> String {
         Some(t) => format!("test summary: {} passed, {} failed", t.passed, t.failed),
         None => "test summary: no test summary recorded".to_string(),
     };
+    let ev = per_question_evidence(session, q);
     format!(
-        "- Q{} {title} ({:?}, {:?}) — {grade_part}; {tokens_part}; {time_part}; {test_part}; {rationale_part}",
+        "- Q{} {title} ({:?}, {:?}) — {grade_part}; {tokens_part}; {time_part}; {test_part}; {rationale_part}; evidence: grade={}; tokens={}; time={}; tests={}",
         q.slot_index + 1,
         q.difficulty,
         q.status,
+        render_evidence(&ev.grade),
+        render_evidence(&ev.tokens),
+        render_evidence(&ev.time),
+        render_evidence(&ev.test),
     )
 }
 
@@ -100,6 +108,16 @@ fn suggestions(session: &Session, breakdown: &FinalBreakdown) -> Vec<String> {
     out
 }
 
+/// Returns the required limitations footer appended to every report.
+pub fn limitations_footer() -> &'static str {
+    "## Limitations\n\n\
+- PairProof is a decision-support tool for a human interviewer. It does not make automated hiring decisions and must not be used to screen applications automatically.\n\
+- One session does not measure overall competence. Conclusions are scoped to the evidence recorded in this session.\n\
+- The scoring rubric is a hypothesis about job-relevant judgment, not a proven predictor of job performance.\n\
+- Per-question AI grades are capped in their effect on the final rating; the rest of the score comes from fixed, event-based steps recorded in events.jsonl.\n\
+- A question marked not scored contributed no AI grade and no correction; nothing was invented in its place.\n"
+}
+
 /// Generates the Markdown report in deterministic slot order.
 pub fn generate_report(
     session: &Session,
@@ -116,21 +134,38 @@ pub fn generate_report(
     out.push_str("# PairProof Session Report\n\n");
     out.push_str(&format!("Session: {}\n\n", session.id()));
     out.push_str(&format!("Status: {:?}\n\n", session.status()));
+    let summary = summary_evidence(session, breakdown);
     out.push_str("## Final breakdown\n\n");
     out.push_str(&format!(
-        "Final rating: {:.2} / 10 (unclamped {:.2})\n\n",
-        breakdown.rating, breakdown.unclamped
+        "Final rating: {:.2} / 10 (unclamped {:.2}) [evidence: {}]\n\n",
+        breakdown.rating,
+        breakdown.unclamped,
+        render_evidence(&summary.rating)
     ));
     out.push_str(&format!(
-        "Solved: {}; finished: {}; skipped: {}\n\n",
-        breakdown.solved_count, breakdown.finished_count, breakdown.skipped_count
+        "Solved: {}; finished: {}; skipped: {} [evidence: solved={}; finished={}; skipped={}]\n\n",
+        breakdown.solved_count,
+        breakdown.finished_count,
+        breakdown.skipped_count,
+        render_evidence(&summary.solved),
+        render_evidence(&summary.finished),
+        render_evidence(&summary.skipped)
     ));
     out.push_str(&format!(
-        "AI correction total: {:+.3}\n\n",
-        breakdown.ai_correction_total
+        "AI correction total: {:+.3} [evidence: {}]\n\n",
+        breakdown.ai_correction_total,
+        render_evidence(&summary.ai_correction_total)
     ));
-    out.push_str(&format!("Total time: {} ms\n\n", breakdown.total_time_ms));
-    out.push_str(&format!("Paste flags: {}\n\n", breakdown.paste_flag_count));
+    out.push_str(&format!(
+        "Total time: {} ms [evidence: {}]\n\n",
+        breakdown.total_time_ms,
+        render_evidence(&summary.total_time)
+    ));
+    out.push_str(&format!(
+        "Paste flags: {} [evidence: {}]\n\n",
+        breakdown.paste_flag_count,
+        render_evidence(&summary.paste_flags)
+    ));
     if breakdown.lines.is_empty() {
         out.push_str("- No rating movements recorded.\n\n");
     } else {
@@ -138,11 +173,12 @@ pub fn generate_report(
         lines.sort_by_key(|l| (l.slot_index, l.component));
         for line in &lines {
             out.push_str(&format!(
-                "- Q{} {:?} {:+.2} — {}\n",
+                "- Q{} {:?} {:+.2} — {} [evidence: {}]\n",
                 line.slot_index + 1,
                 line.component,
                 line.delta,
-                line.detail
+                line.detail,
+                render_evidence(&score_line_evidence(session, line))
             ));
         }
         out.push('\n');
@@ -197,5 +233,7 @@ pub fn generate_report(
             "Only the permitted chat excerpts supplied for this report are quoted above.\n",
         );
     }
+    out.push('\n');
+    out.push_str(limitations_footer());
     out
 }

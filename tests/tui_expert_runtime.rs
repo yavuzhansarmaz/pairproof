@@ -109,7 +109,12 @@ async fn make_runtime_with_sync(name: &str, hang: bool, sync_phase: SessionSyncP
 
 #[rustfmt::skip]
 fn write_hello(control: &std::path::Path, session_id: &str) {
-    let body = serde_json::json!({ "v": 1, "session_id": session_id }).to_string();
+    let body = serde_json::json!({ "v": 1, "session_id": session_id, "app_version": env!("CARGO_PKG_VERSION") }).to_string();
+    std::fs::write(control.join("inbox").join("hello.json"), body).unwrap();
+}
+#[rustfmt::skip]
+fn write_hello_version(control: &std::path::Path, session_id: &str, version: &str) {
+    let body = serde_json::json!({ "v": 1, "session_id": session_id, "app_version": version }).to_string();
     std::fs::write(control.join("inbox").join("hello.json"), body).unwrap();
 }
 #[rustfmt::skip]
@@ -460,4 +465,25 @@ fn expert_build_uses_extracted_topics() {
     assert_eq!(expert_context_from_extraction(&extracted), (vec!["hash-table".to_string(), "graph".to_string()], "senior".to_string(), Language::Python));
     let unsupported = ExtractionResult { topics: vec!["math".into()], level: "mid".into(), proposed_language: None, unsupported_language: Some("Brainfuck".into()), language_reason: String::new() };
     assert_eq!(expert_context_from_extraction(&unsupported), (vec!["math".to_string()], "mid".to_string(), Language::Python));
+}
+
+#[tokio::test] #[rustfmt::skip]
+async fn expert_candidate_version_match_is_accepted() {
+    let (_root, control, mut runtime) = make_runtime("ver-match", false).await;
+    write_hello_version(&control, "s1", env!("CARGO_PKG_VERSION"));
+    assert_eq!(runtime.poll_candidate(T0 + 1_000).await, PollOutcome::Connected);
+    assert!(runtime.orchestrator().is_connected()); assert_eq!(runtime.version_mismatch(), None);
+}
+
+#[tokio::test] #[rustfmt::skip]
+async fn expert_candidate_version_mismatch_is_rejected() {
+    let (_root, control, mut runtime) = make_runtime("ver-mismatch", false).await;
+    write_hello_version(&control, "s1", "9.9.9");
+    assert_eq!(runtime.poll_candidate(T0 + 1_000).await, PollOutcome::VersionMismatch);
+    assert!(!runtime.orchestrator().is_connected()); assert_eq!(runtime.gate_phase(), GatePhase::Awaiting);
+    assert_eq!(runtime.orchestrator().status(), SessionStatus::WaitingForCandidate);
+    assert_eq!(connected_events(&runtime), 0);
+    let (cand, exp) = runtime.version_mismatch().expect("mismatch stored");
+    assert_eq!(cand, "9.9.9"); assert_eq!(exp, env!("CARGO_PKG_VERSION"));
+    assert!(control.join("inbox").join("hello.json").exists(), "hello must not be consumed on mismatch");
 }

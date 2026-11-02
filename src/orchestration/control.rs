@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use crate::core::ApproachChoice;
 use crate::orchestration::finalize::final_visible_to_candidate;
+use crate::orchestration::health::ServiceKind;
 use crate::orchestration::pipeline::QuestionPipeline;
 use crate::orchestration::session::Orchestrator;
 use crate::orchestration::sync_gate::SessionSyncPhase;
@@ -70,6 +71,8 @@ pub enum ControlError {
     WrongVersion(u64),
     #[error("control message bound to another session")]
     WrongSession,
+    #[error("PairProof version mismatch: candidate is running {candidate}, expert is running {expert}; both must run the same version - update/restart PairProof and reconnect")]
+    VersionMismatch { candidate: String, expert: String },
     #[error("invalid intent id")]
     InvalidId,
     #[error("intent exceeds {MAX_INTENT_BYTES} bytes")]
@@ -292,6 +295,18 @@ pub struct SnapshotFinalQuestion { pub slot_index: usize, pub grade: Option<f64>
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SnapshotFinal { pub rating: f64, pub per_question: Vec<SnapshotFinalQuestion> }
 
+/// Candidate-safe recovery projection; no reason/body/status strings.
+#[rustfmt::skip]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotRecovery { pub active: bool, pub service: Option<String>, pub remaining_ms: u64, pub generation: u64, pub technical_failure: bool }
+#[rustfmt::skip]
+impl SnapshotRecovery {
+    pub fn service_name(service: ServiceKind) -> &'static str { match service { ServiceKind::Meta => "Meta", ServiceKind::LeetCode => "LeetCode" } }
+    pub fn from_service(active: bool, service: Option<ServiceKind>, remaining_ms: u64, generation: u64, technical_failure: bool) -> Self { Self { active, service: service.map(|s| Self::service_name(s).to_string()), remaining_ms, generation, technical_failure } }
+}
+#[rustfmt::skip]
+pub fn snapshot_service_name(service: ServiceKind) -> &'static str { SnapshotRecovery::service_name(service) }
+
 /// Versioned, session-bound candidate snapshot. Deliberately has no
 /// field for quality, best index, expected tokens, or grading internals.
 #[rustfmt::skip]
@@ -301,6 +316,7 @@ pub struct CandidateSnapshot {
     pub current: Option<SnapshotQuestion>, pub options: Vec<SnapshotOption>,
     pub selected: Option<String>, pub latest_test: Option<SnapshotTest>,
     pub chat_replies: Vec<String>, pub final_breakdown: Option<SnapshotFinal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub recovery: Option<SnapshotRecovery>,
 }
 
 /// Builds a snapshot only from candidate-safe projections. The final
@@ -308,6 +324,11 @@ pub struct CandidateSnapshot {
 #[rustfmt::skip]
 pub fn build_snapshot(orch: &Orchestrator, pipe: &QuestionPipeline, sync_phase: SessionSyncPhase,
     chat_replies: &[String], breakdown: Option<&FinalBreakdown>) -> CandidateSnapshot {
+    build_snapshot_with_recovery(orch, pipe, sync_phase, chat_replies, breakdown, None)
+}
+#[rustfmt::skip]
+pub fn build_snapshot_with_recovery(orch: &Orchestrator, pipe: &QuestionPipeline, sync_phase: SessionSyncPhase,
+    chat_replies: &[String], breakdown: Option<&FinalBreakdown>, recovery: Option<SnapshotRecovery>) -> CandidateSnapshot {
     let slot = orch.session().current_slot();
     let current = orch.current_question().map(|q| SnapshotQuestion {
         index: orch.current_index().unwrap_or_default(), title: q.title.clone(), slug: q.title_slug.clone(),
@@ -322,13 +343,14 @@ pub fn build_snapshot(orch: &Orchestrator, pipe: &QuestionPipeline, sync_phase: 
     } else { None };
     CandidateSnapshot { v: SNAPSHOT_VERSION, session_id: orch.session_id().to_string(),
         phase: format!("{:?}", orch.status()), sync_phase: sync_phase.label().to_string(), current,
-        options, selected, latest_test, chat_replies: chat_replies.to_vec(), final_breakdown }
+        options, selected, latest_test, chat_replies: chat_replies.to_vec(), final_breakdown, recovery }
 }
 
 pub use crate::orchestration::control_codec::{
-    final_ack_bytes, heartbeat_bytes, is_final_ack, parse_final_ack, parse_heartbeat,
-    parse_session_binding, parse_snapshot, session_binding_bytes, FinalAck, FinalAckOutcome,
-    Heartbeat, SessionBinding,
+    check_app_versions, expert_version_from_binding, final_ack_bytes, heartbeat_bytes, hello_bytes,
+    is_final_ack, parse_final_ack, parse_heartbeat, parse_hello, parse_session_binding,
+    parse_session_binding_full, parse_snapshot, session_binding_bytes, FinalAck, FinalAckOutcome,
+    Heartbeat, Hello, SessionBinding,
 };
 
 /// Resolves a fixed control-relative path under `root`, rejecting
