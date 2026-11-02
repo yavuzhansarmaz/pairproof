@@ -275,7 +275,7 @@ impl ConnectionVerifier for SshAuthVerifier {
 #[rustfmt::skip] fn pop_last(text: &str) -> String { let mut owned = text.to_string(); owned.pop(); owned }
 #[rustfmt::skip]
 fn apply(status: &mut Option<String>, result: Result<Intent, CandidateRuntimeError>) -> bool {
-    match result { Ok(_) => { *status = None; true }, Err(err) => { *status = Some(err.to_string()); false } }
+    match result { Ok(_) => { *status = None; true }, Err(err) => { *status = Some(crate::tui::help::candidate_error_message(&err).to_string()); false } }
 }
 #[rustfmt::skip]
 fn live_lines(state: &CandidateRunState, runtime: &CandidateRuntime<SshCandidateTransport>, status: &Option<String>) -> Vec<String> {
@@ -292,6 +292,8 @@ fn live_lines(state: &CandidateRunState, runtime: &CandidateRuntime<SshCandidate
 fn handle_live_key(state: &mut CandidateRunState, runtime: &mut CandidateRuntime<SshCandidateTransport>, key: KeyEvent, status: &mut Option<String>) {
     let control = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code { K::Esc => { state.app.quit(); return; } K::Char('c') if control => { state.app.quit(); return; } _ => {} }
+    if key.code == K::Char('?') && !control && !crate::tui::help::candidate_is_typing(state.app.screen(), state.focus) { state.show_help = !state.show_help; return; }
+    if state.show_help { return; }
     if runtime.view().is_terminal() { match key.code { K::Enter => { state.app.quit(); }, K::Char('q') if !control => { state.app.quit(); }, _ => {} } return; }
     match state.focus {
         CandidateFocus::Work => match key.code {
@@ -300,7 +302,7 @@ fn handle_live_key(state: &mut CandidateRunState, runtime: &mut CandidateRuntime
                 '1'..='4' => { apply(status, runtime.send_intent(IntentKind::SelectPreset { preset: c as u8 - b'1' })); } '5' | 'o' => state.focus = CandidateFocus::Other,
                 'c' => { apply(status, runtime.send_intent(IntentKind::Continue)); } 'd' => state.focus = CandidateFocus::Redirect,
                 't' => { apply(status, runtime.send_intent(IntentKind::RequestTests)); } 's' => { apply(status, runtime.send_intent(IntentKind::Skip)); }
-                'f' => { if apply(status, runtime.send_intent(IntentKind::Finish)) { if let Err(err) = runtime.flush() { *status = Some(err.to_string()); } } }
+                'f' => { if apply(status, runtime.send_intent(IntentKind::Finish)) { if let Err(err) = runtime.flush() { *status = Some(crate::tui::help::candidate_error_message(&err).to_string()); } } }
                 'r' => { apply(status, runtime.send_intent(IntentKind::RequestReQuestion)); } 'q' => { state.app.quit(); }, _ => {}
             }, _ => {}
         },
@@ -338,12 +340,13 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut live = false;
     let mut status: Option<String> = None;
     while state.app.screen() != CandidateScreen::Exited {
-        if live { if let Some(active) = runtime.as_mut() { if let Err(err) = active.poll_snapshot() { status = Some(err.to_string()); } } }
+        if live { if let Some(active) = runtime.as_mut() { if let Err(err) = active.poll_snapshot() { status = Some(crate::tui::help::candidate_error_message(&err).to_string()); } } }
         let (title, lines) = if live {
-            match runtime.as_ref() { Some(active) => (screen_title(CandidateScreen::Solving), live_lines(state, active, &status)), None => (screen_title(state.app.screen()), candidate_screen_lines(state)) }
+            match runtime.as_ref() { Some(active) => (screen_title(CandidateScreen::Solving), if state.show_help { crate::tui::help::candidate_help_lines_for(state.app.screen(), state.focus) } else { live_lines(state, active, &status) }), None => (screen_title(state.app.screen()), candidate_screen_lines(state)) }
         } else { let mut lines = candidate_screen_lines(state); if let Some(text) = &status { lines.push(text.clone()); } (screen_title(state.app.screen()), lines) };
+        let visible = crate::tui::viewport::visible_with_pinned(&lines, terminal.size().map(|s| s.height as usize).unwrap_or(24).saturating_sub(2));
         let _ = terminal.draw(|frame| {
-            let widget = ratatui::widgets::Paragraph::new(lines.join("\n")).block(ratatui::widgets::Block::default().title(title).borders(ratatui::widgets::Borders::ALL));
+            let widget = ratatui::widgets::Paragraph::new(visible.join("\n")).block(ratatui::widgets::Block::default().title(title).borders(ratatui::widgets::Borders::ALL));
             frame.render_widget(widget, frame.area());
         });
         if crossterm::event::poll(Duration::from_millis(250)).unwrap_or(false) {
@@ -363,13 +366,13 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                             match material {
                                 Some((conn, key_line)) => {
                                     if let Some(existing) = runtime.as_mut() {
-                                        match existing.reconnect(&conn) { Ok(()) => { status = None; }, Err(err) => { status = Some(err.to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); } }
+                                        match existing.reconnect(&conn) { Ok(()) => { status = None; }, Err(err) => { status = Some(crate::tui::help::candidate_error_message(&err).to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); } }
                                     } else {
                                         let mut built = CandidateRuntime::new_discovering(default_workspace(), SshCandidateTransport::from_verified(&conn, key_line));
-                                        match built.connect(&conn) { Ok(()) => { runtime = Some(built); status = None; }, Err(err) => { status = Some(err.to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); } }
+                                        match built.connect(&conn) { Ok(()) => { runtime = Some(built); status = None; }, Err(err) => { status = Some(crate::tui::help::candidate_error_message(&err).to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); } }
                                     }
                                 }
-                                None => { status = Some(CandidateRuntimeError::Transport.to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); }
+                                None => { status = Some(crate::tui::help::candidate_error_message(&CandidateRuntimeError::Transport).to_string()); *state = CandidateRunState::new(); stash = fresh_verifier(state); }
                             }
                         }
                         if runtime.is_some() && state.app.rules_accepted() { live = true; }
