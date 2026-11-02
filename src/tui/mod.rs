@@ -58,32 +58,49 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 /// Starts the interactive loop, falling back to a hint on init failure.
+/// Backing out of candidate Connect with an empty Enter returns here.
 fn run_interactive(initial: Option<Role>) -> anyhow::Result<()> {
-    let mut app = app::ExpertApp::new();
-    if expert_tty::load_disclosure_ack_default() {
-        app.set_disclosure_acknowledged(true);
+    let mut initial = initial;
+    loop {
+        let mut app = app::ExpertApp::new();
+        if expert_tty::load_disclosure_ack_default() {
+            app.set_disclosure_acknowledged(true);
+        }
+        let mut preflight_done = false;
+        if initial == Some(Role::Expert) {
+            let _ = app.handle(app::AppEvent::SelectExpert);
+            run_preflight_check(&mut app);
+            preflight_done = true;
+        }
+        if interactive_loop(&mut app, &mut preflight_done).is_err() {
+            println!("pairproof: expert flow \u{2014} run preflight before starting a session");
+            return Ok(());
+        }
+        if !app.is_candidate_placeholder() {
+            return Ok(());
+        }
+        let mut state = candidate_run::CandidateRunState::new();
+        if candidate_runtime::candidate_loop(&mut state).is_err() {
+            println!("pairproof: {}", candidate::placeholder_message());
+            return Ok(());
+        }
+        if !state.back_to_menu {
+            return Ok(());
+        }
+        initial = None;
     }
-    let mut preflight_done = false;
-    if initial == Some(Role::Expert) {
-        let _ = app.handle(app::AppEvent::SelectExpert);
-        run_preflight_check(&mut app);
-        preflight_done = true;
-    }
-    if interactive_loop(&mut app, &mut preflight_done).is_err() {
-        println!("pairproof: expert flow \u{2014} run preflight before starting a session");
-        return Ok(());
-    }
-    if app.is_candidate_placeholder() {
-        return run_candidate_interactive();
-    }
-    Ok(())
 }
 
 /// Starts the candidate loop, falling back to a hint on init failure.
+/// An empty Enter on Connect returns to the main menu.
 fn run_candidate_interactive() -> anyhow::Result<()> {
     let mut state = candidate_run::CandidateRunState::new();
     if candidate_runtime::candidate_loop(&mut state).is_err() {
         println!("pairproof: {}", candidate::placeholder_message());
+        return Ok(());
+    }
+    if state.back_to_menu {
+        return run_interactive(None);
     }
     Ok(())
 }
@@ -141,9 +158,7 @@ fn interactive_loop(
         });
         if crossterm::event::poll(std::time::Duration::from_millis(250)).unwrap_or(false) {
             match crossterm::event::read() {
-                Ok(crossterm::event::Event::Key(key)) => {
-                    state.handle_key_event(app, preflight_done, key)
-                }
+                Ok(crossterm::event::Event::Key(key)) => state.handle_key_event(app, key),
                 Ok(crossterm::event::Event::Paste(text)) => {
                     handle_paste(app, &mut state.pastes, &mut state.api_key_input, &text)
                 }

@@ -34,6 +34,19 @@ pub(crate) fn handle_paste(
     }
 }
 
+/// Opens masked API-key entry on Expert Setup so a mistyped key can
+/// be replaced; an env-provided key is changed in the environment.
+fn open_api_key_change(app: &mut app::ExpertApp) {
+    if crate::tui::config::env_override_active() {
+        app.set_status_message(
+            "Meta API key comes from the MODEL_API_KEY environment variable; change it there.",
+        );
+        return;
+    }
+    app.set_api_key_entry(true);
+    app.set_status_message("type the new Meta API key, then press enter to save it.");
+}
+
 /// Maps one key press: app events before the runtime exists, real
 /// runtime operations afterwards (`e` ends a live session).
 pub(crate) fn handle_key(
@@ -41,7 +54,6 @@ pub(crate) fn handle_key(
     runtime: &mut Option<ExpertRuntime>,
     tokio_rt: &mut Option<tokio::runtime::Runtime>,
     pastes: &mut ExpertSetupPastes,
-    preflight_done: &mut bool,
     api_key_input: &mut String,
     code: crossterm::event::KeyCode,
 ) {
@@ -50,7 +62,23 @@ pub(crate) fn handle_key(
     if app.api_key_entry && app.screen() == AppScreen::Preflight {
         match code {
             K::Esc => _ = app.handle(AppEvent::Quit),
-            K::Enter => expert_tty::save_entered_api_key(app, api_key_input),
+            K::Enter => {
+                if api_key_input.trim().is_empty() {
+                    expert_tty::save_entered_api_key(app, api_key_input);
+                } else {
+                    let checked = block_on(tokio_rt, expert_tty::check_api_key(api_key_input));
+                    match checked {
+                        Some(result) => {
+                            expert_tty::save_checked_api_key(app, api_key_input, result)
+                        }
+                        None => set_error(
+                            app,
+                            "API key check failed; key not saved",
+                            "runtime unavailable",
+                        ),
+                    }
+                }
+            }
             K::Backspace => {
                 api_key_input.pop();
             }
@@ -72,11 +100,11 @@ pub(crate) fn handle_key(
         K::Up if app.screen() == AppScreen::Setup => pastes.scroll_focused(-1),
         K::Down if app.screen() == AppScreen::Setup => pastes.scroll_focused(1),
         K::Char('b') => _ = app.handle(AppEvent::Back),
-        K::Char('r') => {
-            if expert_tty::preflight_retry_requested(app.screen(), code) {
-                *preflight_done = false;
+        K::Char('m') if app.screen() == AppScreen::Preflight => open_api_key_change(app),
+        K::Char('m') if app.screen() == AppScreen::Setup => {
+            if app.handle(AppEvent::Back).is_ok() && app.screen() == AppScreen::Preflight {
+                open_api_key_change(app);
             }
-            _ = app.handle(AppEvent::Retry)
         }
         K::Char('e') if app.screen() == AppScreen::RoleSelect => {
             _ = app.handle(AppEvent::SelectExpert)

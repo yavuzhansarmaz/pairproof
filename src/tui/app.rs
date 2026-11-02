@@ -33,7 +33,6 @@ pub enum AppEvent {
     CandidateReconnected,
     Back,
     Quit,
-    Retry,
 }
 
 /// Typed navigation failures; illegal events never panic.
@@ -86,7 +85,6 @@ fn event_name(event: AppEvent) -> &'static str {
         AppEvent::CandidateReconnected => "CandidateReconnected",
         AppEvent::Back => "Back",
         AppEvent::Quit => "Quit",
-        AppEvent::Retry => "Retry",
     }
 }
 
@@ -239,7 +237,6 @@ impl ExpertApp {
                 Ok(self.screen)
             }
             AppEvent::Back => self.back(),
-            AppEvent::Retry => Ok(self.screen),
             _ => self.handle_forward(event),
         }
     }

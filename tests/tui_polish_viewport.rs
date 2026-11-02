@@ -297,6 +297,60 @@ fn main_menu_renders_as_a_centred_brand_panel() {
 }
 
 #[test]
+fn candidate_connection_renders_as_a_centred_panel() {
+    use pairproof::tui::candidate::CandidateApp;
+    use pairproof::tui::render::draw_screen;
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = CandidateApp::new().screen_lines();
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(rendered.contains("Candidate connection"), "{rendered}");
+    assert_eq!(buffer[(0, 0)].symbol(), " ");
+    let left_border = (0..30)
+        .find_map(|y| (0..100).find(|&x| buffer[(x, y)].symbol() == "\u{2502}"))
+        .expect("left border");
+    assert!(
+        left_border > 10,
+        "panel should be centred, border at {left_border}"
+    );
+}
+
+#[test]
+fn enter_is_green_and_b_and_m_are_navy_in_key_hints() {
+    use pairproof::tui::render::{draw_screen, ENTER_KEY_COLOR, PAIR_COLOR};
+    let backend = ratatui::backend::TestBackend::new(60, 10);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = vec![
+        "Keys".to_string(),
+        "press enter to continue, b back, m change, esc quit, ? help".to_string(),
+        "[PASS] Connection: direct connection ready".to_string(),
+    ];
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, false))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let green: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == ENTER_KEY_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(green, "enter[PASS]", "{green}");
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PAIR_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(navy.contains('b'), "{navy}");
+    assert!(navy.contains('m'), "{navy}");
+}
+
+#[test]
 fn expert_setup_renders_as_a_centred_panel() {
     use pairproof::tui::app::{screen_lines, AppEvent, ExpertApp};
     use pairproof::tui::render::draw_screen;

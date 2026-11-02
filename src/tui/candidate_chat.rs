@@ -289,9 +289,9 @@ impl ChatController {
             } else {
                 "you"
             };
-            lines.push(sanitize_display(&format!("{label}: {}", message.content)));
+            lines.push(format!("{label}: {}", message.content));
         }
-        lines.push(sanitize_display(&format!("message: {}", self.input.text())));
+        lines.push(format!("message: {}", self.input.text()));
         if self.busy {
             lines.push("sending...".to_string());
         }

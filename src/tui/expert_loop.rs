@@ -83,18 +83,12 @@ impl ExpertLoopState {
         lines
     }
 
-    fn dispatch_key(
-        &mut self,
-        app: &mut app::ExpertApp,
-        preflight_done: &mut bool,
-        code: crossterm::event::KeyCode,
-    ) {
+    fn dispatch_key(&mut self, app: &mut app::ExpertApp, code: crossterm::event::KeyCode) {
         handle_key(
             app,
             &mut self.runtime,
             &mut self.tokio_rt,
             &mut self.pastes,
-            preflight_done,
             &mut self.api_key_input,
             code,
         );
@@ -104,14 +98,13 @@ impl ExpertLoopState {
     pub(crate) fn handle_key_event(
         &mut self,
         app: &mut app::ExpertApp,
-        preflight_done: &mut bool,
         key: crossterm::event::KeyEvent,
     ) {
         if key.kind == crossterm::event::KeyEventKind::Release {
             return;
         }
         if app.api_key_entry {
-            self.dispatch_key(app, preflight_done, key.code);
+            self.dispatch_key(app, key.code);
             return;
         }
         if self.show_help
@@ -119,7 +112,7 @@ impl ExpertLoopState {
             && help::help_overlay_dispatches(key.code, app.screen())
         {
             self.show_help = false;
-            self.dispatch_key(app, preflight_done, key.code);
+            self.dispatch_key(app, key.code);
             return;
         }
         match if self.show_disclosure {
@@ -141,7 +134,7 @@ impl ExpertLoopState {
             help::ExpertKeyAction::Quit => {
                 let _ = app.handle(app::AppEvent::Quit);
             }
-            help::ExpertKeyAction::Dispatch => self.dispatch_key(app, preflight_done, key.code),
+            help::ExpertKeyAction::Dispatch => self.dispatch_key(app, key.code),
         }
     }
 

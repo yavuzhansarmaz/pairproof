@@ -26,6 +26,8 @@ pub use crate::tui::setup_panel::{draw_setup_screen, setup_box_areas, SetupPanel
 pub const HELP_KEY_COLOR: Color = Color::Rgb(250, 221, 141);
 /// Pastel red used for the `esc` quit key on every screen.
 pub const ESC_KEY_COLOR: Color = Color::Rgb(249, 160, 160);
+/// Pastel green used for the `enter` key on every screen.
+pub const ENTER_KEY_COLOR: Color = Color::Rgb(168, 230, 182);
 
 fn brand_line() -> Line<'static> {
     Line::from(vec![
@@ -70,35 +72,51 @@ pub fn panel_area(area: Rect, lines: &[String], centered: bool) -> Rect {
         .map(|line| line.chars().count())
         .max()
         .unwrap_or(0);
-    let width = (longest as u16).saturating_add(4).clamp(44, 92);
+    let width = (longest as u16).saturating_add(4).clamp(44, 104);
     let height = (lines.len() as u16).saturating_add(2);
     centered_rect(area, width, height)
 }
 
-/// Splits a line into spans, colouring a standalone `?` help key
-/// pastel yellow and a standalone `esc` quit key pastel red.
-/// Question marks and words inside sentences stay white.
+/// Splits a line into spans, colouring standalone key tokens:
+/// `enter` and `[PASS]` pastel green, `b` and `m` pastel navy,
+/// `?` pastel yellow, and `esc` pastel red. Keys inside words
+/// stay white.
 pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
     let bytes = text.as_bytes();
     let mut spans = Vec::new();
     let mut raw_start = 0;
     let mut i = 0;
     while i < bytes.len() {
-        let prev_ok = |i: usize| i == 0 || matches!(bytes[i - 1], b' ' | b',');
+        let prev_ok = |i: usize| i == 0 || matches!(bytes[i - 1], b' ' | b',' | b'(');
+        let next_ok =
+            |end: usize| end == bytes.len() || matches!(bytes[end], b' ' | b',' | b'.' | b')');
+        let is_pass =
+            text[i..].starts_with("[PASS]") && (i == 0 || bytes[i - 1] == b' ') && next_ok(i + 6);
+        let is_enter = text[i..].starts_with("enter") && prev_ok(i) && next_ok(i + 5);
         let is_esc = text[i..].starts_with("esc")
             && prev_ok(i)
             && (i + 3 == bytes.len() || matches!(bytes[i + 3], b' ' | b','));
+        let is_back = bytes[i] == b'b' && prev_ok(i) && next_ok(i + 1);
+        let is_meta = bytes[i] == b'm' && prev_ok(i) && next_ok(i + 1);
         let is_help = bytes[i] == b'?'
             && i > 0
             && bytes[i - 1] == b' '
             && i + 1 < bytes.len()
             && bytes[i + 1] == b' ';
-        if is_esc || is_help {
+        if is_pass || is_enter || is_esc || is_back || is_meta || is_help {
             if raw_start < i {
                 spans.push(Span::raw(text[raw_start..i].to_string()));
             }
-            let (token, color, len) = if is_esc {
+            let (token, color, len) = if is_pass {
+                ("[PASS]", ENTER_KEY_COLOR, 6)
+            } else if is_enter {
+                ("enter", ENTER_KEY_COLOR, 5)
+            } else if is_esc {
                 ("esc", ESC_KEY_COLOR, 3)
+            } else if is_back {
+                ("b", PAIR_COLOR, 1)
+            } else if is_meta {
+                ("m", PAIR_COLOR, 1)
             } else {
                 ("?", HELP_KEY_COLOR, 1)
             };

@@ -282,6 +282,8 @@ pub fn work_lines(session: &Session, work: &CandidateWork) -> Vec<String> {
     } else {
         lines.push("re-question: not available".to_string());
     }
+    // Every dynamic field arrives sanitized via `work_view`; the
+    // remaining lines are literals, so no second pass is needed.
     lines.push(view.phase_line.clone());
-    lines.iter().map(|line| sanitize_display(line)).collect()
+    lines
 }

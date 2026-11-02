@@ -157,6 +157,9 @@ impl ExpertRuntime {
         let result = coordinator
             .finalize_and_cleanup(&self.layout, &self.orch, &report_md, &context, &codes)
             .await;
+        if let Some(mapping) = self.port_mapping.take() {
+            mapping.close().await;
+        }
         if let Some(report) = coordinator.last_report() {
             let mut stored = report.clone();
             if ack_outcome == Some(FinalAckOutcome::Timeout) {

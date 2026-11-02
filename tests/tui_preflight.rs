@@ -16,7 +16,8 @@ fn healthy() -> PreflightInputs {
         image_present: true,
         port: 2222,
         port_free: true,
-        local_ips: vec![ip(203, 0, 113, 10)],
+        local_ips: vec![ip(8, 8, 8, 8)],
+        external_ip: Some(ip(8, 8, 8, 8)),
         mutagen_version: Some("0.18.1".to_string()),
     }
 }
@@ -78,18 +79,37 @@ fn preflight_view_preserves_guidance() {
     inputs.docker_version = None;
     let report = compute_preflight(&inputs);
     let view = preflight_view(&report);
-    assert_eq!(view.lines.len(), report.checks.len());
+    let joined = view.lines.join("\n");
     for check in &report.checks {
-        let line = view
-            .lines
-            .iter()
-            .find(|l| l.contains(&format!("{:?}", check.kind)))
-            .expect("line for kind");
-        assert!(line.contains(&check.detail), "line: {line}");
+        assert!(joined.contains(&check.detail), "missing detail in {joined}");
         if let Some(guidance) = &check.guidance {
-            assert!(line.contains(guidance.as_str()), "line: {line}");
+            assert!(
+                joined.contains(guidance.as_str()),
+                "missing guidance in {joined}"
+            );
         }
     }
+    // Guidance sits on its own indented line, labels are readable,
+    // and no Debug enum names or over-long lines leak through.
+    assert!(view.lines.iter().any(|l| l.trim_start().starts_with("-> ")));
+    assert!(joined.contains("Connection"), "{joined}");
+    assert!(!joined.contains("Public IP"), "{joined}");
+    assert!(!joined.contains("CGNAT"), "{joined}");
+    assert!(!joined.contains("ExternalIp"), "{joined}");
+    assert!(!joined.contains("CgnatSuspicion"), "{joined}");
+    assert!(!joined.contains("ask your ISP"), "{joined}");
+    assert!(!joined.contains("port forwarding is required"), "{joined}");
+    assert!(
+        view.lines.iter().all(|l| l.chars().count() <= 84),
+        "{joined}"
+    );
+    // The passed Connection line fits on one line, never wrapped.
+    assert!(
+        view.lines
+            .iter()
+            .any(|l| l.starts_with("[PASS] Connection:") && l.contains("direct connection ready")),
+        "{joined}"
+    );
     assert!(view
         .lines
         .iter()
@@ -102,14 +122,17 @@ fn preflight_view_prefixes_match_status() {
     let view = preflight_view(&report);
     assert!(view.can_start);
     assert_eq!(view.failures, 0);
-    for (check, line) in report.checks.iter().zip(view.lines.iter()) {
+    for check in &report.checks {
         let expected = match check.status {
             CheckStatus::Pass => "[PASS]",
             CheckStatus::Warn => "[WARN]",
             CheckStatus::Fail => "[FAIL]",
         };
-        assert!(line.starts_with(expected), "line: {line}");
-        assert!(line.contains(&format!("{:?}", check.kind)));
+        assert!(
+            view.lines.iter().any(|l| l.starts_with(expected)),
+            "no {expected} line in {:?}",
+            view.lines
+        );
     }
 }
 
@@ -137,7 +160,7 @@ fn preflight_port_busy_blocks_start() {
     assert!(view
         .lines
         .iter()
-        .any(|l| l.starts_with("[FAIL]") && l.contains("PortAvailable")));
+        .any(|l| l.starts_with("[FAIL]") && l.contains("Port:")));
 }
 
 #[test]

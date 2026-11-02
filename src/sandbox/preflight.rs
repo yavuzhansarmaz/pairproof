@@ -43,8 +43,7 @@ pub enum CheckKind {
     DockerDaemon,
     SandboxImage,
     PortAvailable,
-    ExternalIp,
-    CgnatSuspicion,
+    Network,
     MutagenInstalled,
 }
 
@@ -74,6 +73,7 @@ pub struct PreflightInputs {
     pub port: u16,
     pub port_free: bool,
     pub local_ips: Vec<Ipv4Addr>,
+    pub external_ip: Option<Ipv4Addr>,
     pub mutagen_version: Option<String>,
 }
 
@@ -116,7 +116,7 @@ fn check(
     }
 }
 
-/// Computes the seven preflight checks from pure inputs.
+/// Computes the six preflight checks from pure inputs.
 pub fn compute_preflight(inputs: &PreflightInputs) -> PreflightReport {
     let docker_missing = inputs.docker_version.is_none();
     let docker = match &inputs.docker_version {
@@ -187,61 +187,36 @@ pub fn compute_preflight(inputs: &PreflightInputs) -> PreflightReport {
             Some("choose another port or stop the process using this one"),
         )
     };
-    let classes: Vec<IpClass> = inputs
+    // One informational line only: NAT state is never a user warning.
+    // The connection is set up automatically at session start (public
+    // address, NAT-PMP, or UPnP); when no automatic path exists the
+    // session still starts on the loopback endpoint.
+    let public_local = inputs
         .local_ips
         .iter()
-        .map(|ip| classify_ipv4(*ip))
-        .collect();
-    let public: Vec<String> = inputs
-        .local_ips
-        .iter()
-        .filter(|ip| classify_ipv4(**ip) == IpClass::Public)
-        .map(ToString::to_string)
-        .collect();
-    let has_non_loopback = classes
-        .iter()
-        .any(|c| !matches!(c, IpClass::Loopback | IpClass::Unspecified));
-    let external_ip = if !public.is_empty() {
+        .find(|ip| classify_ipv4(**ip) == IpClass::Public);
+    let network = if let Some(ip) = public_local {
         check(
-            CheckKind::ExternalIp,
+            CheckKind::Network,
             CheckStatus::Pass,
-            format!("public interface address: {}", public.join(", ")),
+            format!("direct connection ready ({ip})"),
             None,
         )
-    } else if has_non_loopback {
+    } else if let Some(ip) = inputs
+        .external_ip
+        .filter(|ip| classify_ipv4(*ip) == IpClass::Public)
+    {
         check(
-            CheckKind::ExternalIp,
-            CheckStatus::Warn,
-            "no public interface address; behind NAT, port forwarding is required",
-            Some("direct mode needs a public IP and a forwarded port"),
-        )
-    } else {
-        check(
-            CheckKind::ExternalIp,
-            CheckStatus::Warn,
-            "no external interface found",
-            Some("direct mode needs a public IP and a forwarded port"),
-        )
-    };
-    let cgnat = if classes.contains(&IpClass::Cgnat) {
-        check(
-            CheckKind::CgnatSuspicion,
-            CheckStatus::Warn,
-            "CGNAT address range detected; direct mode likely fails",
-            Some("ask your ISP for a public IP or use another network"),
-        )
-    } else if public.is_empty() {
-        check(
-            CheckKind::CgnatSuspicion,
-            CheckStatus::Warn,
-            "all interfaces are private; CGNAT behind the router is possible",
-            Some("verify the router WAN address is a public IP"),
-        )
-    } else {
-        check(
-            CheckKind::CgnatSuspicion,
+            CheckKind::Network,
             CheckStatus::Pass,
-            "no CGNAT signs on local interfaces",
+            format!("connection set up automatically at session start ({ip})"),
+            None,
+        )
+    } else {
+        check(
+            CheckKind::Network,
+            CheckStatus::Pass,
+            "connection set up automatically at session start",
             None,
         )
     };
@@ -260,7 +235,7 @@ pub fn compute_preflight(inputs: &PreflightInputs) -> PreflightReport {
         ),
     };
     PreflightReport {
-        checks: vec![docker, daemon, image, port, external_ip, cgnat, mutagen],
+        checks: vec![docker, daemon, image, port, network, mutagen],
     }
 }
 
@@ -323,6 +298,7 @@ pub async fn gather_preflight(port: u16) -> PreflightReport {
         .filter(|ip| classify_ipv4(*ip) != IpClass::Loopback)
         .into_iter()
         .collect();
+    let external_ip = super::nat::discover_external_ip().await;
     compute_preflight(&PreflightInputs {
         docker_version,
         daemon_reachable,
@@ -330,6 +306,7 @@ pub async fn gather_preflight(port: u16) -> PreflightReport {
         port,
         port_free: port_is_free(port),
         local_ips,
+        external_ip,
         mutagen_version,
     })
 }

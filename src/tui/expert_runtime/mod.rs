@@ -32,25 +32,19 @@ use crate::scoring::{ApproachSet, GradeOutcome};
 use crate::tui::candidate_final::{candidate_final_lines, CandidateFinal};
 use crate::tui::monitor::{final_view, monitor_view, MonitorView};
 
-#[path = "expert_runtime_recovery.rs"]
-mod expert_recovery;
-#[path = "expert_runtime_hello.rs"]
+mod build;
+mod connection;
 mod hello;
-pub use self::expert_recovery::RecoverySnapshot;
+mod recovery;
+mod selection;
+mod session;
+pub use self::build::expert_context_from_extraction;
+pub(crate) use self::build::{build_expert_runtime, meta_client};
 pub use self::hello::{
     ConsumeFuture, DockerHelloSource, HelloFuture, HelloSource, LocalHelloSource,
     SessionPublishFuture,
 };
-#[path = "expert_runtime_build.rs"]
-mod expert_runtime_build;
-#[path = "expert_runtime_connection.rs"]
-mod expert_runtime_connection;
-#[path = "expert_runtime_selection.rs"]
-mod expert_runtime_selection;
-#[path = "expert_runtime_session.rs"]
-mod expert_runtime_session;
-pub use self::expert_runtime_build::expert_context_from_extraction;
-pub(crate) use self::expert_runtime_build::{build_expert_runtime, meta_client};
+pub use self::recovery::RecoverySnapshot;
 
 /// Errors from the expert runtime; payloads never carry secrets.
 #[derive(Debug, thiserror::Error)]
@@ -214,6 +208,7 @@ pub struct ExpertRuntime {
     leetcode_probe: Option<Arc<dyn LeetCodeProbe>>,
     meta_probe: Option<Arc<dyn MetaProbe>>,
     recovery_timed_out: bool,
+    port_mapping: Option<crate::sandbox::nat::PortMapping>,
 }
 
 impl ExpertRuntime {
@@ -298,6 +293,7 @@ impl ExpertRuntime {
             meta_probe: None,
             recovery_timed_out: false,
             final_grades: Vec::new(),
+            port_mapping: None,
         })
     }
 
@@ -366,6 +362,14 @@ impl ExpertRuntime {
     }
     pub fn username(&self) -> &EphemeralUsername {
         &self.username
+    }
+    /// Attaches the session's router port mapping, removed at session end.
+    pub(crate) fn set_port_mapping(&mut self, mapping: Option<crate::sandbox::nat::PortMapping>) {
+        self.port_mapping = mapping;
+    }
+    /// Returns true when a router port mapping is held for this session.
+    pub fn has_port_mapping(&self) -> bool {
+        self.port_mapping.is_some()
     }
     pub fn version_mismatch(&self) -> Option<(String, String)> {
         self.version_mismatch.clone()

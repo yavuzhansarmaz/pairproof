@@ -32,6 +32,9 @@ pub fn destination_for(role: Role) -> RoleDestination {
 }
 
 /// Strips terminal control and escape sequences for display.
+/// Ownership rule: each line producer sanitizes exactly once at its
+/// own boundary; aggregators and TTY loops must not re-sanitize lines
+/// they only collect from other producers.
 pub fn sanitize_display(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();

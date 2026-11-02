@@ -210,12 +210,11 @@ fn candidate_selection_never_enters_expert_flow() {
 }
 
 #[test]
-fn retry_preserves_screen() {
+fn preflight_advance_keeps_screen_until_disclosure() {
     let mut app = ExpertApp::new();
     app.handle(AppEvent::SelectExpert).expect("to preflight");
     app.set_preflight_passed(true);
     app.set_api_key_ready(true);
-    assert_eq!(app.handle(AppEvent::Retry), Ok(AppScreen::Preflight));
     assert_eq!(app.screen(), AppScreen::Preflight);
     assert!(app.preflight_passed);
     app.handle(AppEvent::DisclosureAcknowledged)
@@ -373,7 +372,7 @@ fn screen_lines_are_sanitized_with_footers() {
     );
     assert_eq!(
         lines.last().map(String::as_str),
-        Some("b back, r re-run, esc quit, ? help")
+        Some("b back, esc quit, ? help")
     );
     assert!(!joined.contains("Esc qui\n"), "{joined}");
     assert!(!joined.contains("API key is never shown"), "{joined}");
@@ -398,7 +397,7 @@ fn expert_setup_steps_ack_then_api_key_then_continue() {
         .expect("acknowledge");
     let after = screen_lines(&app).join("\n");
     assert!(!after.contains("will be sent"), "{after}");
-    assert!(after.contains("disclosure: acknowledged."), "{after}");
+    assert!(after.contains("[PASS] Disclosure: acknowledged"), "{after}");
     assert!(
         after.contains("press enter to add your Meta API key."),
         "{after}"
@@ -409,6 +408,12 @@ fn expert_setup_steps_ack_then_api_key_then_continue() {
     );
     assert_eq!(app.screen(), AppScreen::Preflight);
     app.set_api_key_ready(true);
+    app.set_api_key_status("Meta API key: configured (••••1234)");
+    let ready_lines = screen_lines(&app).join("\n");
+    assert!(
+        ready_lines.contains("[PASS] Meta API key: configured"),
+        "{ready_lines}"
+    );
     assert_eq!(
         app.handle(AppEvent::PreflightCompleted),
         Ok(AppScreen::Setup)

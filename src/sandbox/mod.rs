@@ -5,6 +5,7 @@ pub mod error;
 pub mod exec;
 pub mod image;
 pub mod lifecycle;
+pub mod nat;
 pub mod parse;
 pub mod preflight;
 pub mod process;

@@ -107,12 +107,33 @@ pub(crate) async fn build_expert_runtime(
         .map_err(|e| e.to_string())?;
     let session_id = format_session_id(std::process::id(), now);
     let port = select_sandbox_port().ok_or_else(|| "no free sandbox port".to_string())?;
-    let endpoint = Endpoint::new("127.0.0.1", port).map_err(|e| e.to_string())?;
+    // Automatic direct access: public address, NAT-PMP, or UPnP mapping.
+    // When no automatic path exists (for example CGNAT), fall back to the
+    // loopback endpoint so same-machine and manual-tunnel use still work.
+    let (endpoint, mut port_mapping) =
+        match crate::sandbox::nat::establish_direct_access(port).await {
+            Some(direct) => direct.into_parts(),
+            None => (
+                Endpoint::new("127.0.0.1", port).map_err(|e| e.to_string())?,
+                None,
+            ),
+        };
     let username = EphemeralUsername::generate();
     let secret0 = Secret::generate();
-    let (handle, fingerprint) = create_and_provision(&session_id, &endpoint, &username, &secret0)
-        .await
-        .map_err(|e| e.to_string())?;
+    // Docker always publishes the internal port; the public endpoint
+    // (possibly a different, router-assigned external port) only goes
+    // into the connection string.
+    let sandbox_endpoint = Endpoint::new("127.0.0.1", port).map_err(|e| e.to_string())?;
+    let (handle, fingerprint) =
+        match create_and_provision(&session_id, &sandbox_endpoint, &username, &secret0).await {
+            Ok(pair) => pair,
+            Err(err) => {
+                if let Some(mapping) = port_mapping.take() {
+                    mapping.close().await;
+                }
+                return Err(err.to_string());
+            }
+        };
     let built: Result<ExpertRuntime, String> = async {
         let control_io = DockerControlIo::new(handle.clone());
         control_io
@@ -173,9 +194,15 @@ pub(crate) async fn build_expert_runtime(
     }
     .await;
     match built {
-        Ok(runtime) => Ok(runtime),
+        Ok(mut runtime) => {
+            runtime.set_port_mapping(port_mapping.take());
+            Ok(runtime)
+        }
         Err(err) => {
             let _ = destroy(&handle).await;
+            if let Some(mapping) = port_mapping.take() {
+                mapping.close().await;
+            }
             Err(err)
         }
     }

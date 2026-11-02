@@ -27,15 +27,12 @@ const HELLO_PATH: &str = "/pairproof-control/inbox/hello.json";
 const SSH_TIMEOUT: Duration = Duration::from_secs(20);
 const HEARTBEAT_THROTTLE_MS: u64 = 5_000;
 pub const CONNECTION_LOST: &str = "connection lost \u{2014} retrying";
-#[path = "candidate_runtime_live.rs"]
-mod candidate_runtime_live;
-#[path = "candidate_runtime_transport.rs"]
-mod candidate_runtime_transport;
-#[path = "candidate_runtime_view.rs"]
-mod candidate_runtime_view;
-pub use self::candidate_runtime_live::{candidate_loop, default_workspace, handle_live_key};
-pub use self::candidate_runtime_transport::{SshAuthVerifier, SshCandidateTransport};
-pub use self::candidate_runtime_view::CandidateView;
+mod live;
+mod transport;
+mod view;
+pub use self::live::{candidate_loop, default_workspace, handle_live_key};
+pub use self::transport::{SshAuthVerifier, SshCandidateTransport};
+pub use self::view::CandidateView;
 /// Explicit runtime phase; work is reachable only when Connected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CandidateRuntimePhase {

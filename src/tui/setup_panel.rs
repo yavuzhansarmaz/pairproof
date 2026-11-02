@@ -151,7 +151,7 @@ pub fn draw_setup_screen(frame: &mut Frame, panel: &SetupPanel) {
         "additional notes are optional. enter reviews the proposal."
     };
     frame.render_widget(
-        Paragraph::new(hint).style(Style::default().fg(TEXT_COLOR)),
+        Paragraph::new(Line::from(help_key_spans(hint))).style(Style::default().fg(TEXT_COLOR)),
         chunks[1],
     );
     let width = chunks[2].width.saturating_sub(2) as usize;
@@ -183,7 +183,8 @@ pub fn draw_setup_screen(frame: &mut Frame, panel: &SetupPanel) {
     );
     if let Some(status) = panel.status {
         frame.render_widget(
-            Paragraph::new(format!("status: {status}")).style(Style::default().fg(TEXT_COLOR)),
+            Paragraph::new(Line::from(help_key_spans(&format!("status: {status}"))))
+                .style(Style::default().fg(TEXT_COLOR)),
             chunks[4],
         );
     }

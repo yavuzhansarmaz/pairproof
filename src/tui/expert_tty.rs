@@ -90,8 +90,16 @@ pub fn save_disclosure_ack(path: &std::path::Path) -> std::io::Result<()> {
 
 /// Saves a key typed on Expert Setup to the stored key file and
 /// updates the app status. The raw input is cleared on success and
-/// never stored on the app itself.
+/// never stored on the app itself. An empty input (0 characters)
+/// closes the entry without saving, so a key change can be backed
+/// out with Enter (`b` types into the key, so it cannot go back).
 pub fn save_entered_api_key(app: &mut app::ExpertApp, input: &mut String) {
+    if input.trim().is_empty() {
+        input.clear();
+        app.set_api_key_entry(false);
+        app.set_status_message("Meta API key unchanged.");
+        return;
+    }
     let Some(path) = crate::tui::config::default_api_key_path() else {
         set_error(app, "API key save failed", "no API key path");
         return;
@@ -111,6 +119,30 @@ pub fn save_entered_api_key(app: &mut app::ExpertApp, input: &mut String) {
     }
 }
 
+/// Health-checks a candidate Meta API key with one bounded
+/// `list_models` call; nothing is saved when this fails.
+pub async fn check_api_key(key: &str) -> Result<(), String> {
+    let client = crate::llm::MetaClient::new(crate::llm::DEFAULT_BASE_URL, key.trim());
+    match tokio::time::timeout(std::time::Duration::from_secs(15), client.list_models()).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(err)) => Err(err.to_string()),
+        Err(_) => Err("Meta API check timed out after 15 seconds".to_string()),
+    }
+}
+
+/// Saves the entered key only after its health check passed; a
+/// failed check keeps the entry open and the typed key in place.
+pub fn save_checked_api_key(
+    app: &mut app::ExpertApp,
+    input: &mut String,
+    checked: Result<(), String>,
+) {
+    match checked {
+        Ok(()) => save_entered_api_key(app, input),
+        Err(err) => set_error(app, "API key check failed; key not saved", &err),
+    }
+}
+
 /// Loads the persisted disclosure acknowledgement, if any.
 pub fn load_disclosure_ack_default() -> bool {
     disclosure_ack_path()
@@ -123,12 +155,6 @@ pub fn save_disclosure_ack_default() {
     if let Some(path) = disclosure_ack_path() {
         let _ = save_disclosure_ack(&path);
     }
-}
-
-/// Returns true when this key press asks to re-run the preflight
-/// check: plain `r` while the Preflight screen is showing.
-pub fn preflight_retry_requested(screen: app::AppScreen, code: crossterm::event::KeyCode) -> bool {
-    screen == app::AppScreen::Preflight && code == crossterm::event::KeyCode::Char('r')
 }
 
 pub fn now_ms() -> u64 {

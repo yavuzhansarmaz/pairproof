@@ -15,7 +15,6 @@ use crate::tui::candidate_chat::{other_insert, ChatController};
 use crate::tui::candidate_final::{candidate_final, candidate_final_lines};
 use crate::tui::candidate_work::{work_lines, CandidateWork};
 use crate::tui::help::{candidate_help_lines_for, candidate_is_typing};
-use crate::tui::shared::sanitize_display;
 
 /// Focus pane while solving; Tab cycles Work, Other, Redirect, Chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -76,6 +75,9 @@ pub struct CandidateRunState {
     pub focus: CandidateFocus,
     pub paste_notice: bool,
     pub show_help: bool,
+    /// Set when the candidate backs out of Connect with an empty
+    /// Enter; the caller returns to the main menu instead of exiting.
+    pub back_to_menu: bool,
 }
 
 impl CandidateRunState {
@@ -97,6 +99,7 @@ impl CandidateRunState {
             focus: CandidateFocus::Work,
             paste_notice: false,
             show_help: false,
+            back_to_menu: false,
         }
     }
 
@@ -270,7 +273,14 @@ pub fn handle_candidate_key(state: &mut CandidateRunState, key: KeyEvent) {
     match state.app.screen() {
         CandidateScreen::Connect => match key.code {
             K::Enter => {
-                let _ = state.app.submit_connection(now_ms());
+                // `b` types into the connection string, so an empty
+                // Enter is the way back to the main menu.
+                if state.app.input_len() == 0 {
+                    state.back_to_menu = true;
+                    state.app.quit();
+                } else {
+                    let _ = state.app.submit_connection(now_ms());
+                }
             }
             K::Backspace => state.app.backspace(),
             K::Char(c) if !control => state.app.push_char(c),
@@ -300,7 +310,7 @@ pub fn handle_candidate_key(state: &mut CandidateRunState, key: KeyEvent) {
 /// Routes a paste by screen; solving pastes are always blocked.
 pub fn handle_candidate_paste(state: &mut CandidateRunState, text: &str) {
     match state.app.screen() {
-        CandidateScreen::Connect => state.app.push_text(text),
+        CandidateScreen::Connect => state.app.replace_text(text),
         CandidateScreen::Solving => match state.focus {
             CandidateFocus::Chat => {
                 let _ = state.chat.paste_input(text);
@@ -312,15 +322,13 @@ pub fn handle_candidate_paste(state: &mut CandidateRunState, text: &str) {
     }
 }
 
-/// Builds sanitized candidate screen lines for the run state.
+/// Builds candidate screen lines; every producer below sanitizes
+/// its own lines, so this aggregator does not sanitize again.
 pub fn candidate_screen_lines(state: &CandidateRunState) -> Vec<String> {
     if state.show_help {
-        return candidate_help_lines_for(state.app.screen(), state.focus)
-            .iter()
-            .map(|line| sanitize_display(line))
-            .collect();
+        return candidate_help_lines_for(state.app.screen(), state.focus);
     }
-    let lines = match state.app.screen() {
+    match state.app.screen() {
         CandidateScreen::Solving => {
             let mut lines = match state.app.session() {
                 Some(session) => work_lines(session, &state.work),
@@ -343,8 +351,7 @@ pub fn candidate_screen_lines(state: &CandidateRunState) -> Vec<String> {
             None => state.app.screen_lines(),
         },
         _ => state.app.screen_lines(),
-    };
-    lines.iter().map(|line| sanitize_display(line)).collect()
+    }
 }
 
 /// Restores the candidate terminal on drop for every exit path.

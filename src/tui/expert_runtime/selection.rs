@@ -1,7 +1,7 @@
 //! Expert runtime question selection: medium/hard fetching and
 //! selection backoff.
 
-use super::expert_runtime_build::widened_note;
+use super::build::widened_note;
 use super::*;
 
 impl ExpertRuntime {

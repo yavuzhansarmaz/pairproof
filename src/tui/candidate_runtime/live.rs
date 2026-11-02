@@ -36,10 +36,12 @@ fn live_lines(
         lines.push(CONNECTION_LOST.to_string());
         lines.push("press R to reconnect with a fresh string.".to_string());
     }
+    // `view.lines()` is already sanitized by its producer; only the
+    // raw typed texts appended here are sanitized, at this boundary.
     lines.extend([
-        format!("other: {}", state.work.other_text()),
-        format!("redirect: {}", state.work.redirect_text()),
-        format!("message: {}", state.chat.input_text()),
+        sanitize_display(&format!("other: {}", state.work.other_text())),
+        sanitize_display(&format!("redirect: {}", state.work.redirect_text())),
+        sanitize_display(&format!("message: {}", state.chat.input_text())),
     ]);
     if state.paste_notice || state.chat.paste_notice() {
         lines.push("pasting is blocked here; type instead.".to_string());
@@ -50,9 +52,9 @@ fn live_lines(
         "focus: work/other/redirect/chat (tab switches)".to_string()
     });
     if let Some(text) = status {
-        lines.push(text.clone());
+        lines.push(sanitize_display(text));
     }
-    lines.iter().map(|line| sanitize_display(line)).collect()
+    lines
 }
 pub fn handle_live_key<T: CandidateTransport>(
     state: &mut CandidateRunState,
@@ -247,8 +249,10 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                 .unwrap_or(24)
                 .saturating_sub(2),
         );
-        let _ = terminal
-            .draw(|frame| crate::tui::render::draw_screen(frame, &visible, state.show_help));
+        // The connection screen sits centred like the expert main
+        // menu; later screens use the full area.
+        let centered = state.show_help || (!live && state.app.screen() == CandidateScreen::Connect);
+        let _ = terminal.draw(|frame| crate::tui::render::draw_screen(frame, &visible, centered));
         if crossterm::event::poll(Duration::from_millis(250)).unwrap_or(false) {
             match crossterm::event::read() {
                 Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => {

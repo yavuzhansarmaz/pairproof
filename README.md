@@ -21,7 +21,7 @@ Startup note: on every interactive (TTY) launch without a subcommand, PairProof 
 ## 3. Expert workflow
 
 1. Start PairProof as expert (see Section 9). If you pass `--role expert`, preflight runs immediately; otherwise it runs when you enter the Expert Setup screen.
-2. Pass the preflight checklist (Docker, daemon, sandbox image, port, external IP / CGNAT, Mutagen probe). A `Fail` blocks the session; a `Warn` (for example, a missing sandbox image that will be built on first use) does not.
+2. Pass the preflight checklist (Docker, daemon, sandbox image, port, connection, Mutagen probe). A `Fail` blocks the session; a `Warn` (for example, a missing sandbox image that will be built on first use) does not. The connection line is informational only: the reachable endpoint is set up automatically when the session starts, and no network action is required from the user.
 3. Make sure a Meta Model API key is available before the session (see Section 9). All Meta charges run on the expert's key. On the Expert Setup screen you first acknowledge the Meta disclosure with Enter, then — if no key is configured yet — press Enter again to type and save a Meta API key (input is masked). A key from the environment or the stored key file is used as-is, and a previously given disclosure acknowledgement is remembered.
 4. Paste the job description first and confirm with Enter, then paste additional notes or press Enter to skip them. Only the job description is required for topic/level/language extraction. Blank pastes and pastes over 50,000 characters are rejected.
 5. Confirm the extracted setup. The system creates a disposable Docker sandbox and a session.
@@ -66,7 +66,7 @@ Not currently scored in the live flow (do not rely on these):
 - Raw job-description/notes pastes are deleted at session end. Final artifacts never carry the API key, connection secret, or raw pastes.
 - API keys at rest: the stored key file (`~/.config/pairproof/api_key`) is written with `0600` permissions in a `0700` directory via atomic rename, with symlink refusal. Keys are masked (last 4 characters only) in display and redacted in debug output.
 
-Endpoint reachability: the expert currently publishes the sandbox endpoint as `127.0.0.1:<port>`. For a candidate on another machine, arrange a tunnel or port-forward (for example, an SSH tunnel) before the session; PairProof does not set this up automatically yet.
+Endpoint reachability: at session start PairProof sets up the candidate endpoint automatically — it uses a public interface address directly, or opens a session-scoped router port mapping via NAT-PMP or UPnP IGD (discovering the external address via STUN and the router), puts that public endpoint in the connection string, and removes the mapping at session end. No user network configuration is required. When no automatic path exists (for example behind CGNAT with no mappable router), the session falls back to the loopback endpoint `127.0.0.1:<port>`, which still supports same-machine use and a manually arranged tunnel.
 
 ## 7. Prerequisites and supported environment
 
@@ -225,7 +225,7 @@ PairProof is an early-stage open-source project (version `0.1.0`), originally bu
 
 Current scope and known limitations:
 
-- **Remote sessions:** the sandbox endpoint is currently published on the expert machine's loopback interface, so a candidate on another machine needs a tunnel or port-forward (for example, an SSH tunnel) arranged before the session.
+- **Remote sessions:** the candidate endpoint is set up automatically at session start (public address, NAT-PMP, or UPnP port mapping; see Section 6). Networks where no automatic mapping is possible (for example CGNAT without a mappable router) fall back to the loopback endpoint, which needs a manually arranged tunnel for a remote candidate; a relay that also covers those networks is not built yet.
 - **Re-question flow:** candidates can request a replacement question, but the expert-side resolution action is not implemented yet; interviewers should skip this action for now.
 - **Scoring inputs:** live scoring is based on approach quality, token efficiency, and intervention events. Counted test pass/fail rates and bulk-paste signals are not yet part of the score (see Section 5).
 - **Resilience:** recovery handling covers question-loading failures; a general pause/resume for arbitrary external service outages is planned but not available yet.

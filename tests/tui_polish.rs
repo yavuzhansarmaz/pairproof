@@ -435,20 +435,69 @@ fn expert_event_action_never_dispatches_modified_letter_keys() {
 }
 
 #[test]
-fn preflight_retry_is_requested_only_by_r_on_preflight() {
-    use pairproof::tui::expert_tty::preflight_retry_requested;
-    assert!(preflight_retry_requested(
-        AppScreen::Preflight,
-        KeyCode::Char('r')
+fn preflight_help_offers_api_key_change_without_rerun() {
+    let lines = expert_help_lines(AppScreen::Preflight).join("\n");
+    assert!(lines.contains("m change the Meta API key"), "{lines}");
+    assert!(!lines.contains("enter follows"), "{lines}");
+    assert!(!lines.contains("b back to the main menu"), "{lines}");
+    assert!(lines.contains("b close help"), "{lines}");
+    assert!(!lines.contains("re-run"), "{lines}");
+    assert!(help_overlay_dispatches(
+        KeyCode::Char('m'),
+        AppScreen::Preflight
     ));
-    assert!(!preflight_retry_requested(
-        AppScreen::Setup,
-        KeyCode::Char('r')
+    assert!(help_overlay_dispatches(
+        KeyCode::Char('m'),
+        AppScreen::Setup
     ));
-    assert!(!preflight_retry_requested(
-        AppScreen::Preflight,
-        KeyCode::Enter
+    assert!(!help_overlay_dispatches(
+        KeyCode::Char('m'),
+        AppScreen::Monitor
     ));
+    assert!(!help_overlay_dispatches(
+        KeyCode::Char('r'),
+        AppScreen::Preflight
+    ));
+}
+
+#[test]
+fn failed_api_key_check_keeps_entry_and_saves_nothing() {
+    use pairproof::tui::expert_tty::save_checked_api_key;
+    let mut app = ExpertApp::new();
+    app.handle(AppEvent::SelectExpert).expect("preflight");
+    app.set_api_key_entry(true);
+    let mut input = "bad-key".to_string();
+    save_checked_api_key(&mut app, &mut input, Err("status 401".to_string()));
+    assert!(app.api_key_entry, "entry stays open to fix the key");
+    assert!(!app.api_key_ready);
+    assert_eq!(input, "bad-key", "typed key is kept for editing");
+    assert!(
+        app.status_message()
+            .is_some_and(|m| m.contains("key not saved")),
+        "{:?}",
+        app.status_message()
+    );
+}
+
+#[test]
+fn empty_api_key_enter_closes_without_saving() {
+    use pairproof::tui::expert_tty::save_entered_api_key;
+    let mut app = ExpertApp::new();
+    app.handle(AppEvent::SelectExpert).expect("preflight");
+    app.set_api_key_ready(true);
+    app.set_api_key_entry(true);
+    let mut input = String::new();
+    save_entered_api_key(&mut app, &mut input);
+    assert!(!app.api_key_entry);
+    assert!(app.api_key_ready, "existing key must stay ready");
+    assert!(input.is_empty());
+    assert_eq!(app.status_message(), Some("Meta API key unchanged."));
+    // Whitespace-only input is also "0 characters" and must not save.
+    app.set_api_key_entry(true);
+    let mut blank = "   ".to_string();
+    save_entered_api_key(&mut app, &mut blank);
+    assert!(!app.api_key_entry);
+    assert!(blank.is_empty());
 }
 
 #[test]

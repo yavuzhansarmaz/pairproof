@@ -29,7 +29,7 @@ fn footer(app: &ExpertApp) -> String {
             if app.api_key_entry {
                 "backspace delete, esc quit".to_string()
             } else {
-                "b back, r re-run, esc quit, ? help".to_string()
+                "b back, esc quit, ? help".to_string()
             }
         }
         AppScreen::Setup => "enter continue, b back, esc quit, ? help".to_string(),
@@ -85,15 +85,18 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                 if app.api_key_entry {
                     lines.push("  Meta API key: entry open (hidden).".into());
                 } else {
-                    lines.push(format!(
-                        "  {}",
-                        app.api_key_status
-                            .as_deref()
-                            .unwrap_or("Meta API key: not checked yet")
-                    ));
+                    let status = app
+                        .api_key_status
+                        .as_deref()
+                        .unwrap_or("Meta API key: not checked yet");
+                    lines.push(if app.api_key_ready {
+                        format!("  [PASS] {status}")
+                    } else {
+                        format!("  {status}")
+                    });
                 }
                 if app.disclosure_acknowledged {
-                    lines.push("  disclosure: acknowledged.".into());
+                    lines.push("  [PASS] Disclosure: acknowledged".into());
                 } else {
                     lines.extend([
                         "Meta disclosure".into(),
@@ -105,13 +108,13 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                 }
                 lines.push("".into());
                 lines.push(if app.api_key_entry {
-                    "press enter to save the key.".into()
+                    "press enter to save the key (empty enter closes without saving).".into()
                 } else if !app.disclosure_acknowledged {
                     "press enter to acknowledge the disclosure.".into()
                 } else if !app.api_key_ready {
                     "press enter to add your Meta API key.".into()
                 } else if !app.preflight_passed {
-                    "fix failing checks, then press r to re-run them.".into()
+                    "fix the failing checks, then restart to check again.".into()
                 } else {
                     "ready. press enter to continue.".into()
                 });
@@ -167,7 +170,7 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
         }
     }
     if let Some(message) = app.status_message() {
-        lines.push(format!("status: {}", sanitize_display(message)));
+        lines.push(format!("status: {message}"));
     }
     lines.push(footer(app));
     lines.iter().map(|line| sanitize_display(line)).collect()

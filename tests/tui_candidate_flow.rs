@@ -352,6 +352,83 @@ fn candidate_terminal_is_restored_after_error_and_quit() {
 }
 
 #[test]
+fn empty_enter_on_connect_goes_back_to_menu() {
+    let mut state = CandidateRunState::new();
+    assert_eq!(state.app.screen(), CandidateScreen::Connect);
+    handle_candidate_key(&mut state, key(KeyCode::Enter));
+    assert!(state.back_to_menu);
+    assert_eq!(state.app.screen(), CandidateScreen::Exited);
+}
+
+#[test]
+fn repasting_after_malformed_replaces_old_string() {
+    let app = CandidateApp::with_verifier(OkVerifier);
+    let mut state =
+        CandidateRunState::with_parts(app, CandidateWork::new(), ChatController::default());
+    handle_candidate_paste(&mut state, "not-a-connection-string");
+    handle_candidate_key(&mut state, key(KeyCode::Enter));
+    assert_eq!(state.app.screen(), CandidateScreen::Connect);
+    let fresh = encoded_connection();
+    handle_candidate_paste(&mut state, &fresh);
+    assert_eq!(state.app.input_len(), fresh.chars().count());
+    handle_candidate_key(&mut state, key(KeyCode::Enter));
+    assert_eq!(state.app.screen(), CandidateScreen::Rules);
+}
+
+#[test]
+fn space_on_connect_is_not_a_character() {
+    let mut state = CandidateRunState::new();
+    handle_candidate_key(&mut state, key(KeyCode::Char(' ')));
+    assert_eq!(state.app.input_len(), 0);
+    handle_candidate_paste(&mut state, " ab c ");
+    assert_eq!(state.app.input_len(), 3);
+    state.app.clear_input();
+    handle_candidate_key(&mut state, key(KeyCode::Enter));
+    assert!(state.back_to_menu, "space-only input still counts as empty");
+}
+
+#[test]
+fn manual_retype_after_malformed_starts_fresh() {
+    let app = CandidateApp::with_verifier(OkVerifier);
+    let mut state =
+        CandidateRunState::with_parts(app, CandidateWork::new(), ChatController::default());
+    handle_candidate_paste(&mut state, "not-a-connection-string");
+    handle_candidate_key(&mut state, key(KeyCode::Enter));
+    assert_eq!(state.app.screen(), CandidateScreen::Connect);
+    // Typing the fresh string by hand must clear the rejected one on
+    // the first keystroke, not append to it.
+    let fresh = encoded_connection();
+    for c in fresh.chars() {
+        handle_candidate_key(&mut state, key(KeyCode::Char(c)));
+    }
+    assert_eq!(state.app.input_len(), fresh.chars().count());
+    handle_candidate_key(&mut state, key(KeyCode::Enter));
+    assert_eq!(state.app.screen(), CandidateScreen::Rules);
+}
+
+#[test]
+fn typed_enter_on_connect_does_not_go_back() {
+    let mut state = CandidateRunState::new();
+    handle_candidate_key(&mut state, key(KeyCode::Char('x')));
+    handle_candidate_key(&mut state, key(KeyCode::Enter));
+    assert!(!state.back_to_menu);
+    assert_eq!(state.app.screen(), CandidateScreen::Connect);
+}
+
+#[test]
+fn candidate_screen_lines_strip_escapes_via_producers() {
+    // Aggregators no longer re-sanitize; the statement producer must
+    // strip escapes itself so no raw ESC reaches the terminal.
+    let mut state = solving_state(started());
+    state
+        .work
+        .set_statement("e0", "\u{1b}[31mDanger\u{1b}[0m statement");
+    let lines = candidate_screen_lines(&state);
+    assert!(lines.iter().all(|line| !line.contains('\u{1b}')));
+    assert!(lines.iter().any(|line| line.contains("Danger")));
+}
+
+#[test]
 fn now_ms_is_positive_epoch_millis() {
     let first = pairproof::tui::candidate_run::now_ms();
     assert!(first > 1_700_000_000_000, "{first}");
