@@ -6,6 +6,7 @@ use crossterm::event::{KeyCode as K, KeyEvent, KeyModifiers};
 
 use crate::core::Session;
 use crate::llm::chat::ChatState;
+use crate::orchestration::{Clock, SystemClock};
 use crate::tui::candidate::{CandidateApp, CandidateScreen};
 use crate::tui::candidate_actions::{
     UnavailableCodingRunner, UnavailableOtherGrader, UnavailableTestRunner,
@@ -14,7 +15,6 @@ use crate::tui::candidate_chat::{other_insert, ChatController};
 use crate::tui::candidate_final::{candidate_final, candidate_final_lines};
 use crate::tui::candidate_work::{work_lines, CandidateWork};
 use crate::tui::help::{candidate_help_lines_for, candidate_is_typing};
-use crate::tui::shared::sanitize_display;
 
 /// Focus pane while solving; Tab cycles Work, Other, Redirect, Chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -26,6 +26,47 @@ pub enum CandidateFocus {
     Chat,
 }
 
+/// One work-pane key action, shared by the offline and live handlers
+/// so both paths map the same keys to the same actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkKeyAction {
+    SelectPreset(u8),
+    OpenOther,
+    Continue,
+    OpenRedirect,
+    ChangeApproach,
+    RequestTests,
+    Finish,
+    Skip,
+    RequestReQuestion,
+}
+
+/// Classifies a typed work-pane character; `None` is not a work key.
+pub fn work_key_action(c: char) -> Option<WorkKeyAction> {
+    match c {
+        '1'..='4' => Some(WorkKeyAction::SelectPreset(c as u8 - b'1')),
+        '5' | 'o' => Some(WorkKeyAction::OpenOther),
+        'c' => Some(WorkKeyAction::Continue),
+        'd' => Some(WorkKeyAction::OpenRedirect),
+        'a' => Some(WorkKeyAction::ChangeApproach),
+        't' => Some(WorkKeyAction::RequestTests),
+        'f' => Some(WorkKeyAction::Finish),
+        's' => Some(WorkKeyAction::Skip),
+        'r' => Some(WorkKeyAction::RequestReQuestion),
+        _ => None,
+    }
+}
+
+/// Next pane in the Tab cycle: Work, Other, Redirect, Chat, Work.
+pub fn next_focus(focus: CandidateFocus) -> CandidateFocus {
+    match focus {
+        CandidateFocus::Work => CandidateFocus::Other,
+        CandidateFocus::Other => CandidateFocus::Redirect,
+        CandidateFocus::Redirect => CandidateFocus::Chat,
+        CandidateFocus::Chat => CandidateFocus::Work,
+    }
+}
+
 /// Pure candidate run state; runners are fresh unavailable values.
 pub struct CandidateRunState {
     pub app: CandidateApp,
@@ -34,6 +75,9 @@ pub struct CandidateRunState {
     pub focus: CandidateFocus,
     pub paste_notice: bool,
     pub show_help: bool,
+    /// Set when the candidate backs out of Connect with an empty
+    /// Enter; the caller returns to the main menu instead of exiting.
+    pub back_to_menu: bool,
 }
 
 impl CandidateRunState {
@@ -55,6 +99,7 @@ impl CandidateRunState {
             focus: CandidateFocus::Work,
             paste_notice: false,
             show_help: false,
+            back_to_menu: false,
         }
     }
 
@@ -72,12 +117,10 @@ impl Default for CandidateRunState {
     }
 }
 
-/// Returns the current time in milliseconds for connection expiry.
+/// Returns the current time in milliseconds for connection expiry;
+/// delegates to the shared orchestration system clock.
 pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| (d.as_millis()).min(u128::from(u64::MAX)) as u64)
-        .unwrap_or(0)
+    SystemClock.now_ms()
 }
 
 fn pop_last(text: &str) -> String {
@@ -107,36 +150,35 @@ fn submit_chat(state: &mut CandidateRunState) {
 
 fn handle_work_key(state: &mut CandidateRunState, key: KeyEvent, control: bool) {
     match key.code {
-        K::Tab => state.focus = CandidateFocus::Other,
-        K::Char(c) if !control => match c {
-            '1'..='4' => {
-                let preset = c as u8 - b'1';
+        K::Tab => state.focus = next_focus(state.focus),
+        K::Char(c) if !control => match work_key_action(c) {
+            Some(WorkKeyAction::SelectPreset(preset)) => {
                 state.with_session(|work, session| {
                     let _ =
                         work.select_preset(session, preset, &mut UnavailableCodingRunner, now_ms());
                 });
             }
-            '5' | 'o' => state.focus = CandidateFocus::Other,
-            'c' => state.with_session(|work, session| {
+            Some(WorkKeyAction::OpenOther) => state.focus = CandidateFocus::Other,
+            Some(WorkKeyAction::Continue) => state.with_session(|work, session| {
                 let _ = work.continue_work(session, &mut UnavailableCodingRunner, now_ms());
             }),
-            'd' => state.focus = CandidateFocus::Redirect,
-            'a' => state.with_session(|work, session| {
+            Some(WorkKeyAction::OpenRedirect) => state.focus = CandidateFocus::Redirect,
+            Some(WorkKeyAction::ChangeApproach) => state.with_session(|work, session| {
                 let _ = work.change_approach(session, now_ms());
             }),
-            't' => state.with_session(|work, session| {
+            Some(WorkKeyAction::RequestTests) => state.with_session(|work, session| {
                 let _ = work.request_tests(session, &mut UnavailableTestRunner, now_ms());
             }),
-            'f' => state.with_session(|work, session| {
+            Some(WorkKeyAction::Finish) => state.with_session(|work, session| {
                 let _ = work.finish_question(session, now_ms());
             }),
-            's' => state.with_session(|work, session| {
+            Some(WorkKeyAction::Skip) => state.with_session(|work, session| {
                 let _ = work.skip_question(session, now_ms());
             }),
-            'r' => state.with_session(|work, session| {
+            Some(WorkKeyAction::RequestReQuestion) => state.with_session(|work, session| {
                 let _ = work.request_requestion(session, now_ms());
             }),
-            _ => {}
+            None => {}
         },
         _ => {}
     }
@@ -144,7 +186,7 @@ fn handle_work_key(state: &mut CandidateRunState, key: KeyEvent, control: bool) 
 
 fn handle_other_key(state: &mut CandidateRunState, key: KeyEvent, control: bool) {
     match key.code {
-        K::Tab => state.focus = CandidateFocus::Redirect,
+        K::Tab => state.focus = next_focus(state.focus),
         K::Enter => {
             state.with_session(|work, session| {
                 let _ = work.select_other_graded(
@@ -173,7 +215,7 @@ fn handle_other_key(state: &mut CandidateRunState, key: KeyEvent, control: bool)
 
 fn handle_redirect_key(state: &mut CandidateRunState, key: KeyEvent, control: bool) {
     match key.code {
-        K::Tab => state.focus = CandidateFocus::Chat,
+        K::Tab => state.focus = next_focus(state.focus),
         K::Enter => {
             state.with_session(|work, session| {
                 let _ = work.redirect(session, &mut UnavailableCodingRunner, now_ms());
@@ -193,7 +235,7 @@ fn handle_redirect_key(state: &mut CandidateRunState, key: KeyEvent, control: bo
 
 fn handle_chat_key(state: &mut CandidateRunState, key: KeyEvent, control: bool) {
     match key.code {
-        K::Tab => state.focus = CandidateFocus::Work,
+        K::Tab => state.focus = next_focus(state.focus),
         K::Enter => submit_chat(state),
         K::Backspace => state.chat.backspace_input(),
         K::Char(c) if !control => state.chat.type_char(c),
@@ -231,7 +273,14 @@ pub fn handle_candidate_key(state: &mut CandidateRunState, key: KeyEvent) {
     match state.app.screen() {
         CandidateScreen::Connect => match key.code {
             K::Enter => {
-                let _ = state.app.submit_connection(now_ms());
+                // `b` types into the connection string, so an empty
+                // Enter is the way back to the main menu.
+                if state.app.input_len() == 0 {
+                    state.back_to_menu = true;
+                    state.app.quit();
+                } else {
+                    let _ = state.app.submit_connection(now_ms());
+                }
             }
             K::Backspace => state.app.backspace(),
             K::Char(c) if !control => state.app.push_char(c),
@@ -261,7 +310,7 @@ pub fn handle_candidate_key(state: &mut CandidateRunState, key: KeyEvent) {
 /// Routes a paste by screen; solving pastes are always blocked.
 pub fn handle_candidate_paste(state: &mut CandidateRunState, text: &str) {
     match state.app.screen() {
-        CandidateScreen::Connect => state.app.push_text(text),
+        CandidateScreen::Connect => state.app.replace_text(text),
         CandidateScreen::Solving => match state.focus {
             CandidateFocus::Chat => {
                 let _ = state.chat.paste_input(text);
@@ -273,15 +322,13 @@ pub fn handle_candidate_paste(state: &mut CandidateRunState, text: &str) {
     }
 }
 
-/// Builds sanitized candidate screen lines for the run state.
+/// Builds candidate screen lines; every producer below sanitizes
+/// its own lines, so this aggregator does not sanitize again.
 pub fn candidate_screen_lines(state: &CandidateRunState) -> Vec<String> {
     if state.show_help {
-        return candidate_help_lines_for(state.app.screen(), state.focus)
-            .iter()
-            .map(|line| sanitize_display(line))
-            .collect();
+        return candidate_help_lines_for(state.app.screen(), state.focus);
     }
-    let lines = match state.app.screen() {
+    match state.app.screen() {
         CandidateScreen::Solving => {
             let mut lines = match state.app.session() {
                 Some(session) => work_lines(session, &state.work),
@@ -304,8 +351,7 @@ pub fn candidate_screen_lines(state: &CandidateRunState) -> Vec<String> {
             None => state.app.screen_lines(),
         },
         _ => state.app.screen_lines(),
-    };
-    lines.iter().map(|line| sanitize_display(line)).collect()
+    }
 }
 
 /// Restores the candidate terminal on drop for every exit path.

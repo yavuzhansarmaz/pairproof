@@ -132,6 +132,21 @@ fn connection_requires_locked_event_not_timer() {
 }
 
 #[test]
+fn back_from_connection_wait_returns_to_proposal() {
+    let mut app = ExpertApp::new();
+    advance_to_connection_wait(&mut app);
+    assert_eq!(app.screen(), AppScreen::ConnectionWait);
+    assert!(app.can_go_back());
+    assert_eq!(app.handle(AppEvent::Back), Ok(AppScreen::Proposal));
+    assert_eq!(app.screen(), AppScreen::Proposal);
+    // Re-confirming returns to the wait with the runtime intact.
+    assert_eq!(
+        app.handle(AppEvent::ProposalConfirmed),
+        Ok(AppScreen::ConnectionWait)
+    );
+}
+
+#[test]
 fn accidental_disconnect_stays_on_monitor() {
     let mut app = ExpertApp::new();
     advance_to_monitor(&mut app);
@@ -210,12 +225,11 @@ fn candidate_selection_never_enters_expert_flow() {
 }
 
 #[test]
-fn retry_preserves_screen() {
+fn preflight_advance_keeps_screen_until_disclosure() {
     let mut app = ExpertApp::new();
     app.handle(AppEvent::SelectExpert).expect("to preflight");
     app.set_preflight_passed(true);
     app.set_api_key_ready(true);
-    assert_eq!(app.handle(AppEvent::Retry), Ok(AppScreen::Preflight));
     assert_eq!(app.screen(), AppScreen::Preflight);
     assert!(app.preflight_passed);
     app.handle(AppEvent::DisclosureAcknowledged)
@@ -241,6 +255,39 @@ fn back_is_rejected_past_the_runtime_commit_point() {
     assert!(!app.can_go_back());
     assert!(app.handle(AppEvent::Back).is_err());
     assert_eq!(app.screen(), AppScreen::Final);
+}
+
+#[test]
+fn proposal_and_final_lines_render_on_their_screens() {
+    let mut app = ExpertApp::new();
+    advance_to_setup(&mut app);
+    app.set_has_proposal(true);
+    app.set_proposal_lines(vec![
+        "Level: mid".to_string(),
+        "Topics: array, hash-table".to_string(),
+        "Language: Python".to_string(),
+    ]);
+    assert_eq!(app.handle(AppEvent::ProposalReady), Ok(AppScreen::Proposal));
+    let proposal = screen_lines(&app).join("\n");
+    assert!(proposal.contains("Level: mid"), "{proposal}");
+    assert!(proposal.contains("Topics: array, hash-table"), "{proposal}");
+    assert!(proposal.contains("Language: Python"), "{proposal}");
+    assert!(
+        proposal.contains("press enter to wait for the candidate, b back, esc quit, ? help"),
+        "{proposal}"
+    );
+    assert!(!proposal.contains("enter confirm"), "{proposal}");
+
+    let mut done = ExpertApp::new();
+    advance_to_monitor(&mut done);
+    done.set_final_lines(vec![
+        "Final breakdown".to_string(),
+        "final rating: 7.50".to_string(),
+    ]);
+    assert_eq!(done.handle(AppEvent::EndSession), Ok(AppScreen::Final));
+    let final_lines = screen_lines(&done).join("\n");
+    assert!(final_lines.contains("Final breakdown"), "{final_lines}");
+    assert!(final_lines.contains("final rating: 7.50"), "{final_lines}");
 }
 
 #[test]
@@ -341,7 +388,7 @@ fn screen_lines_are_sanitized_with_footers() {
     );
     assert_eq!(
         lines.last().map(String::as_str),
-        Some("b back, r re-run, esc quit, ? help")
+        Some("b back, esc quit, ? help")
     );
     assert!(!joined.contains("Esc qui\n"), "{joined}");
     assert!(!joined.contains("API key is never shown"), "{joined}");
@@ -366,7 +413,7 @@ fn expert_setup_steps_ack_then_api_key_then_continue() {
         .expect("acknowledge");
     let after = screen_lines(&app).join("\n");
     assert!(!after.contains("will be sent"), "{after}");
-    assert!(after.contains("disclosure: acknowledged."), "{after}");
+    assert!(after.contains("[PASS] Disclosure: acknowledged"), "{after}");
     assert!(
         after.contains("press enter to add your Meta API key."),
         "{after}"
@@ -377,6 +424,12 @@ fn expert_setup_steps_ack_then_api_key_then_continue() {
     );
     assert_eq!(app.screen(), AppScreen::Preflight);
     app.set_api_key_ready(true);
+    app.set_api_key_status("Meta API key: configured (••••1234)");
+    let ready_lines = screen_lines(&app).join("\n");
+    assert!(
+        ready_lines.contains("[PASS] Meta API key: configured"),
+        "{ready_lines}"
+    );
     assert_eq!(
         app.handle(AppEvent::PreflightCompleted),
         Ok(AppScreen::Setup)

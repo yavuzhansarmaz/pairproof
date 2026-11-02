@@ -33,7 +33,6 @@ pub enum AppEvent {
     CandidateReconnected,
     Back,
     Quit,
-    Retry,
 }
 
 /// Typed navigation failures; illegal events never panic.
@@ -86,7 +85,6 @@ fn event_name(event: AppEvent) -> &'static str {
         AppEvent::CandidateReconnected => "CandidateReconnected",
         AppEvent::Back => "Back",
         AppEvent::Quit => "Quit",
-        AppEvent::Retry => "Retry",
     }
 }
 
@@ -104,6 +102,8 @@ pub struct ExpertApp {
     pub disconnected: bool,
     pub candidate_placeholder: bool,
     pub preflight_lines: Vec<String>,
+    pub proposal_lines: Vec<String>,
+    pub final_lines: Vec<String>,
     pub api_key_status: Option<String>,
     pub api_key_ready: bool,
     pub api_key_entry: bool,
@@ -129,6 +129,16 @@ impl ExpertApp {
     /// Records the compact per-check lines shown on Expert Setup.
     pub fn set_preflight_lines(&mut self, lines: Vec<String>) {
         self.preflight_lines = lines;
+    }
+
+    /// Records the proposal lines shown on the Proposal screen.
+    pub fn set_proposal_lines(&mut self, lines: Vec<String>) {
+        self.proposal_lines = lines;
+    }
+
+    /// Records the final breakdown lines shown on the Final screen.
+    pub fn set_final_lines(&mut self, lines: Vec<String>) {
+        self.final_lines = lines;
     }
 
     /// Records the API-key status line shown on Expert Setup.
@@ -193,19 +203,23 @@ impl ExpertApp {
     }
 
     /// Returns true when Back can return to a previous screen.
-    /// Screens past Proposal commit external state (a built runtime,
-    /// a locked connection, a committed selection, a live or ended
-    /// session), so Back is not offered there.
+    /// Screens past Proposal commit external state (a locked
+    /// connection, a committed selection, a live or ended session),
+    /// so Back is not offered there. ConnectionWait is the exception:
+    /// the runtime stays built and re-confirming returns here.
     pub fn can_go_back(&self) -> bool {
         self.screen != AppScreen::Exited
-            && !is_irreversible(self.screen)
             && !self.history.is_empty()
+            && (!is_irreversible(self.screen) || self.screen == AppScreen::ConnectionWait)
     }
 
     /// Pops to the previous screen; RoleSelect/Exited and screens
-    /// past the runtime commit point are typed errors.
+    /// past the runtime commit point (except ConnectionWait) are
+    /// typed errors.
     pub fn back(&mut self) -> Result<AppScreen, AppError> {
-        if self.screen == AppScreen::Exited || is_irreversible(self.screen) {
+        if self.screen == AppScreen::Exited
+            || (is_irreversible(self.screen) && self.screen != AppScreen::ConnectionWait)
+        {
             return Err(self.invalid(AppEvent::Back));
         }
         match self.history.pop() {
@@ -227,7 +241,6 @@ impl ExpertApp {
                 Ok(self.screen)
             }
             AppEvent::Back => self.back(),
-            AppEvent::Retry => Ok(self.screen),
             _ => self.handle_forward(event),
         }
     }
@@ -322,4 +335,4 @@ impl ExpertApp {
     }
 }
 
-pub use crate::tui::expert_view::{screen_lines, screen_title};
+pub use crate::tui::expert_view::{footer, screen_lines, screen_title};

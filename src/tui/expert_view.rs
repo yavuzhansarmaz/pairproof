@@ -12,7 +12,7 @@ pub fn screen_title(screen: AppScreen) -> &'static str {
         AppScreen::Preflight => "Expert Setup",
         AppScreen::Setup => "Session setup",
         AppScreen::Proposal => "Proposed context",
-        AppScreen::ConnectionWait => "Waiting for candidate",
+        AppScreen::ConnectionWait => "waiting for candidate to connect",
         AppScreen::SelectMedium => "Select medium questions",
         AppScreen::SelectHard => "Select hard questions",
         AppScreen::Monitor => "Live monitor",
@@ -21,27 +21,29 @@ pub fn screen_title(screen: AppScreen) -> &'static str {
     }
 }
 
-fn footer(app: &ExpertApp) -> String {
-    match app.screen() {
+pub fn footer(app: &ExpertApp) -> Option<String> {
+    let text = match app.screen() {
         AppScreen::Exited => "esc quit".to_string(),
         AppScreen::RoleSelect => "e expert, c candidate, esc quit, ? help".to_string(),
         AppScreen::Preflight => {
             if app.api_key_entry {
                 "backspace delete, esc quit".to_string()
             } else {
-                "b back, r re-run, esc quit, ? help".to_string()
+                "b back, esc quit, ? help".to_string()
             }
         }
         AppScreen::Setup => "enter continue, b back, esc quit, ? help".to_string(),
-        AppScreen::Proposal => "enter confirm, b back, esc quit, ? help".to_string(),
-        AppScreen::ConnectionWait => "esc quit, ? help".to_string(),
+        // Proposal carries its keys on the wait line; no footer.
+        AppScreen::Proposal => String::new(),
+        AppScreen::ConnectionWait => "b back, esc quit, ? help".to_string(),
         AppScreen::SelectMedium => "enter load medium questions, esc quit, ? help".to_string(),
         AppScreen::SelectHard => "enter load hard questions, esc quit, ? help".to_string(),
         AppScreen::Monitor => {
             "e end the session, R reissue after disconnect, esc quit, ? help".to_string()
         }
         AppScreen::Final => "enter close, esc quit".to_string(),
-    }
+    };
+    (!text.is_empty()).then_some(text)
 }
 
 /// Builds deterministic sanitized lines for rendering one screen.
@@ -85,15 +87,18 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                 if app.api_key_entry {
                     lines.push("  Meta API key: entry open (hidden).".into());
                 } else {
-                    lines.push(format!(
-                        "  {}",
-                        app.api_key_status
-                            .as_deref()
-                            .unwrap_or("Meta API key: not checked yet")
-                    ));
+                    let status = app
+                        .api_key_status
+                        .as_deref()
+                        .unwrap_or("Meta API key: not checked yet");
+                    lines.push(if app.api_key_ready {
+                        format!("  [PASS] {status}")
+                    } else {
+                        format!("  {status}")
+                    });
                 }
                 if app.disclosure_acknowledged {
-                    lines.push("  disclosure: acknowledged.".into());
+                    lines.push("  [PASS] Disclosure: acknowledged".into());
                 } else {
                     lines.extend([
                         "Meta disclosure".into(),
@@ -105,13 +110,13 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                 }
                 lines.push("".into());
                 lines.push(if app.api_key_entry {
-                    "press enter to save the key.".into()
+                    "press enter to save the key (empty enter closes without saving).".into()
                 } else if !app.disclosure_acknowledged {
                     "press enter to acknowledge the disclosure.".into()
                 } else if !app.api_key_ready {
                     "press enter to add your Meta API key.".into()
                 } else if !app.preflight_passed {
-                    "fix failing checks, then press r to re-run them.".into()
+                    "fix the failing checks, then restart to check again.".into()
                 } else {
                     "ready. press enter to continue.".into()
                 });
@@ -129,13 +134,25 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                 });
             }
             S::Proposal => {
-                lines.push("review the proposal. press enter to wait for the candidate.".into())
+                if app.proposal_lines.is_empty() {
+                    lines.push(
+                        "review the proposal. press enter to wait for the candidate, b back, esc quit, ? help"
+                            .into(),
+                    );
+                } else {
+                    for line in &app.proposal_lines {
+                        lines.push(format!("  {line}"));
+                    }
+                    lines.push(
+                        "press enter to wait for the candidate, b back, esc quit, ? help".into(),
+                    );
+                }
             }
-            S::ConnectionWait => lines.push(if app.connected {
-                "candidate connected.".into()
-            } else {
-                "waiting for candidate to connect.".into()
-            }),
+            S::ConnectionWait => {
+                if app.connected {
+                    lines.push("candidate connected.".into());
+                }
+            }
             S::SelectMedium => lines.push("press enter to load 3 medium questions.".into()),
             S::SelectHard => {
                 lines.push("press enter to load 2 hard questions and open the monitor.".into())
@@ -148,13 +165,21 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                 });
                 lines.push("press e to end the session.".into());
             }
-            S::Final => lines.push("session ended.".into()),
+            S::Final => {
+                if app.final_lines.is_empty() {
+                    lines.push("session ended.".into());
+                } else {
+                    lines.extend(app.final_lines.iter().cloned());
+                }
+            }
             S::Exited => lines.push("goodbye.".into()),
         }
     }
     if let Some(message) = app.status_message() {
-        lines.push(format!("status: {}", sanitize_display(message)));
+        lines.push(format!("status: {message}"));
     }
-    lines.push(footer(app));
+    if let Some(foot) = footer(app) {
+        lines.push(foot);
+    }
     lines.iter().map(|line| sanitize_display(line)).collect()
 }

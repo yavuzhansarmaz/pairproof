@@ -300,7 +300,7 @@ async fn flow(
     chk(rating.is_finite(), "final rating not finite")?;
     chk(chats > 0, "final snapshot lost the real chat reply")?;
     chk(
-        lines.iter().any(|l| l.contains("Final rating")),
+        lines.iter().any(|l| l.contains("final rating")),
         "candidate view lacks final rating line",
     )?;
     println!("livemeta candidate final rating={rating:.2} lines={lines:?}");

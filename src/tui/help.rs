@@ -25,21 +25,20 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
             "  e expert — set up and run a live interview",
             "  c candidate — join with a connection string",
         ]),
-        AppScreen::Preflight => lines.extend([
-            "  enter follows the step shown on screen:",
-            "  acknowledge, add the API key, then continue",
-            "  r re-run the environment checks",
-            "  b back to the main menu",
-        ]),
+        AppScreen::Preflight => lines.extend(["  m change the Meta API key"]),
         AppScreen::Setup => lines.extend([
             "  paste into the focused box, enter moves on",
+            "  backspace deletes the last character",
             "  up/down scroll, drag a box border to resize",
+            "  m change the Meta API key (back on Expert Setup)",
             "  b back a step, keeping your pasted text",
         ]),
-        AppScreen::Proposal => lines.extend(["  enter confirm and wait for the candidate"]),
+        AppScreen::Proposal => lines.extend(["  enter wait for the candidate"]),
         AppScreen::ConnectionWait => lines.extend([
             "  waiting for the candidate to connect",
             "  share the connection string shown on screen",
+            "  the [COPY] button copies the connection string on click",
+            "  b back to the proposal",
         ]),
         AppScreen::SelectMedium => lines.extend(["  enter load the medium questions"]),
         AppScreen::SelectHard => lines.extend(["  enter load the hard questions"]),
@@ -50,6 +49,7 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
         AppScreen::Final => lines.extend(["  enter close"]),
         AppScreen::Exited => lines.extend(["  goodbye."]),
     }
+    lines.push("  d read the disclosure");
     lines.extend([
         "",
         "Everywhere:",
@@ -61,7 +61,7 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
         "  pairproof uninstall             remove binary and data",
         "  pairproof uninstall --keep-data remove binary, keep data",
         "",
-        "b close help, d read the disclosure.",
+        "b close help.",
     ]);
     clean(lines)
 }
@@ -255,14 +255,17 @@ pub fn expert_disclosure_action(key: crossterm::event::KeyEvent) -> ExpertKeyAct
 }
 
 /// Returns true when a key shown on the help overlay still works
-/// while help is open: role selection on the main menu is safe to
+/// while help is open: role selection on the main menu and the
+/// API-key change on Expert Setup / Session Setup are safe to
 /// dispatch without closing help first.
 pub fn help_overlay_dispatches(code: crossterm::event::KeyCode, screen: AppScreen) -> bool {
-    screen == AppScreen::RoleSelect
+    (screen == AppScreen::RoleSelect
         && matches!(
             code,
             crossterm::event::KeyCode::Char('e') | crossterm::event::KeyCode::Char('c')
-        )
+        ))
+        || (matches!(screen, AppScreen::Preflight | AppScreen::Setup)
+            && code == crossterm::event::KeyCode::Char('m'))
 }
 
 /// Routes a key: `?` toggles help; help open swallows non-quit keys.

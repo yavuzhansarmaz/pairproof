@@ -7,8 +7,7 @@ use pairproof::orchestration::connection::{
     ConnectionGate, ConnectionGateError, GatePhase, HostKeyVerifier,
 };
 use pairproof::orchestration::Orchestrator;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 const T0: u64 = 1_730_000_000_000;
 #[derive(Debug)]
 struct FakeState {
@@ -17,10 +16,10 @@ struct FakeState {
     seen: Vec<Endpoint>,
 }
 #[derive(Debug, Clone)]
-struct FakeVerifier(Rc<RefCell<FakeState>>);
+struct FakeVerifier(Arc<Mutex<FakeState>>);
 impl FakeVerifier {
-    fn new(result: Result<(), ConnectionGateError>) -> (Self, Rc<RefCell<FakeState>>) {
-        let state = Rc::new(RefCell::new(FakeState {
+    fn new(result: Result<(), ConnectionGateError>) -> (Self, Arc<Mutex<FakeState>>) {
+        let state = Arc::new(Mutex::new(FakeState {
             calls: 0,
             result,
             seen: Vec::new(),
@@ -31,7 +30,7 @@ impl FakeVerifier {
 }
 impl HostKeyVerifier for FakeVerifier {
     fn verify_host_key(&self, e: &Endpoint, _f: &Fingerprint) -> Result<(), ConnectionGateError> {
-        let mut s = self.0.borrow_mut();
+        let mut s = self.0.lock().expect("fake state");
         s.calls += 1;
         s.seen.push(e.clone());
         s.result.clone()
@@ -96,7 +95,11 @@ fn connection_gate_accept_after_ssh_auth_locks_once() {
     assert!(o.is_connected() && connected(&o) == 1);
     assert_eq!(gate.phase(), GatePhase::Locked);
     assert_eq!(gate.state(), ConnectionState::Locked);
-    assert_eq!(state.borrow().calls, 0, "host-key verifier must not run");
+    assert_eq!(
+        state.lock().expect("fake state").calls,
+        0,
+        "host-key verifier must not run"
+    );
     o.start(T0 + 2_000).expect("start after ssh-auth accept");
     let events = o.session().events().len();
     let err = gate

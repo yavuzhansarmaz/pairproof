@@ -206,6 +206,26 @@ fn proposal_lines_are_sanitized_and_hide_raw_jd() {
 }
 
 #[test]
+fn proposal_lines_wrap_long_language_reason() {
+    let mut controller = SetupController::new();
+    controller.set_jd("Senior backend engineer role.");
+    let mut proposed = proposal(LanguageProposal::Proposed(Language::Python));
+    proposed.language_reason = "the job description repeatedly emphasises backend services,         distributed systems, careful API design, and production Python experience         across several paragraphs of responsibilities and requirements"
+        .to_string();
+    controller.apply_proposal(proposed);
+    let lines = controller.proposal_lines();
+    assert!(lines.iter().all(|l| l.chars().count() <= 80), "{lines:?}");
+    let reason_lines: Vec<_> = lines
+        .iter()
+        .filter(|l| {
+            l.contains("emphasises") || l.contains("distributed") || l.contains("requirements")
+        })
+        .collect();
+    assert!(reason_lines.len() >= 2, "{lines:?}");
+    assert!(lines.iter().any(|l| l.starts_with("Language reason:")));
+}
+
+#[test]
 fn focused_pastes_make_notes_optional_and_keep_texts_on_back() {
     let mut pastes = ExpertSetupPastes::new();
     assert_eq!(pastes.focus(), ExpertSetupFocus::JobDescription);
@@ -233,6 +253,48 @@ fn focused_pastes_make_notes_optional_and_keep_texts_on_back() {
     // Empty notes stay empty and ready: Enter on notes skips them.
     assert_eq!(pastes.notes(), "");
     assert!(pastes.is_ready());
+}
+
+#[test]
+fn duplicate_additional_notes_are_silently_ignored() {
+    let mut controller = SetupController::new();
+    controller.set_jd("Senior Rust role, async systems.");
+    controller.set_additional("  Senior Rust role, async systems.  ");
+    let docs = controller.validate_for_proposal().expect("docs");
+    assert!(docs.additional.text.is_empty());
+    assert_eq!(docs.additional_text(), None);
+    // Genuinely different notes are kept.
+    controller.set_additional("Focus on distributed systems.");
+    let docs = controller.validate_for_proposal().expect("docs");
+    assert_eq!(
+        docs.additional_text(),
+        Some("Focus on distributed systems.")
+    );
+}
+
+#[test]
+fn backspace_deletes_and_reenter_clears_notes() {
+    let mut pastes = ExpertSetupPastes::new();
+    pastes
+        .apply_focused_paste("Senior Rust role.")
+        .expect("jd paste");
+    assert!(pastes.confirm_job_description());
+    pastes
+        .apply_focused_paste("Focus on Rust.")
+        .expect("notes paste");
+    // Backspace removes one character from the focused (notes) box.
+    pastes.backspace_focused();
+    assert_eq!(pastes.notes(), "Focus on Rust");
+    pastes.backspace_focused();
+    assert_eq!(pastes.notes(), "Focus on Rus");
+    // Back to the JD, delete there too, then Enter again: the
+    // previously written notes are cleared for a fresh entry.
+    pastes.back_to_job_description();
+    pastes.backspace_focused();
+    assert_eq!(pastes.jd(), "Senior Rust role");
+    assert!(pastes.confirm_job_description());
+    assert_eq!(pastes.notes(), "");
+    assert_eq!(pastes.focus(), ExpertSetupFocus::AdditionalNotes);
 }
 
 #[test]

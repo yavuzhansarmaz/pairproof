@@ -1,6 +1,6 @@
 //! Expert screens: setup, question selection, live monitoring, final score.
 
-use crate::sandbox::preflight::{CheckStatus, PreflightReport};
+use crate::sandbox::preflight::{CheckKind, CheckStatus, PreflightReport};
 use crate::sync::classify_ssh_failure;
 use crate::tui::shared::sanitize_display;
 
@@ -21,25 +21,61 @@ fn status_prefix(status: CheckStatus) -> &'static str {
     }
 }
 
-/// Builds the preflight view from a typed report without recomputing.
-pub fn preflight_view(report: &PreflightReport) -> PreflightView {
-    let lines = report
-        .checks
-        .iter()
-        .map(|check| {
-            let mut line = format!(
-                "{} {:?}: {}",
-                status_prefix(check.status),
-                check.kind,
-                sanitize_display(&check.detail)
-            );
-            if let Some(guidance) = &check.guidance {
-                line.push_str(" \u{2014} ");
-                line.push_str(&sanitize_display(guidance));
+/// Human-readable label for one check; never the Debug enum name.
+fn kind_label(kind: CheckKind) -> &'static str {
+    match kind {
+        CheckKind::DockerInstalled => "Docker",
+        CheckKind::DockerDaemon => "Docker daemon",
+        CheckKind::SandboxImage => "Sandbox image",
+        CheckKind::PortAvailable => "Port",
+        CheckKind::Network => "Connection",
+        CheckKind::MutagenInstalled => "Mutagen",
+    }
+}
+
+/// Word-wraps `text` under `first_prefix`; continuation lines align
+/// under the text. Width stays narrow so lines fit centred panels.
+fn wrapped(prefix: &str, indent: &str, text: &str) -> Vec<String> {
+    const WIDTH: usize = 84;
+    let mut lines = Vec::new();
+    let mut current = prefix.to_string();
+    for word in text.split_whitespace() {
+        if current.trim().is_empty() || current.chars().count() + 1 + word.chars().count() <= WIDTH
+        {
+            if !current.ends_with(' ') && !current.is_empty() {
+                current.push(' ');
             }
-            line
-        })
-        .collect();
+            current.push_str(word);
+        } else {
+            lines.push(current);
+            current = format!("{indent}{word}");
+        }
+    }
+    lines.push(current);
+    lines
+}
+
+/// Builds the preflight view from a typed report without recomputing.
+/// Each check is one short headed line; guidance, when present, goes
+/// on its own indented `->` line so warnings stay readable.
+pub fn preflight_view(report: &PreflightReport) -> PreflightView {
+    let mut lines = Vec::new();
+    for check in &report.checks {
+        let prefix = format!(
+            "{} {}: ",
+            status_prefix(check.status),
+            kind_label(check.kind)
+        );
+        let indent = " ".repeat(prefix.chars().count());
+        lines.extend(wrapped(&prefix, &indent, &sanitize_display(&check.detail)));
+        if let Some(guidance) = &check.guidance {
+            lines.extend(wrapped(
+                "       -> ",
+                "          ",
+                &sanitize_display(guidance),
+            ));
+        }
+    }
     PreflightView {
         lines,
         can_start: report.can_start(),

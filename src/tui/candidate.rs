@@ -80,9 +80,10 @@ where
 
 /// Legacy Phase-9 seam: always `Unavailable`, never fakes verification.
 /// Live Phase-10 production replaces it via `fresh_verifier`/
-/// `SshAuthVerifier` in `candidate_runtime`; retained for tests/offline use.
+/// `SshAuthVerifier` in `candidate_runtime`; crate-internal only, tests
+/// exercise it through `CandidateApp::new_unavailable`.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct UnavailableVerifier;
+pub(crate) struct UnavailableVerifier;
 
 impl ConnectionVerifier for UnavailableVerifier {
     fn verify(&self, _c: &ConnectionString, _now: u64) -> Result<(), CandidateConnectError> {
@@ -183,21 +184,44 @@ impl CandidateApp {
     }
 
     /// Appends one typed character to the connection input on Connect.
+    /// After a failed submit, the first typed character starts fresh:
+    /// the rejected string is cleared instead of appended to.
     pub fn push_char(&mut self, c: char) {
-        if self.screen() != CandidateScreen::Connect || c.is_control() {
+        if self.screen() != CandidateScreen::Connect || c.is_control() || c.is_whitespace() {
             return;
+        }
+        if self.last_error.is_some() {
+            self.input.clear();
         }
         self.input.push(c);
         self.last_error = None;
     }
 
+    /// Replaces the connection input with pasted text on Connect, so
+    /// pasting a fresh string after a malformed one corrects it
+    /// instead of appending to the rejected text.
+    pub fn replace_text(&mut self, text: &str) {
+        if self.screen() != CandidateScreen::Connect {
+            return;
+        }
+        if !text.chars().any(|c| !c.is_control() && !c.is_whitespace()) {
+            return;
+        }
+        self.input.clear();
+        self.push_text(text);
+    }
+
     /// Appends pasted text to the connection input on Connect.
+    /// After a failed submit, appended text also starts fresh.
     pub fn push_text(&mut self, text: &str) {
         if self.screen() != CandidateScreen::Connect {
             return;
         }
+        if self.last_error.is_some() {
+            self.input.clear();
+        }
         for c in text.chars() {
-            if !c.is_control() {
+            if !c.is_control() && !c.is_whitespace() {
                 self.input.push(c);
             }
         }

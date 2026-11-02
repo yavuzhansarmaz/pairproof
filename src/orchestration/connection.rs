@@ -55,7 +55,7 @@ pub enum GatePhase {
 }
 
 /// Narrow host-key boundary so gate logic is deterministic in tests.
-pub trait HostKeyVerifier: fmt::Debug {
+pub trait HostKeyVerifier: fmt::Debug + Send + Sync {
     /// Verifies the live host key at `endpoint` against `expected`.
     fn verify_host_key(
         &self,

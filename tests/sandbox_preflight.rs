@@ -16,7 +16,8 @@ fn healthy() -> PreflightInputs {
         image_present: true,
         port: 2222,
         port_free: true,
-        local_ips: vec![ip(203, 0, 113, 10)],
+        local_ips: vec![ip(8, 8, 8, 8)],
+        external_ip: Some(ip(8, 8, 8, 8)),
         mutagen_version: Some("0.18.1".to_string()),
     }
 }
@@ -60,7 +61,7 @@ fn preflight_missing_docker_hard_fails() {
     assert_eq!(status(&report, CheckKind::SandboxImage), CheckStatus::Warn);
     assert!(!report.can_start());
     assert_eq!(report.failures(), 2);
-    assert_eq!(report.checks.len(), 7);
+    assert_eq!(report.checks.len(), 6);
 }
 
 #[test]
@@ -93,55 +94,52 @@ fn preflight_port_busy_fails() {
 }
 
 #[test]
-fn preflight_cgnat_ip_warns_suspicion() {
+fn preflight_cgnat_ip_never_warns_network() {
     let mut inputs = healthy();
     inputs.local_ips = vec![ip(100, 64, 0, 1)];
+    inputs.external_ip = Some(ip(100, 64, 0, 1));
     let report = compute_preflight(&inputs);
-    assert_eq!(
-        status(&report, CheckKind::CgnatSuspicion),
-        CheckStatus::Warn
-    );
-    assert_eq!(status(&report, CheckKind::ExternalIp), CheckStatus::Warn);
+    assert_eq!(status(&report, CheckKind::Network), CheckStatus::Pass);
     assert!(report.can_start());
-    assert!(report.warnings() >= 2);
+    assert_eq!(report.warnings(), 0);
+    let network = report
+        .checks
+        .iter()
+        .find(|c| c.kind == CheckKind::Network)
+        .expect("network check");
+    assert!(network.guidance.is_none());
+    assert!(!network.detail.contains("CGNAT"));
+    assert!(!network.detail.contains("ISP"));
 }
 
 #[test]
-fn preflight_all_private_warns_cgnat_possible() {
+fn preflight_all_private_never_warns_network() {
     let mut inputs = healthy();
     inputs.local_ips = vec![ip(192, 168, 1, 5), ip(10, 0, 0, 2)];
+    inputs.external_ip = None;
     let report = compute_preflight(&inputs);
-    assert_eq!(
-        status(&report, CheckKind::CgnatSuspicion),
-        CheckStatus::Warn
-    );
-    assert_eq!(status(&report, CheckKind::ExternalIp), CheckStatus::Warn);
+    assert_eq!(status(&report, CheckKind::Network), CheckStatus::Pass);
+    assert_eq!(report.warnings(), 0);
+    assert!(report.can_start());
 }
 
 #[test]
-fn preflight_public_ip_passes_network_checks() {
+fn preflight_public_ip_passes_network_check() {
     let report = compute_preflight(&healthy());
-    assert_eq!(status(&report, CheckKind::ExternalIp), CheckStatus::Pass);
-    assert_eq!(
-        status(&report, CheckKind::CgnatSuspicion),
-        CheckStatus::Pass
-    );
+    assert_eq!(status(&report, CheckKind::Network), CheckStatus::Pass);
     assert!(report.can_start());
     assert_eq!(report.failures(), 0);
     assert_eq!(report.warnings(), 0);
 }
 
 #[test]
-fn preflight_no_interface_and_no_mutagen_warn() {
+fn preflight_no_interface_network_passes_but_mutagen_warns() {
     let mut inputs = healthy();
     inputs.local_ips = vec![];
+    inputs.external_ip = None;
     inputs.mutagen_version = None;
     let report = compute_preflight(&inputs);
-    assert_eq!(status(&report, CheckKind::ExternalIp), CheckStatus::Warn);
-    assert_eq!(
-        status(&report, CheckKind::CgnatSuspicion),
-        CheckStatus::Warn
-    );
+    assert_eq!(status(&report, CheckKind::Network), CheckStatus::Pass);
     assert_eq!(
         status(&report, CheckKind::MutagenInstalled),
         CheckStatus::Warn
@@ -175,9 +173,9 @@ fn primary_local_ipv4_never_unspecified_when_present() {
 }
 
 #[tokio::test]
-async fn gather_preflight_returns_seven_checks() {
+async fn gather_preflight_returns_six_checks() {
     let report = gather_preflight(0).await;
-    assert_eq!(report.checks.len(), 7);
+    assert_eq!(report.checks.len(), 6);
     let kinds: Vec<CheckKind> = report.checks.iter().map(|c| c.kind).collect();
     assert_eq!(
         kinds,
@@ -186,11 +184,11 @@ async fn gather_preflight_returns_seven_checks() {
             CheckKind::DockerDaemon,
             CheckKind::SandboxImage,
             CheckKind::PortAvailable,
-            CheckKind::ExternalIp,
-            CheckKind::CgnatSuspicion,
+            CheckKind::Network,
             CheckKind::MutagenInstalled,
         ]
     );
+    assert_eq!(status(&report, CheckKind::Network), CheckStatus::Pass);
     assert_eq!(status(&report, CheckKind::PortAvailable), CheckStatus::Fail);
     assert!(!report.can_start());
 }

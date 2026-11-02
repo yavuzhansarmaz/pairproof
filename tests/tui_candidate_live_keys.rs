@@ -121,3 +121,24 @@ fn q_does_not_quit_live_or_offline() {
     assert_ne!(state.app.screen(), CandidateScreen::Exited);
     assert!(runtime.transport().sent.is_empty());
 }
+
+#[test]
+fn shared_work_key_classifier_maps_both_paths() {
+    use pairproof::tui::candidate_run::{next_focus, work_key_action, WorkKeyAction};
+    assert_eq!(work_key_action('1'), Some(WorkKeyAction::SelectPreset(0)));
+    assert_eq!(work_key_action('4'), Some(WorkKeyAction::SelectPreset(3)));
+    assert_eq!(work_key_action('5'), Some(WorkKeyAction::OpenOther));
+    assert_eq!(work_key_action('o'), Some(WorkKeyAction::OpenOther));
+    assert_eq!(work_key_action('c'), Some(WorkKeyAction::Continue));
+    assert_eq!(work_key_action('d'), Some(WorkKeyAction::OpenRedirect));
+    assert_eq!(work_key_action('a'), Some(WorkKeyAction::ChangeApproach));
+    assert_eq!(work_key_action('t'), Some(WorkKeyAction::RequestTests));
+    assert_eq!(work_key_action('f'), Some(WorkKeyAction::Finish));
+    assert_eq!(work_key_action('s'), Some(WorkKeyAction::Skip));
+    assert_eq!(work_key_action('r'), Some(WorkKeyAction::RequestReQuestion));
+    assert_eq!(work_key_action('x'), None);
+    assert_eq!(next_focus(CandidateFocus::Work), CandidateFocus::Other);
+    assert_eq!(next_focus(CandidateFocus::Other), CandidateFocus::Redirect);
+    assert_eq!(next_focus(CandidateFocus::Redirect), CandidateFocus::Chat);
+    assert_eq!(next_focus(CandidateFocus::Chat), CandidateFocus::Work);
+}

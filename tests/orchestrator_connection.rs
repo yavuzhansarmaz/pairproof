@@ -8,8 +8,7 @@ use pairproof::orchestration::connection::{
     ConnectionGate, ConnectionGateError, GatePhase, HostKeyVerifier, SshKeyscanVerifier,
 };
 use pairproof::orchestration::{Orchestrator, OrchestratorError};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 const T0: u64 = 1_730_000_000_000;
 #[derive(Debug)]
 struct FakeState {
@@ -18,10 +17,10 @@ struct FakeState {
     seen: Vec<Endpoint>,
 }
 #[derive(Debug, Clone)]
-struct FakeVerifier(Rc<RefCell<FakeState>>);
+struct FakeVerifier(Arc<Mutex<FakeState>>);
 impl FakeVerifier {
-    fn new(result: Result<(), ConnectionGateError>) -> (Self, Rc<RefCell<FakeState>>) {
-        let state = Rc::new(RefCell::new(FakeState {
+    fn new(result: Result<(), ConnectionGateError>) -> (Self, Arc<Mutex<FakeState>>) {
+        let state = Arc::new(Mutex::new(FakeState {
             calls: 0,
             result,
             seen: Vec::new(),
@@ -32,7 +31,7 @@ impl FakeVerifier {
 }
 impl HostKeyVerifier for FakeVerifier {
     fn verify_host_key(&self, e: &Endpoint, _f: &Fingerprint) -> Result<(), ConnectionGateError> {
-        let mut s = self.0.borrow_mut();
+        let mut s = self.0.lock().expect("fake state");
         s.calls += 1;
         s.seen.push(e.clone());
         s.result.clone()
@@ -118,10 +117,10 @@ fn connection_string_is_not_accepted_before_host_key_verification() {
     }
     let err = aerr(&mut gate, &mut o, &wrong, T0 + 1_000);
     assert_eq!(err, ConnectionGateError::HostKeyMismatch);
-    assert_eq!(state.borrow().calls, 1);
+    assert_eq!(state.lock().expect("fake state").calls, 1);
     assert!(!o.is_connected() && connected(&o) == 0);
     assert!(gate.state() == ConnectionState::Rotating && gate.phase() == GatePhase::Awaiting);
-    state.borrow_mut().result = Ok(());
+    state.lock().expect("fake state").result = Ok(());
     let genuine = gate.current_string(T0 + 1_500).expect("string");
     gate.accept(&mut o, &genuine, T0 + 2_000)
         .expect("accept after pass");
@@ -312,8 +311,8 @@ fn accept_verifies_gate_endpoint_not_presented_endpoint() {
     let presented = cs(other, u, s, x, f);
     let err = aerr(&mut gate, &mut o, &presented, T0 + 1_000);
     assert_eq!(err, ConnectionError::EndpointMismatch.into());
-    assert_eq!(state.borrow().seen, vec![endpoint()]);
-    assert_eq!(state.borrow().calls, 1);
+    assert_eq!(state.lock().expect("fake state").seen, vec![endpoint()]);
+    assert_eq!(state.lock().expect("fake state").calls, 1);
     assert!(!o.is_connected() && connected(&o) == 0);
     gate.accept(&mut o, &base, T0 + 2_000).expect("genuine");
     assert!(o.is_connected());
@@ -330,8 +329,8 @@ fn accept_failure_before_attach_keeps_secret_alive() {
         "candidate_connected in Setup".into(),
     ));
     assert_eq!(err, ConnectionGateError::Orchestrator(want));
-    assert_eq!(state.borrow().calls, 0);
-    assert!(state.borrow().seen.is_empty());
+    assert_eq!(state.lock().expect("fake state").calls, 0);
+    assert!(state.lock().expect("fake state").seen.is_empty());
     assert!(gate.state() == ConnectionState::Rotating && gate.phase() == GatePhase::Awaiting);
     assert!(!o.is_connected());
     o.mark_waiting_for_candidate(1).expect("waiting");

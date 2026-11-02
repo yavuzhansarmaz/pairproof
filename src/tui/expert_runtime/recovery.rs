@@ -12,7 +12,7 @@ use crate::orchestration::recovery::{
 };
 use crate::orchestration::{
     build_snapshot_with_recovery, publish_snapshot, CancelToken, HealthGate, LeetCodeProbe,
-    MetaProbe, PipelineError, RetryPolicy, SnapshotRecovery,
+    MetaProbe, PipelineError, Probes, RetryPolicy, ServiceHealth, SnapshotRecovery,
 };
 
 use super::{CannedFetcher, CannedGenerator, ExpertRuntime, ExpertRuntimeError};
@@ -145,16 +145,18 @@ impl ExpertRuntime {
             self.recovery_rx = Some((generation, rx));
             let cancel = CancelToken::new();
             self.recovery_cancel = Some(cancel.clone());
-            let window = Duration::from_millis(self.health.policy().window_ms);
+            let gate = self.health;
+            let window = Duration::from_millis(gate.policy().window_ms);
             self.supervisor.spawn("recovery", async move {
                 let start = Instant::now();
                 loop {
                     let up = tokio::select! {
                         _ = cancel.cancelled() => return,
                         up = async {
-                            let l = leetcode.probe().await.is_up();
-                            let m = meta.probe().await.is_up();
-                            l && m
+                            gate.probe_both(&Probes::new(&*leetcode, &*meta))
+                                .await
+                                .iter()
+                                .all(ServiceHealth::is_up)
                         } => up,
                     };
                     if up {

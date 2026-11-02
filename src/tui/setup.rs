@@ -192,6 +192,29 @@ impl SetupController {
         None
     }
 
+    /// Word-wraps one display line at 80 columns; continuation lines
+    /// are indented two spaces so long reasons stay on screen.
+    fn wrap_line(line: &str) -> Vec<String> {
+        const WIDTH: usize = 80;
+        let mut out = Vec::new();
+        let mut current = String::new();
+        for word in line.split_whitespace() {
+            if current.is_empty() {
+                current = word.to_string();
+            } else if current.chars().count() + 1 + word.chars().count() <= WIDTH {
+                current.push(' ');
+                current.push_str(word);
+            } else {
+                out.push(std::mem::take(&mut current));
+                current = format!("  {word}");
+            }
+        }
+        if !current.is_empty() || out.is_empty() {
+            out.push(current);
+        }
+        out
+    }
+
     /// Builds sanitized display lines; never includes the raw pastes.
     pub fn proposal_lines(&self) -> Vec<String> {
         let Some(proposal) = &self.proposal else {
@@ -234,6 +257,9 @@ impl SetupController {
             lines.push("Additional notes were truncated to 50,000 characters.".to_string());
         }
         lines
+            .iter()
+            .flat_map(|line| Self::wrap_line(line))
+            .collect()
     }
 
     /// Validates and stores the auto-selected easy set without preview.
@@ -328,6 +354,28 @@ impl ExpertSetupPastes {
     pub fn focus(&self) -> ExpertSetupFocus { self.focus }
     pub fn jd_scroll(&self) -> usize { self.jd_scroll }
     pub fn notes_scroll(&self) -> usize { self.notes_scroll }
+    /// Syncs the Preflight disclosure acknowledgement into the controller.
+    pub fn acknowledge_disclosure(&mut self) { self.controller.acknowledge_disclosure(); }
+    /// Requests the proposal through the controller (Meta API call).
+    pub async fn request_proposal(&mut self, client: &MetaClient) -> Result<ProposedContext, SetupError> { self.controller.request_proposal(client).await }
+    /// Builds a detached collector from raw texts, for requesting a
+    /// proposal off the TTY thread while the on-screen one stays put.
+    pub fn from_texts(jd: &str, notes: &str) -> Self {
+        let mut detached = Self::new();
+        detached.controller.set_jd(jd);
+        detached.controller.set_additional(notes);
+        detached.jd_received = !jd.trim().is_empty();
+        detached.notes_received = !notes.trim().is_empty();
+        detached
+    }
+    /// Stores a proposal obtained by a detached collector.
+    pub fn apply_proposal(&mut self, proposed: ProposedContext) { self.controller.apply_proposal(proposed); }
+    /// Returns the stored proposal, if one has been applied.
+    pub fn proposal(&self) -> Option<&ProposedContext> { self.controller.proposal() }
+    /// Sanitized proposal lines for the Proposal screen; never raw pastes.
+    pub fn proposal_lines(&self) -> Vec<String> { self.controller.proposal_lines() }
+    /// Returns the language selected from the proposal, if any.
+    pub fn selected_language(&self) -> Option<Language> { self.controller.selected_language() }
     /// Pastes into the focused box, replacing its previous text so a
     /// wrong paste can be corrected by pasting again.
     pub fn apply_focused_paste(&mut self, text: &str) -> Result<(), String> {
@@ -339,11 +387,34 @@ impl ExpertSetupPastes {
         Ok(())
     }
     /// Enter on the job-description box: moves to additional notes
-    /// when a JD is present. Returns false when there is no JD yet.
+    /// when a JD is present, clearing any previously written notes
+    /// so re-entering after going back starts the notes fresh.
+    /// Returns false when there is no JD yet.
     pub fn confirm_job_description(&mut self) -> bool {
         if !self.is_ready() { return false; }
+        self.controller.set_additional("");
+        self.notes_received = false;
+        self.notes_scroll = 0;
         self.focus = ExpertSetupFocus::AdditionalNotes;
         true
+    }
+    /// Deletes the last character of the focused box, if any;
+    /// emptying the job description also un-marks it as received.
+    pub fn backspace_focused(&mut self) {
+        match self.focus {
+            ExpertSetupFocus::JobDescription => {
+                let mut text = self.controller.draft().jd.clone();
+                text.pop();
+                self.jd_received = !text.is_empty();
+                self.controller.set_jd(&text);
+            }
+            ExpertSetupFocus::AdditionalNotes => {
+                let mut text = self.controller.draft().additional.clone();
+                text.pop();
+                self.notes_received = !text.is_empty();
+                self.controller.set_additional(&text);
+            }
+        }
     }
     /// Returns focus to the job-description box; texts are kept.
     pub fn back_to_job_description(&mut self) { self.focus = ExpertSetupFocus::JobDescription; }
