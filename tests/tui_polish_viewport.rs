@@ -10,6 +10,9 @@ use pairproof::tui::candidate_final::{
 };
 use pairproof::tui::candidate_runtime::CandidateView;
 use pairproof::tui::monitor::FinalView;
+use pairproof::tui::render::{
+    centered_rect, panel_area, ESC_KEY_COLOR, HELP_KEY_COLOR, PAIR_COLOR, PROOF_COLOR,
+};
 use pairproof::tui::viewport::{
     is_pinned_summary, split_pinned, truncation_marker, visible_lines, visible_with_pinned,
 };
@@ -73,7 +76,7 @@ fn final_rating_remains_visible_on_short_terminal() {
     let CandidateFinal::Breakdown(view) = &result else {
         panic!("expected breakdown");
     };
-    let rating_line = format!("Final rating: {:.2}", view.rating);
+    let rating_line = format!("final rating: {:.2}", view.rating);
     for height in [12_usize, 8, 5] {
         let visible = candidate_final_lines_for_height(&result, height);
         assert!(visible.len() <= height, "{visible:?}");
@@ -119,7 +122,7 @@ fn long_statement_does_not_hide_final_summary() {
     let visible = visible_with_pinned(&lines, 12);
     assert!(visible.len() <= 12, "{visible:?}");
     assert!(
-        visible.iter().any(|l| l.contains("Final rating: 8.25")),
+        visible.iter().any(|l| l.contains("final rating: 8.25")),
         "{visible:?}"
     );
     assert!(
@@ -127,12 +130,12 @@ fn long_statement_does_not_hide_final_summary() {
         "{visible:?}"
     );
     let content: Vec<String> = (0..60).map(|i| format!("line {i}")).collect();
-    let pinned = vec!["Final rating: 8.25".to_string()];
+    let pinned = vec!["final rating: 8.25".to_string()];
     let visible = visible_lines(&content, 6, &pinned);
     assert_eq!(visible.len(), 6);
     assert_eq!(
         visible.last().map(String::as_str),
-        Some("Final rating: 8.25")
+        Some("final rating: 8.25")
     );
 }
 
@@ -144,7 +147,7 @@ fn terminal_resize_preserves_usable_layout() {
     let full = candidate_final_lines(&result);
     let rating_line = full
         .iter()
-        .find(|l| l.contains("Final rating:"))
+        .find(|l| l.contains("final rating:"))
         .expect("rating line")
         .clone();
     for height in [50_usize, 24, 12, 6, 3, 2, 1, 0] {
@@ -168,9 +171,9 @@ fn terminal_resize_preserves_usable_layout() {
     assert_eq!(regrown, full);
     assert!(visible_lines(&[], 0, &[]).is_empty());
     assert_eq!(visible_lines(&[String::new()], 1, &[]), vec![String::new()]);
-    let edge = visible_lines(&["x".repeat(500)], 2, &["Final rating: 1.00".to_string()]);
+    let edge = visible_lines(&["x".repeat(500)], 2, &["final rating: 1.00".to_string()]);
     assert_eq!(edge.len(), 2);
-    assert_eq!(edge[1], "Final rating: 1.00");
+    assert_eq!(edge[1], "final rating: 1.00");
 }
 
 #[test]
@@ -179,19 +182,19 @@ fn viewport_markers_and_pinned_split_are_exact() {
         truncation_marker(3),
         "... 3 more lines \u{2014} scroll/resize for full text"
     );
-    assert!(is_pinned_summary("  Final rating: 8.25"));
-    assert!(is_pinned_summary(" Live rating: 8.25"));
-    assert!(is_pinned_summary("   Solved: 3"));
+    assert!(is_pinned_summary("  final rating: 8.25"));
+    assert!(is_pinned_summary(" live rating: 8.25"));
+    assert!(is_pinned_summary("   solved: 3"));
     assert!(!is_pinned_summary(
         "Given an array of integers, return the indices."
     ));
     assert!(!is_pinned_summary("  The final rating is pending."));
     let lines = vec![
         "Statement A".to_string(),
-        "Final rating: 8.25".to_string(),
+        "final rating: 8.25".to_string(),
         "Statement B".to_string(),
-        "  Solved: 3".to_string(),
-        "Live rating: 8.00".to_string(),
+        "  solved: 3".to_string(),
+        "live rating: 8.00".to_string(),
     ];
     let (content, pinned) = split_pinned(&lines);
     assert_eq!(
@@ -201,11 +204,257 @@ fn viewport_markers_and_pinned_split_are_exact() {
     assert_eq!(
         pinned,
         vec![
-            "Final rating: 8.25".to_string(),
-            "  Solved: 3".to_string(),
-            "Live rating: 8.00".to_string(),
+            "final rating: 8.25".to_string(),
+            "  solved: 3".to_string(),
+            "live rating: 8.00".to_string(),
         ]
     );
+}
+
+#[test]
+fn centered_rect_is_centred_and_never_exceeds_the_area() {
+    let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let rect = centered_rect(area, 76, 12);
+    assert_eq!((rect.width, rect.height), (76, 12));
+    assert_eq!(rect.x, (120 - 76) / 2);
+    assert_eq!(rect.y, (40 - 12) / 2);
+    let small = ratatui::layout::Rect::new(0, 0, 30, 8);
+    let shrunk = centered_rect(small, 76, 12);
+    assert_eq!((shrunk.width, shrunk.height), (30, 8));
+    assert_eq!((shrunk.x, shrunk.y), (0, 0));
+}
+
+#[test]
+fn panel_area_centres_only_when_asked() {
+    let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let lines = vec!["Main Menu".to_string(), "Choose a role.".to_string()];
+    assert_eq!(panel_area(area, &lines, false), area);
+    let panel = panel_area(area, &lines, true);
+    assert!(panel.width < area.width && panel.height < area.height);
+    assert!(panel.x > 0 && panel.y > 0, "{panel:?}");
+}
+
+#[test]
+fn main_menu_renders_as_a_centred_brand_panel() {
+    use pairproof::tui::app::{screen_lines, ExpertApp};
+    use pairproof::tui::render::draw_screen;
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let app = ExpertApp::new();
+    let lines = screen_lines(&app);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(rendered.contains("PairProof"), "{rendered}");
+    assert!(rendered.contains("Main Menu"), "{rendered}");
+    // Purple is reserved for "Proof" and the expert key `e`;
+    // "Pair", the "Main Menu" heading, and the candidate key `c`
+    // are navy.
+    let purple: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PROOF_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(purple, "Proofee", "{purple}");
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PAIR_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(navy.contains("Pair"), "{navy}");
+    assert!(navy.contains("Main Menu"), "{navy}");
+    assert!(navy.contains('c'), "{navy}");
+    let yellow: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == HELP_KEY_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(yellow, "?", "{yellow}");
+    let red: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == ESC_KEY_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(red, "esc", "{red}");
+    assert!(rendered.contains("Expert"), "{rendered}");
+    assert!(rendered.contains("Candidate"), "{rendered}");
+    // The panel must not fill the terminal: corners stay blank.
+    assert_eq!(buffer[(0, 0)].symbol(), " ");
+    assert_eq!(buffer[(99, 29)].symbol(), " ");
+    let left_border = (0..30)
+        .find_map(|y| (0..100).find(|&x| buffer[(x, y)].symbol() == "\u{2502}"))
+        .expect("left border");
+    assert!(
+        left_border > 10,
+        "panel should be centred, border at {left_border}"
+    );
+}
+
+#[test]
+fn expert_setup_renders_as_a_centred_panel() {
+    use pairproof::tui::app::{screen_lines, AppEvent, ExpertApp};
+    use pairproof::tui::render::draw_screen;
+    let backend = ratatui::backend::TestBackend::new(100, 34);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let mut app = ExpertApp::new();
+    app.handle(AppEvent::SelectExpert).expect("preflight");
+    app.set_preflight_lines(vec!["[PASS] Docker".to_string()]);
+    app.set_api_key_status("Meta API key: configured (environment)");
+    let lines = screen_lines(&app);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(rendered.contains("PairProof"), "{rendered}");
+    assert!(rendered.contains("Expert Setup"), "{rendered}");
+    assert!(rendered.contains("Meta disclosure"), "{rendered}");
+    assert!(rendered.contains("[PASS] Docker"), "{rendered}");
+    assert_eq!(buffer[(0, 0)].symbol(), " ");
+    assert_eq!(buffer[(99, 33)].symbol(), " ");
+}
+
+#[test]
+fn help_colours_tool_commands_and_role_keys() {
+    use pairproof::tui::app::AppScreen;
+    use pairproof::tui::help::expert_help_lines;
+    use pairproof::tui::render::{draw_screen, PAIR_COLOR, PROOF_COLOR};
+    let backend = ratatui::backend::TestBackend::new(100, 34);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = expert_help_lines(AppScreen::RoleSelect);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let purple: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PROOF_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(purple.contains("pairproof update"), "{purple}");
+    assert!(
+        purple.contains("pairproof uninstall --keep-data"),
+        "{purple}"
+    );
+    assert!(purple.contains('e'), "{purple}");
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PAIR_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(navy.contains('c'), "{navy}");
+}
+
+#[test]
+fn session_setup_boxes_show_five_and_two_lines() {
+    use pairproof::tui::render::{draw_setup_screen, SetupPanel};
+    let backend = ratatui::backend::TestBackend::new(80, 24);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let jd = (1..=9)
+        .map(|i| format!("JD line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let notes = (1..=5)
+        .map(|i| format!("Note line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    terminal
+        .draw(|frame| {
+            draw_setup_screen(
+                frame,
+                &SetupPanel {
+                    job_description: &jd,
+                    additional_notes: &notes,
+                    job_focused: true,
+                    job_scroll: 0,
+                    notes_scroll: 0,
+                    status: None,
+                    job_height: 5,
+                    notes_height: 2,
+                },
+            )
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(
+        rendered.contains("Job description (required)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("Additional notes (optional)"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("JD line 5"), "{rendered}");
+    assert!(!rendered.contains("JD line 6"), "{rendered}");
+    assert!(rendered.contains("Note line 2"), "{rendered}");
+    assert!(!rendered.contains("Note line 3"), "{rendered}");
+    assert!(rendered.contains("paste the job description"), "{rendered}");
+    assert!(
+        !rendered.contains("Paste the job description"),
+        "{rendered}"
+    );
+    // No phantom blank row: with no status, the footer sits
+    // directly under the notes box.
+    let rows: Vec<String> = (0..24)
+        .map(|y| {
+            (0..80)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect()
+        })
+        .collect();
+    let footer_y = rows
+        .iter()
+        .position(|row| row.contains("up/down scroll"))
+        .expect("footer row");
+    let (_, notes_box) =
+        pairproof::tui::render::setup_box_areas(ratatui::layout::Rect::new(0, 0, 80, 24), 5, 2);
+    assert_eq!(footer_y as u16, notes_box.y + notes_box.height);
+    // Full-size screen: the outer frame fills the terminal.
+    assert_eq!(buffer[(0, 0)].symbol(), "\u{250c}");
+}
+
+#[test]
+fn session_setup_wraps_words_and_expands_with_height() {
+    use pairproof::tui::render::{draw_setup_screen, setup_box_areas, SetupPanel};
+    let backend = ratatui::backend::TestBackend::new(40, 24);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let jd = "alpha beta gamma delta epsilon zeta eta theta";
+    terminal
+        .draw(|frame| {
+            draw_setup_screen(
+                frame,
+                &SetupPanel {
+                    job_description: jd,
+                    additional_notes: "note one\r\nnote two",
+                    job_focused: true,
+                    job_scroll: 0,
+                    notes_scroll: 0,
+                    status: None,
+                    job_height: 8,
+                    notes_height: 2,
+                },
+            )
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    // Word wrap: lines break between words, CRLF renders clean.
+    assert!(rendered.contains("alpha beta"), "{rendered}");
+    assert!(rendered.contains("note one"), "{rendered}");
+    assert!(rendered.contains("note two"), "{rendered}");
+    let (jd_box, notes_box) = setup_box_areas(ratatui::layout::Rect::new(0, 0, 40, 24), 8, 2);
+    assert_eq!(jd_box.height, 10);
+    assert_eq!(notes_box.height, 4);
+    assert_eq!(notes_box.y, jd_box.y + jd_box.height);
 }
 
 #[test]
@@ -225,11 +474,11 @@ fn candidate_final_pinned_lines_are_the_completion_summary() {
     assert_eq!(
         candidate_final_pinned_lines(&CandidateFinal::Breakdown(view)),
         vec![
-            "Final rating: 8.25".to_string(),
-            "Solved: 3".to_string(),
-            "Finished: 7".to_string(),
-            "Skipped: 2".to_string(),
-            "Paste flags: 1".to_string(),
+            "final rating: 8.25".to_string(),
+            "solved: 3".to_string(),
+            "finished: 7".to_string(),
+            "skipped: 2".to_string(),
+            "paste flags: 1".to_string(),
         ]
     );
     assert_eq!(

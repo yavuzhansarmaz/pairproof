@@ -109,6 +109,7 @@ pub enum IntentKind {
     Finish,
     Skip,
     RequestReQuestion,
+    ChangeApproach,
     ChatRequest { chat_id: String, text: String },
 }
 #[rustfmt::skip]
@@ -119,7 +120,7 @@ impl IntentKind {
             Self::SelectPreset { .. } => "SelectPreset", Self::SelectOther { .. } => "SelectOther",
             Self::Continue => "Continue", Self::Redirect { .. } => "Redirect",
             Self::RequestTests => "RequestTests", Self::Finish => "Finish", Self::Skip => "Skip",
-            Self::RequestReQuestion => "RequestRequestion", Self::ChatRequest { .. } => "ChatRequest",
+            Self::RequestReQuestion => "RequestRequestion", Self::ChangeApproach => "ChangeApproach", Self::ChatRequest { .. } => "ChatRequest",
         }
     }
 }
@@ -176,6 +177,7 @@ fn kind_payload(kind: &IntentKind) -> (&'static str, Value) {
         IntentKind::Finish => ("Finish", serde_json::json!({})),
         IntentKind::Skip => ("Skip", serde_json::json!({})),
         IntentKind::RequestReQuestion => ("RequestRequestion", serde_json::json!({})),
+        IntentKind::ChangeApproach => ("ChangeApproach", serde_json::json!({})),
         IntentKind::ChatRequest { chat_id, text } => ("ChatRequest", serde_json::json!({"chat_id": chat_id, "text": text})),
     }
 }
@@ -216,6 +218,7 @@ fn parse_kind(name: &str, payload: &Value) -> Result<IntentKind, ControlError> {
         "Finish" => IntentKind::Finish,
         "Skip" => IntentKind::Skip,
         "RequestRequestion" | "RequestReQuestion" => IntentKind::RequestReQuestion,
+        "ChangeApproach" => IntentKind::ChangeApproach,
         "ChatRequest" => IntentKind::ChatRequest { chat_id: payload_text(payload, "chat_id")?, text: payload_text(payload, "text")? },
         other => return Err(ControlError::ForbiddenKind(other.to_string())),
     };

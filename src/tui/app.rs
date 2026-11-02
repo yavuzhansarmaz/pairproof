@@ -1,15 +1,11 @@
 //! Pure expert-app navigation state machine beneath rendering.
 
-use crate::tui::candidate::placeholder_message;
-use crate::tui::shared::sanitize_display;
-
 /// Screen shown by the expert interactive loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppScreen {
     #[default]
     RoleSelect,
     Preflight,
-    ApiKey,
     Setup,
     Proposal,
     ConnectionWait,
@@ -26,7 +22,6 @@ pub enum AppEvent {
     SelectExpert,
     SelectCandidate,
     PreflightCompleted,
-    ApiKeySaved,
     DisclosureAcknowledged,
     ProposalReady,
     ProposalConfirmed,
@@ -59,6 +54,20 @@ pub enum AppError {
     /// Session was already ended by the expert.
     #[error("session already ended")]
     AlreadyEnded,
+    /// No Meta API key is configured yet.
+    #[error("meta api key is not configured")]
+    ApiKeyMissing,
+}
+
+fn is_irreversible(screen: AppScreen) -> bool {
+    matches!(
+        screen,
+        AppScreen::ConnectionWait
+            | AppScreen::SelectMedium
+            | AppScreen::SelectHard
+            | AppScreen::Monitor
+            | AppScreen::Final
+    )
 }
 
 fn event_name(event: AppEvent) -> &'static str {
@@ -66,7 +75,6 @@ fn event_name(event: AppEvent) -> &'static str {
         AppEvent::SelectExpert => "SelectExpert",
         AppEvent::SelectCandidate => "SelectCandidate",
         AppEvent::PreflightCompleted => "PreflightCompleted",
-        AppEvent::ApiKeySaved => "ApiKeySaved",
         AppEvent::DisclosureAcknowledged => "DisclosureAcknowledged",
         AppEvent::ProposalReady => "ProposalReady",
         AppEvent::ProposalConfirmed => "ProposalConfirmed",
@@ -95,6 +103,10 @@ pub struct ExpertApp {
     pub ended: bool,
     pub disconnected: bool,
     pub candidate_placeholder: bool,
+    pub preflight_lines: Vec<String>,
+    pub api_key_status: Option<String>,
+    pub api_key_ready: bool,
+    pub api_key_entry: bool,
     status_message: Option<String>,
 }
 
@@ -112,6 +124,26 @@ impl ExpertApp {
     /// Records the preflight outcome from `can_proceed(report)`.
     pub fn set_preflight_passed(&mut self, passed: bool) {
         self.preflight_passed = passed;
+    }
+
+    /// Records the compact per-check lines shown on Expert Setup.
+    pub fn set_preflight_lines(&mut self, lines: Vec<String>) {
+        self.preflight_lines = lines;
+    }
+
+    /// Records the API-key status line shown on Expert Setup.
+    pub fn set_api_key_status(&mut self, status: impl Into<String>) {
+        self.api_key_status = Some(status.into());
+    }
+
+    /// Records whether a usable Meta API key is configured.
+    pub fn set_api_key_ready(&mut self, ready: bool) {
+        self.api_key_ready = ready;
+    }
+
+    /// Opens or closes the masked API-key entry on Expert Setup.
+    pub fn set_api_key_entry(&mut self, active: bool) {
+        self.api_key_entry = active;
     }
 
     /// Records whether a proposal exists in the setup controller.
@@ -144,6 +176,12 @@ impl ExpertApp {
         self.status_message.as_deref()
     }
 
+    /// Clears the transient status message (e.g. a consumed reissue
+    /// string must not stay on screen after the candidate reconnects).
+    pub fn clear_status_message(&mut self) {
+        self.status_message = None;
+    }
+
     /// Returns true when candidate placeholder mode was selected.
     pub fn is_candidate_placeholder(&self) -> bool {
         self.candidate_placeholder
@@ -155,13 +193,19 @@ impl ExpertApp {
     }
 
     /// Returns true when Back can return to a previous screen.
+    /// Screens past Proposal commit external state (a built runtime,
+    /// a locked connection, a committed selection, a live or ended
+    /// session), so Back is not offered there.
     pub fn can_go_back(&self) -> bool {
-        self.screen != AppScreen::Exited && !self.history.is_empty()
+        self.screen != AppScreen::Exited
+            && !is_irreversible(self.screen)
+            && !self.history.is_empty()
     }
 
-    /// Pops to the previous screen; RoleSelect/Exited are typed errors.
+    /// Pops to the previous screen; RoleSelect/Exited and screens
+    /// past the runtime commit point are typed errors.
     pub fn back(&mut self) -> Result<AppScreen, AppError> {
-        if self.screen == AppScreen::Exited {
+        if self.screen == AppScreen::Exited || is_irreversible(self.screen) {
             return Err(self.invalid(AppEvent::Back));
         }
         match self.history.pop() {
@@ -197,14 +241,21 @@ impl ExpertApp {
                 self.candidate_placeholder = true;
                 Ok(self.go(S::Exited))
             }
+            (S::Preflight, E::DisclosureAcknowledged) => {
+                self.disclosure_acknowledged = true;
+                Ok(self.screen)
+            }
             (S::Preflight, E::PreflightCompleted) => {
-                if self.preflight_passed {
-                    Ok(self.go(S::ApiKey))
-                } else {
+                if !self.preflight_passed {
                     Err(AppError::PreflightBlocked)
+                } else if !self.disclosure_acknowledged {
+                    Err(AppError::DisclosureRequired)
+                } else if !self.api_key_ready {
+                    Err(AppError::ApiKeyMissing)
+                } else {
+                    Ok(self.go(S::Setup))
                 }
             }
-            (S::ApiKey, E::ApiKeySaved) => Ok(self.go(S::Setup)),
             (S::Setup, E::DisclosureAcknowledged) => {
                 self.disclosure_acknowledged = true;
                 Ok(self.screen)
@@ -271,89 +322,4 @@ impl ExpertApp {
     }
 }
 
-/// Returns the static title for a screen.
-pub fn screen_title(screen: AppScreen) -> &'static str {
-    match screen {
-        AppScreen::RoleSelect => "Select role",
-        AppScreen::Preflight => "Preflight checks",
-        AppScreen::ApiKey => "API key",
-        AppScreen::Setup => "Session setup",
-        AppScreen::Proposal => "Proposed context",
-        AppScreen::ConnectionWait => "Waiting for candidate",
-        AppScreen::SelectMedium => "Select medium questions",
-        AppScreen::SelectHard => "Select hard questions",
-        AppScreen::Monitor => "Live monitor",
-        AppScreen::Final => "Final breakdown",
-        AppScreen::Exited => "Exited",
-    }
-}
-
-fn footer(app: &ExpertApp) -> String {
-    match app.screen() {
-        AppScreen::Exited => "q quit".to_string(),
-        _ if app.can_go_back() => "q quit, b back, r retry, Enter advance".to_string(),
-        _ => "q quit, r retry, Enter advance".to_string(),
-    }
-}
-
-/// Builds deterministic sanitized lines for rendering one screen.
-pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
-    use AppScreen as S;
-    let screen = app.screen();
-    let mut lines = vec![screen_title(screen).to_string()];
-    if app.candidate_placeholder && screen == S::Exited {
-        lines.push(placeholder_message().to_string());
-    } else {
-        match screen {
-            S::RoleSelect => lines.push("Press e for expert, c for candidate.".into()),
-            S::Preflight => lines.push(if app.preflight_passed {
-                "Preflight passed. Press Enter to continue.".into()
-            } else {
-                "Preflight has not passed yet. Press r to retry.".into()
-            }),
-            S::ApiKey => {
-                lines.push("API key is never shown on screen. Press Enter when saved.".into())
-            }
-            S::Setup => {
-                lines.push(if app.disclosure_acknowledged {
-                    "Disclosure acknowledged.".into()
-                } else {
-                    "Acknowledge the Meta API disclosure to continue.".into()
-                });
-                lines.push(if app.has_proposal {
-                    "Proposal ready. Press Enter to review it.".into()
-                } else {
-                    "No proposal yet.".into()
-                });
-            }
-            S::Proposal => {
-                lines.push("Review the proposal. Press Enter to wait for the candidate.".into())
-            }
-            S::ConnectionWait => lines.push(if app.connected {
-                "Candidate connected. Press Enter to select questions.".into()
-            } else {
-                "Waiting for candidate to connect.".into()
-            }),
-            S::SelectMedium => {
-                lines.push("Select 3 medium questions. Press Enter when done.".into())
-            }
-            S::SelectHard => lines.push("Select 2 hard questions. Press Enter when done.".into()),
-            S::Monitor => {
-                lines.push(if app.disconnected {
-                    "Candidate disconnected. Session is still live.".into()
-                } else {
-                    "Session live.".into()
-                });
-                lines.push("Press Enter to end the session.".into());
-            }
-            S::Final => lines
-                .push("Session ended. Report generation is Phase 10 (not claimed here).".into()),
-            S::Exited => lines.push("Goodbye.".into()),
-        }
-    }
-    if let Some(message) = app.status_message() {
-        lines.push(format!("Status: {}", sanitize_display(message)));
-    }
-    lines.push(footer(app));
-    lines.iter().map(|line| sanitize_display(line)).collect()
-}
+pub use crate::tui::expert_view::{screen_lines, screen_title};

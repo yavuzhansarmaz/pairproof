@@ -134,8 +134,8 @@ fn candidate_chat_displays_service_error_without_sensitive_details() {
     assert!(chat.history().is_empty());
     assert!(!chat.is_busy());
     let lines = chat.chat_lines().join("\n");
-    assert!(lines.contains("Chat failed; try again."), "{lines}");
-    assert!(lines.contains("Message: help please"), "{lines}");
+    assert!(lines.contains("chat failed; try again."), "{lines}");
+    assert!(lines.contains("message: help please"), "{lines}");
     for banned in ["score", "rating", "token", "424242", "secret", "api key"] {
         assert!(
             !lines.to_lowercase().contains(banned),
@@ -152,7 +152,7 @@ fn candidate_chat_displays_service_error_without_sensitive_details() {
     assert!(unavailable
         .chat_lines()
         .join("\n")
-        .contains("Chat is not available yet."));
+        .contains("chat is not available yet."));
     assert_eq!(unavailable.input_text(), "hello");
 }
 
@@ -164,7 +164,7 @@ fn candidate_chat_prevents_duplicate_submit_when_busy() {
     chat.type_text("hello");
     chat.set_busy(true);
     assert!(chat.is_busy());
-    assert!(chat.chat_lines().join("\n").contains("Sending..."));
+    assert!(chat.chat_lines().join("\n").contains("sending..."));
     let error = chat
         .submit(&mut session, &state, 100)
         .expect_err("busy chat");
@@ -185,7 +185,7 @@ fn candidate_blocks_paste_in_chat() {
         .insert_paste("bulk pasted text")
         .expect_err("paste blocked");
     assert_eq!(error, PasteBlocked::Blocked);
-    assert_eq!(error.to_string(), "Pasting is blocked here; type instead.");
+    assert_eq!(error.to_string(), "pasting is blocked here; type instead.");
     assert_eq!(input.text(), "hi");
     assert!(!input.is_empty());
     let (mut chat, _captured, _calls) = controller(Ok("Reply.".to_string()));
@@ -193,11 +193,11 @@ fn candidate_blocks_paste_in_chat() {
     let error = chat
         .paste_input("bulk pasted text")
         .expect_err("paste blocked");
-    assert_eq!(error.to_string(), "Pasting is blocked here; type instead.");
+    assert_eq!(error.to_string(), "pasting is blocked here; type instead.");
     assert_eq!(chat.input_text(), "hi");
     let lines = chat.chat_lines().join("\n");
     assert!(
-        lines.contains("Pasting is blocked here; type instead."),
+        lines.contains("pasting is blocked here; type instead."),
         "{lines}"
     );
     chat.type_char('!');
@@ -205,7 +205,7 @@ fn candidate_blocks_paste_in_chat() {
     assert!(!chat
         .chat_lines()
         .join("\n")
-        .contains("Pasting is blocked here"));
+        .contains("pasting is blocked here"));
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn candidate_blocks_paste_in_other_input() {
     other_insert(&mut work, "typed plan", false).expect("typed other");
     assert_eq!(work.other_text(), "typed plan");
     let error = other_insert(&mut work, "pasted bulk", true).expect_err("paste blocked");
-    assert_eq!(error.to_string(), "Pasting is blocked here; type instead.");
+    assert_eq!(error.to_string(), "pasting is blocked here; type instead.");
     assert_eq!(work.other_text(), "typed plan");
     other_insert(&mut work, " plus", false).expect("more typing");
     assert_eq!(work.other_text(), "typed plan plus");

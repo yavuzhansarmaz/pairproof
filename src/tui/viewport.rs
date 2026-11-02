@@ -9,12 +9,12 @@ pub fn truncation_marker(hidden: usize) -> String {
 pub fn is_pinned_summary(line: &str) -> bool {
     let line = line.trim_start();
     [
-        "Final rating:",
-        "Live rating:",
-        "Solved:",
-        "Finished:",
-        "Skipped:",
-        "Paste flags:",
+        "final rating:",
+        "live rating:",
+        "solved:",
+        "finished:",
+        "skipped:",
+        "paste flags:",
     ]
     .iter()
     .any(|prefix| line.starts_with(prefix))

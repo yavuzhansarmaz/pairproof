@@ -11,21 +11,26 @@ pub mod candidate_sync;
 pub mod candidate_work;
 pub mod config;
 pub mod expert;
+pub mod expert_keys;
 pub mod expert_runtime;
 pub mod expert_session;
+pub mod expert_tty;
+pub mod expert_view;
 pub mod help;
 pub mod monitor;
+pub mod render;
 pub mod setup;
+pub mod setup_panel;
 pub mod shared;
 pub mod viewport;
 
-use std::future::Future;
 use std::io::IsTerminal;
 
 use clap::Parser;
 
-use crate::orchestration::{Clock, SystemClock};
-use expert_runtime::{ExpertRuntime, PollOutcome, SelectionScreen};
+use expert_keys::{handle_key, handle_paste};
+use expert_runtime::{ExpertRuntime, PollOutcome};
+use expert_tty::{block_on, now_ms, run_preflight_check, TtyGuard};
 
 pub use setup::{apply_expert_setup_paste, ExpertSetupPastes};
 
@@ -51,36 +56,12 @@ pub fn run() -> anyhow::Result<()> {
     }
 }
 
-/// Restores the terminal on drop for every exit or panic path.
-struct TtyGuard;
-
-impl Drop for TtyGuard {
-    fn drop(&mut self) {
-        let _ = crossterm::terminal::disable_raw_mode();
-        #[rustfmt::skip]
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen, crossterm::event::DisableBracketedPaste);
-    }
-}
-
-/// Runs preflight once and feeds the gated outcome into the app.
-/// Checks the port `build_expert_runtime` will select (first free in
-/// `SANDBOX_PORT_RANGE`); when none is free, the range start is reported
-/// busy so preflight still fails on the port check.
-fn run_preflight_check(app: &mut app::ExpertApp) {
-    let port =
-        expert_runtime::select_sandbox_port().unwrap_or(expert_runtime::SANDBOX_PORT_RANGE.start);
-    let passed = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map(|runtime| runtime.block_on(crate::sandbox::preflight::gather_preflight(port)))
-        .map(|report| expert::can_proceed(&report))
-        .unwrap_or(false);
-    app.set_preflight_passed(passed);
-}
-
 /// Starts the interactive loop, falling back to a hint on init failure.
 fn run_interactive(initial: Option<Role>) -> anyhow::Result<()> {
     let mut app = app::ExpertApp::new();
+    if expert_tty::load_disclosure_ack_default() {
+        app.set_disclosure_acknowledged(true);
+    }
     let mut preflight_done = false;
     if initial == Some(Role::Expert) {
         let _ = app.handle(app::AppEvent::SelectExpert);
@@ -106,18 +87,6 @@ fn run_candidate_interactive() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn now_ms() -> u64 {
-    SystemClock.now_ms()
-}
-
-/// Sets a sanitized expert error status with a next step.
-#[rustfmt::skip]
-fn set_error(app: &mut app::ExpertApp, context: &str, detail: &str) { app.set_status_message(help::expert_error_message(context, detail)); }
-
-/// Runs one bounded async step on a lazily built current-thread runtime.
-#[rustfmt::skip]
-fn block_on<T>(slot: &mut Option<tokio::runtime::Runtime>, future: impl Future<Output = T>) -> Option<T> { if slot.is_none() { *slot = tokio::runtime::Builder::new_current_thread().enable_all().build().ok(); } slot.as_ref().map(|runtime| runtime.block_on(future)) }
-
 /// TTY adapter: draws app lines plus live runtime data, polls the
 /// runtime in bounded steps, and maps keys to real operations.
 fn interactive_loop(
@@ -126,21 +95,25 @@ fn interactive_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     crossterm::terminal::enable_raw_mode()?;
     #[rustfmt::skip]
-    crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen, crossterm::event::EnableBracketedPaste)?;
+    crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen, crossterm::event::EnableBracketedPaste, crossterm::event::EnableMouseCapture)?;
     let _guard = TtyGuard;
     let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
     let mut terminal = ratatui::Terminal::new(backend)?;
     let mut runtime: Option<ExpertRuntime> = None;
     let mut tokio_rt: Option<tokio::runtime::Runtime> = None;
     let mut pastes = ExpertSetupPastes::new();
+    let mut api_key_input = String::new();
+    let mut setup_jd_height: u16 = 5;
+    let mut setup_notes_height: u16 = 2;
+    let mut setup_drag: Option<setup::ExpertSetupFocus> = None;
     let mut show_help = false;
+    let mut show_disclosure = false;
     while app.screen() != app::AppScreen::Exited {
         if app.screen() == app::AppScreen::Preflight && !*preflight_done {
             *preflight_done = true;
             run_preflight_check(app);
         }
         tick_runtime(app, &mut runtime, &mut tokio_rt);
-        let title = app::screen_title(app.screen());
         let mut lines = app::screen_lines(app);
         if let Some(active) = runtime.as_mut() {
             let now = now_ms();
@@ -156,50 +129,204 @@ fn interactive_loop(
                 app::AppScreen::Monitor => {
                     lines.extend(monitor::render_monitor_lines(&active.monitor_view(now)));
                     lines.extend(active.recovery_lines());
-                    if let Some(fresh) = active.reissue_string() { lines.push(format!("Reissue: {}", fresh.encode())); lines.push(help::countdown_line(active.countdown_secs(now))); }
-                    if active.is_disconnected() { lines.push("Press R to reissue a fresh connection string.".to_string()); }
-                    lines.push("Press e to end the session.".to_string());
+                    if let Some(fresh) = active.reissue_string() { lines.push(format!("reissue: {}", fresh.encode())); lines.push(help::countdown_line(active.countdown_secs(now))); }
+                    if active.is_disconnected() { lines.push("press R to reissue a fresh connection string.".to_string()); }
+                    lines.push("press e to end the session.".to_string());
                 }
                 _ => {}
             }
         }
-        if show_help {
+        if app.api_key_entry && app.screen() == app::AppScreen::Preflight {
+            let masked = format!(
+                "  Key: {} ({} characters)",
+                "\u{2022}".repeat(api_key_input.chars().count()),
+                api_key_input.chars().count()
+            );
+            let at = lines.len().saturating_sub(1);
+            lines.insert(at, masked);
+        }
+        if show_disclosure {
+            lines = help::disclosure_lines();
+        } else if show_help {
             lines = help::expert_help_lines(app.screen());
         }
         let height = terminal.size().map(|s| s.height as usize).unwrap_or(24);
         let visible = viewport::visible_with_pinned(&lines, height.saturating_sub(2));
+        let centered = matches!(
+            app.screen(),
+            app::AppScreen::RoleSelect | app::AppScreen::Preflight
+        ) || show_help
+            || show_disclosure;
         let _ = terminal.draw(|frame| {
-            let widget = ratatui::widgets::Paragraph::new(visible.join("\n")).block(
-                ratatui::widgets::Block::default()
-                    .title(title)
-                    .borders(ratatui::widgets::Borders::ALL),
-            );
-            frame.render_widget(widget, frame.area());
+            if app.screen() == app::AppScreen::Setup && !show_help && !show_disclosure {
+                render::draw_setup_screen(
+                    frame,
+                    &render::SetupPanel {
+                        job_description: pastes.jd(),
+                        additional_notes: pastes.notes(),
+                        job_focused: pastes.focus() == setup::ExpertSetupFocus::JobDescription,
+                        job_scroll: pastes.jd_scroll(),
+                        notes_scroll: pastes.notes_scroll(),
+                        status: app.status_message(),
+                        job_height: setup_jd_height,
+                        notes_height: setup_notes_height,
+                    },
+                );
+            } else {
+                render::draw_screen(frame, &visible, centered);
+            }
         });
         if crossterm::event::poll(std::time::Duration::from_millis(250)).unwrap_or(false) {
             match crossterm::event::read() {
                 Ok(crossterm::event::Event::Key(key)) => {
                     if key.kind != crossterm::event::KeyEventKind::Release {
-                        match help::expert_key_action(key.code, show_help) {
-                            help::ExpertKeyAction::ToggleHelp => show_help = !show_help,
-                            help::ExpertKeyAction::Ignore => {}
-                            help::ExpertKeyAction::Dispatch => {
-                                handle_key(app, &mut runtime, &mut tokio_rt, &mut pastes, key.code)
+                        if app.api_key_entry {
+                            handle_key(
+                                app,
+                                &mut runtime,
+                                &mut tokio_rt,
+                                &mut pastes,
+                                preflight_done,
+                                &mut api_key_input,
+                                key.code,
+                            );
+                            continue;
+                        }
+                        if show_help
+                            && !show_disclosure
+                            && help::help_overlay_dispatches(key.code, app.screen())
+                        {
+                            show_help = false;
+                            handle_key(
+                                app,
+                                &mut runtime,
+                                &mut tokio_rt,
+                                &mut pastes,
+                                preflight_done,
+                                &mut api_key_input,
+                                key.code,
+                            );
+                            continue;
+                        }
+                        match if show_disclosure {
+                            help::expert_disclosure_action(key)
+                        } else {
+                            help::expert_event_action(key, show_help)
+                        } {
+                            help::ExpertKeyAction::ToggleHelp => {
+                                if show_disclosure {
+                                    show_disclosure = false;
+                                    show_help = false;
+                                } else {
+                                    show_help = !show_help;
+                                }
                             }
+                            help::ExpertKeyAction::ShowDisclosure => {
+                                show_disclosure = !show_disclosure;
+                            }
+                            help::ExpertKeyAction::ReturnToHelp => {
+                                show_disclosure = false;
+                            }
+                            help::ExpertKeyAction::Ignore => {}
+                            help::ExpertKeyAction::Quit => {
+                                let _ = app.handle(app::AppEvent::Quit);
+                            }
+                            help::ExpertKeyAction::Dispatch => handle_key(
+                                app,
+                                &mut runtime,
+                                &mut tokio_rt,
+                                &mut pastes,
+                                preflight_done,
+                                &mut api_key_input,
+                                key.code,
+                            ),
                         }
                     }
                 }
-                Ok(crossterm::event::Event::Paste(text)) => handle_paste(app, &mut pastes, &text),
+                Ok(crossterm::event::Event::Paste(text)) => {
+                    handle_paste(app, &mut pastes, &mut api_key_input, &text)
+                }
+                Ok(crossterm::event::Event::Mouse(mouse))
+                    if app.screen() == app::AppScreen::Setup && !show_help =>
+                {
+                    use crossterm::event::{MouseButton, MouseEventKind};
+                    let size = terminal.size().unwrap_or_default();
+                    let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                    let (jd_box, notes_box) =
+                        render::setup_box_areas(area, setup_jd_height, setup_notes_height);
+                    let in_box = |rect: ratatui::layout::Rect| {
+                        mouse.column >= rect.x
+                            && mouse.column < rect.x + rect.width
+                            && mouse.row >= rect.y
+                            && mouse.row < rect.y + rect.height
+                    };
+                    match mouse.kind {
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            if in_box(jd_box) {
+                                pastes.set_focus(setup::ExpertSetupFocus::JobDescription);
+                                if mouse.row == jd_box.y + jd_box.height - 1 {
+                                    setup_drag = Some(setup::ExpertSetupFocus::JobDescription);
+                                }
+                            } else if in_box(notes_box) {
+                                pastes.set_focus(setup::ExpertSetupFocus::AdditionalNotes);
+                                if mouse.row == notes_box.y + notes_box.height - 1 {
+                                    setup_drag = Some(setup::ExpertSetupFocus::AdditionalNotes);
+                                }
+                            }
+                        }
+                        MouseEventKind::Drag(MouseButton::Left) => match setup_drag {
+                            Some(setup::ExpertSetupFocus::JobDescription) => {
+                                setup_jd_height =
+                                    mouse.row.saturating_sub(jd_box.y + 1).clamp(5, 20);
+                            }
+                            Some(setup::ExpertSetupFocus::AdditionalNotes) => {
+                                setup_notes_height =
+                                    mouse.row.saturating_sub(notes_box.y + 1).clamp(2, 12);
+                            }
+                            None => {}
+                        },
+                        MouseEventKind::Up(MouseButton::Left) => setup_drag = None,
+                        MouseEventKind::ScrollDown => {
+                            if in_box(jd_box) {
+                                pastes.set_focus(setup::ExpertSetupFocus::JobDescription);
+                            } else if in_box(notes_box) {
+                                pastes.set_focus(setup::ExpertSetupFocus::AdditionalNotes);
+                            }
+                            if in_box(jd_box) || in_box(notes_box) {
+                                pastes.scroll_focused(1);
+                            }
+                        }
+                        MouseEventKind::ScrollUp => {
+                            if in_box(jd_box) {
+                                pastes.set_focus(setup::ExpertSetupFocus::JobDescription);
+                            } else if in_box(notes_box) {
+                                pastes.set_focus(setup::ExpertSetupFocus::AdditionalNotes);
+                            }
+                            if in_box(jd_box) || in_box(notes_box) {
+                                pastes.scroll_focused(-1);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                 _ => {}
             }
         }
+    }
+    // Quitting with a built runtime still ends the session (without
+    // waiting for the final ack) so sandbox cleanup always runs.
+    if let Some(active) = runtime.as_mut() {
+        let _ = block_on(
+            &mut tokio_rt,
+            active.end_session_with_ack_deadline(now_ms(), 0),
+        );
     }
     Ok(())
 }
 
 /// Bounded per-tick runtime step: poll for the candidate hello on
 /// the connection screen, drain intents once the session is live.
-fn tick_runtime(
+pub(crate) fn tick_runtime(
     app: &mut app::ExpertApp,
     runtime: &mut Option<ExpertRuntime>,
     tokio_rt: &mut Option<tokio::runtime::Runtime>,
@@ -236,153 +363,9 @@ fn tick_runtime(
             }
             if outcome == Some(PollOutcome::Connected) && app.is_disconnected() {
                 let _ = app.handle(AppEvent::CandidateReconnected);
+                app.clear_status_message();
             }
         }
         _ => {}
-    }
-}
-
-/// Feeds a bracketed paste on Setup into the collector; ignored elsewhere.
-/// The only path that sets `has_proposal`, with progress on the status line.
-#[rustfmt::skip]
-fn handle_paste(app: &mut app::ExpertApp, pastes: &mut ExpertSetupPastes, text: &str) {
-    if app.screen() != app::AppScreen::Setup { return; }
-    match apply_expert_setup_paste(pastes, text) {
-        Ok(false) => app.set_status_message("JD pasted. Paste additional notes."),
-        Ok(true) => { app.set_has_proposal(true); app.set_status_message("Proposal ready. Press Enter."); }
-        Err(reason) => app.set_status_message(reason),
-    }
-}
-
-/// Maps one key press: app events before the runtime exists, real
-/// runtime operations afterwards (`e` ends a live session).
-fn handle_key(
-    app: &mut app::ExpertApp,
-    runtime: &mut Option<ExpertRuntime>,
-    tokio_rt: &mut Option<tokio::runtime::Runtime>,
-    pastes: &mut ExpertSetupPastes,
-    code: crossterm::event::KeyCode,
-) {
-    use app::{AppEvent, AppScreen};
-    use crossterm::event::KeyCode as K;
-    match code {
-        K::Char('q') | K::Esc => _ = app.handle(AppEvent::Quit),
-        K::Char('b') => _ = app.handle(AppEvent::Back),
-        K::Char('r') => _ = app.handle(AppEvent::Retry),
-        K::Char('e') if app.screen() == AppScreen::RoleSelect => {
-            _ = app.handle(AppEvent::SelectExpert)
-        }
-        K::Char('c') if app.screen() == AppScreen::RoleSelect => {
-            _ = app.handle(AppEvent::SelectCandidate)
-        }
-        K::Char('e') if app.screen() == AppScreen::Monitor => {
-            if let Some(active) = runtime.as_mut() {
-                match block_on(tokio_rt, active.end_session(now_ms())) {
-                    Some(Ok(_)) => {
-                        let _ = app.handle(AppEvent::EndSession);
-                    }
-                    Some(Err(err)) => set_error(app, "End failed", &err.to_string()),
-                    None => set_error(app, "End failed", "runtime unavailable"),
-                }
-            }
-        }
-        K::Char('R') if app.screen() == AppScreen::Monitor => {
-            if let Some(active) = runtime.as_mut() {
-                match block_on(tokio_rt, active.reissue(now_ms())) {
-                    Some(Ok(fresh)) => {
-                        app.set_status_message(format!("Fresh string ready: {}", fresh.encode()))
-                    }
-                    Some(Err(err)) => set_error(app, "Reissue failed", &err.to_string()),
-                    None => set_error(app, "Reissue failed", "runtime unavailable"),
-                }
-            }
-        }
-        K::Enter => advance(app, runtime, tokio_rt, pastes),
-        _ => {}
-    }
-}
-
-/// Enter is the context action for the current screen. Pre-runtime
-/// screens keep their controller-checked transitions; building the
-/// runtime is the Proposal action, and afterwards Enter only polls,
-/// fetches real questions through the runtime, or does nothing.
-fn advance(
-    app: &mut app::ExpertApp,
-    runtime: &mut Option<ExpertRuntime>,
-    tokio_rt: &mut Option<tokio::runtime::Runtime>,
-    pastes: &mut ExpertSetupPastes,
-) {
-    use app::{AppEvent, AppScreen};
-    match app.screen() {
-        AppScreen::Preflight => _ = app.handle(AppEvent::PreflightCompleted),
-        AppScreen::ApiKey => {
-            let _ = app.handle(AppEvent::ApiKeySaved);
-        }
-        AppScreen::Setup => {
-            if app.disclosure_acknowledged {
-                let _ = app.handle(AppEvent::ProposalReady);
-            } else {
-                let _ = app.handle(AppEvent::DisclosureAcknowledged);
-            }
-        }
-        AppScreen::Proposal => {
-            if runtime.is_none() {
-                let build =
-                    expert_runtime::build_expert_runtime(now_ms(), pastes.jd(), pastes.notes());
-                match block_on(tokio_rt, build) {
-                    Some(Ok(built)) => *runtime = Some(built),
-                    Some(Err(err)) => {
-                        set_error(app, "Session setup failed", &err.to_string());
-                        return;
-                    }
-                    None => {
-                        set_error(app, "Session setup failed", "runtime unavailable");
-                        return;
-                    }
-                }
-            }
-            let _ = app.handle(AppEvent::ProposalConfirmed);
-        }
-        AppScreen::ConnectionWait => {
-            // Poll only: the lock comes from poll_candidate, never Enter.
-            tick_runtime(app, runtime, tokio_rt);
-        }
-        AppScreen::SelectMedium => {
-            if let Some(active) = runtime.as_mut() {
-                if !active.selection_allowed(SelectionScreen::Medium, now_ms()) {
-                    return;
-                }
-                match block_on(tokio_rt, active.fetch_medium(now_ms())) {
-                    Some(Ok(_)) => {
-                        if let Some(note) = active.selection_note() {
-                            app.set_status_message(note);
-                        }
-                        let _ = app.handle(AppEvent::MediumSelected);
-                    }
-                    Some(Err(err)) => set_error(app, "Selection failed", &err.to_string()),
-                    None => set_error(app, "Selection failed", "runtime unavailable"),
-                }
-            }
-        }
-        AppScreen::SelectHard => {
-            if let Some(active) = runtime.as_mut() {
-                if !active.selection_allowed(SelectionScreen::Hard, now_ms()) {
-                    return;
-                }
-                match block_on(tokio_rt, active.complete_selection(now_ms())) {
-                    Some(Ok(())) => {
-                        if let Some(note) = active.selection_note() {
-                            app.set_status_message(note);
-                        }
-                        app.set_expert_selection_done(true);
-                        let _ = app.handle(AppEvent::ExpertSelectionDone);
-                    }
-                    Some(Err(err)) => set_error(app, "Selection failed", &err.to_string()),
-                    None => set_error(app, "Selection failed", "runtime unavailable"),
-                }
-            }
-        }
-        AppScreen::Monitor | AppScreen::RoleSelect | AppScreen::Exited => {}
-        AppScreen::Final => _ = app.handle(AppEvent::Quit),
     }
 }

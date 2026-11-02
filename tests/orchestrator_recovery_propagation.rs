@@ -167,14 +167,14 @@ fn recovery_state_propagates_to_candidate() {
     assert_eq!(view.recovery.as_ref().map(|r| r.generation), Some(2));
     let lines = view.lines().join("\n");
     assert!(
-        lines.contains("Technical problem - service temporarily unavailable."),
+        lines.contains("technical problem - service temporarily unavailable."),
         "{lines}"
     );
     assert!(
-        lines.contains("Retrying... about 45 seconds remaining."),
+        lines.contains("retrying... about 45 seconds remaining."),
         "{lines}"
     );
-    assert!(lines.contains("Your progress is preserved."), "{lines}");
+    assert!(lines.contains("your progress is preserved."), "{lines}");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -241,14 +241,14 @@ fn candidate_recovery_message_is_sanitized() {
     candidate.poll_snapshot_at(10_000).unwrap();
     let lines = candidate.view().lines().join("\n");
     assert!(
-        lines.contains("Technical problem - service temporarily unavailable."),
+        lines.contains("technical problem - service temporarily unavailable."),
         "{lines}"
     );
     assert!(
-        lines.contains("Retrying... about 13 seconds remaining."),
+        lines.contains("retrying... about 13 seconds remaining."),
         "{lines}"
     );
-    assert!(lines.contains("Your progress is preserved."), "{lines}");
+    assert!(lines.contains("your progress is preserved."), "{lines}");
     for banned in ["503", "MetaApiError", "424242", "status", "body", "secret"] {
         assert!(!lines.contains(banned), "{banned} leaked: {lines}");
     }
@@ -398,14 +398,14 @@ async fn recovery_clear_event_reaches_both_roles() {
         .view()
         .lines()
         .join("\n")
-        .contains("Technical problem"));
+        .contains("technical problem"));
     candidate.poll_snapshot_at(20_000).unwrap();
     assert_eq!(candidate.view().recovery, None);
     assert!(!candidate
         .view()
         .lines()
         .join("\n")
-        .contains("Technical problem"));
+        .contains("technical problem"));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -431,10 +431,10 @@ async fn technical_failure_reaches_both_roles() {
     candidate.poll_snapshot_at(10_000).unwrap();
     let lines = candidate.view().lines().join("\n");
     assert!(
-        lines.contains("The session ended as a technical failure."),
+        lines.contains("the session ended as a technical failure."),
         "{lines}"
     );
-    assert!(lines.contains("No evaluation was produced"), "{lines}");
+    assert!(lines.contains("no evaluation was produced"), "{lines}");
     let _ = std::fs::remove_dir_all(dir);
     // Expert expiry publishes TechnicalFailure with technical_failure=true.
     let (_root, control, mut expert) = make_expert("technical-expert").await;

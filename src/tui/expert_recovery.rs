@@ -111,15 +111,15 @@ impl ExpertRuntime {
                     .unwrap_or("service");
                 let secs = self.recovery_remaining_ms().saturating_add(999) / 1000;
                 vec![
-                    format!("Service temporarily unavailable: {name}"),
-                    format!("Recovering... about {secs} seconds remaining."),
+                    format!("service temporarily unavailable: {name}"),
+                    format!("recovering... about {secs} seconds remaining."),
                 ]
             }
             RecoveryPhase::Failed => vec![
-                "Service recovery failed.".to_string(),
-                "Session ended as a technical failure.".to_string(),
+                "service recovery failed.".to_string(),
+                "session ended as a technical failure.".to_string(),
             ],
-            RecoveryPhase::Recovered => vec!["Service recovered.".to_string()],
+            RecoveryPhase::Recovered => vec!["service recovered.".to_string()],
             RecoveryPhase::Cancelled => Vec::new(),
             RecoveryPhase::Healthy => Vec::new(),
         }

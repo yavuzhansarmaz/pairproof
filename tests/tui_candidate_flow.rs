@@ -165,7 +165,7 @@ fn ctrl_c_quits_from_connect() {
 }
 
 #[test]
-fn rules_q_quits() {
+fn rules_esc_quits_q_does_not() {
     let app = CandidateApp::with_verifier(OkVerifier);
     let mut state =
         CandidateRunState::with_parts(app, CandidateWork::new(), ChatController::default());
@@ -173,6 +173,8 @@ fn rules_q_quits() {
     handle_candidate_key(&mut state, key(KeyCode::Enter));
     assert_eq!(state.app.screen(), CandidateScreen::Rules);
     handle_candidate_key(&mut state, key(KeyCode::Char('q')));
+    assert_eq!(state.app.screen(), CandidateScreen::Rules);
+    handle_candidate_key(&mut state, key(KeyCode::Esc));
     assert_eq!(state.app.screen(), CandidateScreen::Exited);
 }
 
@@ -201,7 +203,7 @@ fn solving_keys_dispatch_with_unavailable_runners_honestly() {
         assert_eq!(session.current_slot().expect("slot").latest_test, None);
     }
     let lines = candidate_screen_lines(&state).join("\n");
-    assert!(lines.contains("Tests are not available yet"), "{lines}");
+    assert!(lines.contains("tests are not available yet"), "{lines}");
     for _ in 0..3 {
         handle_candidate_key(&mut state, key(KeyCode::Tab));
     }
@@ -212,13 +214,13 @@ fn solving_keys_dispatch_with_unavailable_runners_honestly() {
     handle_candidate_key(&mut state, key(KeyCode::Enter));
     assert!(state.chat.history().is_empty());
     let lines = candidate_screen_lines(&state).join("\n");
-    assert!(lines.contains("Chat is not available yet"), "{lines}");
+    assert!(lines.contains("chat is not available yet"), "{lines}");
     handle_candidate_paste(&mut state, "bulk pasted text");
     assert!(state.paste_notice);
     assert_eq!(state.chat.input_text(), "hi");
     let lines = candidate_screen_lines(&state).join("\n");
     assert!(
-        lines.contains("Pasting is blocked here; type instead."),
+        lines.contains("pasting is blocked here; type instead."),
         "{lines}"
     );
 }
@@ -306,7 +308,7 @@ fn solution_editor_sync_is_not_subject_to_pairproof_paste_block() {
     assert!(flag.inserted_bytes >= 2048, "{flag:?}");
     let mut chat = ChatController::default();
     let error = chat.paste_input(&grown).expect_err("chat paste blocked");
-    assert_eq!(error.to_string(), "Pasting is blocked here; type instead.");
+    assert_eq!(error.to_string(), "pasting is blocked here; type instead.");
     assert_eq!(chat.input_text(), "");
     let _ = std::fs::remove_dir_all(&alpha);
 }

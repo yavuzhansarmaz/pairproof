@@ -80,9 +80,9 @@ impl SetupController {
 
     /// Returns disclosure text shown before any text is sent to Meta.
     pub fn disclosure_message() -> &'static str {
-        "Your job description and additional notes (each bounded to 50,000 \
+        "your job description and additional notes (each bounded to 50,000 \
          characters) will be sent to the Meta API to propose interview \
-         topics, level, and language. Acknowledge before continuing."
+         topics, level, and language. acknowledge before continuing."
     }
 
     /// Returns the current draft.
@@ -285,14 +285,35 @@ impl SetupController {
     }
 }
 
-/// Expert Setup paste collector: first paste is the JD, second is notes.
-/// Held by the TTY loop, never by `ExpertApp`; completeness is the only
-/// path that lets the loop set `has_proposal` on the app.
+/// Which Session Setup text box currently receives pastes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExpertSetupFocus {
+    #[default]
+    JobDescription,
+    AdditionalNotes,
+}
+
+/// Expert Setup paste collector for the two text boxes. The job
+/// description is required; additional notes are optional. Held by
+/// the TTY loop, never by `ExpertApp`.
 #[derive(Debug, Default)]
 pub struct ExpertSetupPastes {
     controller: SetupController,
     jd_received: bool,
     notes_received: bool,
+    focus: ExpertSetupFocus,
+    jd_scroll: usize,
+    notes_scroll: usize,
+}
+
+fn validate_paste(text: &str) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("Paste rejected: blank paste ignored.".to_string());
+    }
+    if text.chars().count() > crate::ingest::MAX_TEXT_CHARS {
+        return Err("Paste rejected: exceeds 50,000 characters.".to_string());
+    }
+    Ok(())
 }
 
 #[rustfmt::skip]
@@ -301,6 +322,38 @@ impl ExpertSetupPastes {
     pub fn jd(&self) -> &str { &self.controller.draft().jd }
     pub fn notes(&self) -> &str { &self.controller.draft().additional }
     pub fn is_complete(&self) -> bool { self.jd_received && self.notes_received }
+    /// True once a non-blank job description is in place; notes are
+    /// optional, so this alone is enough to build a proposal.
+    pub fn is_ready(&self) -> bool { self.jd_received && !self.jd().trim().is_empty() }
+    pub fn focus(&self) -> ExpertSetupFocus { self.focus }
+    pub fn jd_scroll(&self) -> usize { self.jd_scroll }
+    pub fn notes_scroll(&self) -> usize { self.notes_scroll }
+    /// Pastes into the focused box, replacing its previous text so a
+    /// wrong paste can be corrected by pasting again.
+    pub fn apply_focused_paste(&mut self, text: &str) -> Result<(), String> {
+        validate_paste(text)?;
+        match self.focus {
+            ExpertSetupFocus::JobDescription => { self.controller.set_jd(text); self.jd_received = true; self.jd_scroll = 0; }
+            ExpertSetupFocus::AdditionalNotes => { self.controller.set_additional(text); self.notes_received = true; self.notes_scroll = 0; }
+        }
+        Ok(())
+    }
+    /// Enter on the job-description box: moves to additional notes
+    /// when a JD is present. Returns false when there is no JD yet.
+    pub fn confirm_job_description(&mut self) -> bool {
+        if !self.is_ready() { return false; }
+        self.focus = ExpertSetupFocus::AdditionalNotes;
+        true
+    }
+    /// Returns focus to the job-description box; texts are kept.
+    pub fn back_to_job_description(&mut self) { self.focus = ExpertSetupFocus::JobDescription; }
+    /// Moves focus to a box (mouse click); texts are kept.
+    pub fn set_focus(&mut self, focus: ExpertSetupFocus) { self.focus = focus; }
+    /// Scrolls the focused box by `delta` lines (clamped at zero).
+    pub fn scroll_focused(&mut self, delta: i32) {
+        let scroll = match self.focus { ExpertSetupFocus::JobDescription => &mut self.jd_scroll, ExpertSetupFocus::AdditionalNotes => &mut self.notes_scroll };
+        *scroll = (*scroll as i64 + i64::from(delta)).max(0) as usize;
+    }
 }
 
 /// Feeds one bracketed paste: first fills the JD, second fills the notes,
@@ -308,10 +361,7 @@ impl ExpertSetupPastes {
 /// are rejected without advancing. `Ok(true)` means the proposal is ready.
 #[rustfmt::skip]
 pub fn apply_expert_setup_paste(pastes: &mut ExpertSetupPastes, text: &str) -> Result<bool, String> {
-    if text.trim().is_empty() { return Err("Paste rejected: blank paste ignored.".to_string()); }
-    if text.chars().count() > crate::ingest::MAX_TEXT_CHARS {
-        return Err("Paste rejected: exceeds 50,000 characters.".to_string());
-    }
+    validate_paste(text)?;
     if !pastes.jd_received {
         pastes.controller.set_jd(text);
         pastes.jd_received = true;

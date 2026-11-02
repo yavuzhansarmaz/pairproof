@@ -92,7 +92,7 @@ pub fn monitor_view(
             .filter(|s| s.paste_flags > 0)
             .map(|s| {
                 format!(
-                    "Paste flag on Q{}: {} confirmed bulk paste(s)",
+                    "paste flag on Q{}: {} confirmed bulk paste(s)",
                     s.index + 1,
                     s.paste_flags
                 )
@@ -114,21 +114,21 @@ pub fn render_monitor_lines(view: &MonitorView) -> Vec<String> {
         .per_question_ms
         .map_or("n/a".into(), |ms| format!("{ms} ms"));
     let mut lines = vec![
-        format!("Status: {}", view.status_label),
-        format!("Current: {q}"),
-        format!("Approach: {a}"),
-        format!("Latest test: {t}"),
-        format!("Elapsed: {} ms", view.elapsed_ms),
-        format!("Per-question: {pq}"),
-        format!("Live rating: {:.2}", view.rating),
+        format!("status: {}", view.status_label),
+        format!("current: {q}"),
+        format!("approach: {a}"),
+        format!("latest test: {t}"),
+        format!("elapsed: {} ms", view.elapsed_ms),
+        format!("per-question: {pq}"),
+        format!("live rating: {:.2}", view.rating),
     ];
     if view.rating_lines.is_empty() {
-        lines.push("Rating breakdown: none".into());
+        lines.push("rating breakdown: none".into());
     } else {
         lines.extend(view.rating_lines.iter().map(|l| format!("  {l}")));
     }
     if view.paste_alerts.is_empty() {
-        lines.push("Paste alerts: none".into());
+        lines.push("paste alerts: none".into());
     } else {
         lines.extend(view.paste_alerts.iter().cloned());
     }
@@ -225,8 +225,6 @@ pub fn final_view(
         paste_flag_count: b.paste_flag_count,
         total_time_ms: b.total_time_ms,
         not_scored: b.not_scored,
-        artefact_note:
-            "Final breakdown computed; Markdown report generation is Phase 10 (not claimed here)."
-                .into(),
+        artefact_note: "final breakdown computed.".into(),
     })
 }

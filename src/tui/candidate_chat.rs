@@ -42,7 +42,7 @@ impl ChatService for Box<dyn ChatService> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PasteBlocked {
     /// Paste was rejected and the buffer was left unchanged.
-    #[error("Pasting is blocked here; type instead.")]
+    #[error("pasting is blocked here; type instead.")]
     Blocked,
 }
 
@@ -117,16 +117,16 @@ pub fn other_insert(
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ChatError {
     /// A chat request is already in flight.
-    #[error("Chat is busy; wait for the current reply.")]
+    #[error("chat is busy; wait for the current reply.")]
     Busy,
     /// The message is empty after trimming.
-    #[error("Message must not be empty.")]
+    #[error("message must not be empty.")]
     EmptyMessage,
     /// Chat transport is not wired yet.
-    #[error("Chat is not available yet.")]
+    #[error("chat is not available yet.")]
     Unavailable,
     /// Chat transport failed generically.
-    #[error("Chat failed; try again.")]
+    #[error("chat failed; try again.")]
     Failed,
     /// Core session failure.
     #[error(transparent)]
@@ -285,20 +285,20 @@ impl ChatController {
         let mut lines: Vec<String> = Vec::new();
         for message in &self.history {
             let label = if message.role == "assistant" {
-                "Coach"
+                "coach"
             } else {
-                "You"
+                "you"
             };
             lines.push(sanitize_display(&format!("{label}: {}", message.content)));
         }
-        lines.push(sanitize_display(&format!("Message: {}", self.input.text())));
+        lines.push(sanitize_display(&format!("message: {}", self.input.text())));
         if self.busy {
-            lines.push("Sending...".to_string());
+            lines.push("sending...".to_string());
         }
         if let Some(error) = self.last_error {
             lines.push(match error {
-                ChatServiceError::Unavailable => "Chat is not available yet.".to_string(),
-                ChatServiceError::Failed => "Chat failed; try again.".to_string(),
+                ChatServiceError::Unavailable => "chat is not available yet.".to_string(),
+                ChatServiceError::Failed => "chat failed; try again.".to_string(),
             });
         }
         if self.paste_notice {

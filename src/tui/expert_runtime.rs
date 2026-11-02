@@ -69,11 +69,11 @@ fn meta_client() -> Result<crate::llm::MetaClient, String> { if let Ok(client) =
 pub fn expert_context_from_extraction(result: &ExtractionResult) -> (Vec<String>, String, Language) { (result.topics.clone(), result.level.clone(), result.proposed_language.unwrap_or(Language::Python)) }
 /// Builds the expert-visible note for a widened selection report.
 #[rustfmt::skip]
-fn widened_note(report: &FallbackReport) -> Option<String> { if !report.widened { return None; } let tags = if report.tags_used.is_empty() { "unfiltered".to_string() } else { report.tags_used.join(", ") }; Some(format!("Selection widened beyond topics ({tags}).")) }
+fn widened_note(report: &FallbackReport) -> Option<String> { if !report.widened { return None; } let tags = if report.tags_used.is_empty() { "unfiltered".to_string() } else { report.tags_used.join(", ") }; Some(format!("selection widened beyond topics ({tags}).")) }
 /// Resolves Setup pastes to stored documents plus runtime context.
 #[rustfmt::skip]
 async fn resolve_expert_context(jd: &str, notes: &str) -> Result<(Option<ExpertDocuments>, Vec<String>, String, Language), String> {
-    if jd.trim().is_empty() || notes.trim().is_empty() { return Ok((None, Vec::new(), String::new(), Language::Python)); }
+    if jd.trim().is_empty() { return Ok((None, Vec::new(), String::new(), Language::Python)); }
     let docs = prepare_documents(jd, notes).map_err(|e| e.to_string())?; let outcome = extract_context(&meta_client()?, &docs.jd.text, docs.additional_text().unwrap_or("")).await.map_err(|e| format!("extraction failed: {e}"))?;
     let (topics, level, language) = expert_context_from_extraction(&outcome.value); Ok((Some(docs), topics, level, language))
 }
@@ -86,7 +86,8 @@ pub(crate) async fn build_expert_runtime(now: u64, jd: &str, notes: &str) -> Res
     use crate::sandbox::lifecycle::{create_and_provision, destroy, rotate_secret}; use crate::orchestration::Clock;
     let (docs, topics, level, language) = resolve_expert_context(jd, notes).await?;
     let leetcode = LeetCodeClient::default(); let mut rng = rand::thread_rng();
-    let easy = auto_pick_easy(&leetcode, &[], &mut rng).await.map_err(|e| e.to_string())?;
+    let topic_refs: Vec<&str> = topics.iter().map(String::as_str).collect();
+    let easy = auto_pick_easy(&leetcode, &topic_refs, &mut rng).await.map_err(|e| e.to_string())?;
     let session_id = format_session_id(std::process::id(), now);
     let port = select_sandbox_port().ok_or_else(|| "no free sandbox port".to_string())?;
     let endpoint = Endpoint::new("127.0.0.1", port).map_err(|e| e.to_string())?; let username = EphemeralUsername::generate(); let secret0 = Secret::generate();

@@ -5,7 +5,7 @@
 #[rustfmt::skip] use crate::orchestration::control_client::{CandidateControlClient, SshControlClient};
 #[rustfmt::skip] use crate::orchestration::mutagen_auth::{run_mutagen, MutagenAuthEnv, PasswordFeeder};
 #[rustfmt::skip] use crate::orchestration::ssh_auth::{run_ssh_command, run_ssh_command_with_stdin, verify_and_key_line, AskpassSession, SshAuthError};
-#[rustfmt::skip] use crate::tui::candidate::{screen_title, CandidateConnectError, CandidateScreen, ConnectionVerifier};
+#[rustfmt::skip] use crate::tui::candidate::{CandidateConnectError, CandidateScreen, ConnectionVerifier};
 #[rustfmt::skip] use crate::tui::candidate_chat::other_insert;
 #[rustfmt::skip] use crate::tui::candidate_run::{candidate_screen_lines, handle_candidate_key, handle_candidate_paste, now_ms, CandidateFocus, CandidateRunState, CandidateTtyGuard};
 #[rustfmt::skip] use crate::tui::shared::sanitize_display;
@@ -17,7 +17,7 @@
 const HELLO_PATH: &str = "/pairproof-control/inbox/hello.json";
 const SSH_TIMEOUT: Duration = Duration::from_secs(20);
 const HEARTBEAT_THROTTLE_MS: u64 = 5_000;
-pub const CONNECTION_LOST: &str = "Connection lost \u{2014} retrying";
+pub const CONNECTION_LOST: &str = "connection lost \u{2014} retrying";
 /// Explicit runtime phase; work is reachable only when Connected.
 #[rustfmt::skip]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,11 +27,11 @@ pub enum CandidateRuntimePhase { Disconnected, Authenticating, Syncing, Connecte
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CandidateRuntimeError {
     #[error("{0}")] Auth(#[from] CandidateConnectError),
-    #[error("Sync problem \u{2014} ask the expert")] SyncFailed,
+    #[error("sync problem \u{2014} ask the expert")] SyncFailed,
     #[error("control message bound to another session")] WrongSession,
     #[error("candidate is not connected")] NotConnected,
     #[error("session has ended")] Ended,
-    #[error("Connection problem \u{2014} ask the expert")] Transport,
+    #[error("connection problem \u{2014} ask the expert")] Transport,
     #[error("PairProof version mismatch: candidate is running {candidate}, expert is running {expert}; both must run the same version - update/restart PairProof and reconnect")] VersionMismatch { candidate: String, expert: String },
 }
 /// Maps any SSH-auth failure to generic rejection; payloads are dropped.
@@ -68,19 +68,19 @@ impl CandidateView {
     pub fn is_terminal(&self) -> bool { matches!(self.phase.as_str(), "Completed" | "EndedByExpert" | "TechnicalFailure") }
     /// Sanitized lines; a rating renders only from a carried breakdown.
     pub fn lines(&self) -> Vec<String> {
-        if self.phase.is_empty() { return vec!["Waiting for the expert.".to_string()]; }
+        if self.phase.is_empty() { return vec!["waiting for the expert.".to_string()]; }
         let mut lines = Vec::new();
-        match (&self.question_index, &self.question_title) { (Some(i), Some(t)) => lines.push(format!("Q{}: {}", i + 1, t)), _ => lines.push("No active question.".to_string()) }
-        match &self.statement { Some(s) => lines.push(s.clone()), None => lines.push("Statement is not available yet.".to_string()) }
-        if self.options.is_empty() { lines.push("Approaches are not available yet.".to_string()); } else { for (i, o) in self.options.iter().enumerate() { lines.push(format!("{}: {} - {}", i, o.title, o.summary)); } lines.push("Other: describe your own approach".to_string()); }
-        lines.push(format!("Selected approach: {}", self.selected.as_deref().unwrap_or("none")));
-        match self.latest_test { Some(t) => lines.push(format!("Latest test: {} passed, {} failed", t.passed, t.failed)), None => lines.push("Latest test: no test run yet".to_string()) }
+        match (&self.question_index, &self.question_title) { (Some(i), Some(t)) => lines.push(format!("Q{}: {}", i + 1, t)), _ => lines.push("no active question.".to_string()) }
+        match &self.statement { Some(s) => lines.push(s.clone()), None => lines.push("statement is not available yet.".to_string()) }
+        if self.options.is_empty() { lines.push("approaches are not available yet.".to_string()); } else { for (i, o) in self.options.iter().enumerate() { lines.push(format!("{}: {} - {}", i, o.title, o.summary)); } lines.push("other: describe your own approach".to_string()); }
+        lines.push(format!("selected approach: {}", self.selected.as_deref().unwrap_or("none")));
+        match self.latest_test { Some(t) => lines.push(format!("latest test: {} passed, {} failed", t.passed, t.failed)), None => lines.push("latest test: no test run yet".to_string()) }
         if !self.sync_phase.is_empty() { lines.push(self.sync_phase.clone()); }
-        lines.push(format!("Phase: {}", self.phase)); for reply in &self.chat_replies { lines.push(format!("Coach: {reply}")); }
-        if let Some(r) = &self.recovery { if r.active { lines.push("Technical problem - service temporarily unavailable.".to_string()); lines.push(format!("Retrying... about {} seconds remaining.", r.remaining_ms.saturating_add(999) / 1000)); lines.push("Your progress is preserved.".to_string()); } }
-        if let Some(f) = &self.final_breakdown { lines.push("Final breakdown".to_string()); lines.push(format!("Final rating: {:.2}", f.rating)); for q in &f.per_question { let grade = q.grade.map_or("not scored".to_string(), |g| format!("{g:.1}")); let mut line = format!("Q{}: grade {}", q.slot_index + 1, grade); if let Some(r) = &q.rationale { line.push_str(&format!(": {r}")); } lines.push(line); } }
-        else if self.phase == "TechnicalFailure" || self.recovery.as_ref().is_some_and(|r| r.technical_failure) { lines.push("The session ended as a technical failure.".to_string()); lines.push("No evaluation was produced; the interview can be rescheduled.".to_string()); }
-        else if self.is_terminal() { lines.push("Session ended.".to_string()); }
+        lines.push(format!("phase: {}", self.phase)); for reply in &self.chat_replies { lines.push(format!("coach: {reply}")); }
+        if let Some(r) = &self.recovery { if r.active { lines.push("technical problem - service temporarily unavailable.".to_string()); lines.push(format!("retrying... about {} seconds remaining.", r.remaining_ms.saturating_add(999) / 1000)); lines.push("your progress is preserved.".to_string()); } }
+        if let Some(f) = &self.final_breakdown { lines.push("Final breakdown".to_string()); lines.push(format!("final rating: {:.2}", f.rating)); for q in &f.per_question { let grade = q.grade.map_or("not scored".to_string(), |g| format!("{g:.1}")); let mut line = format!("Q{}: grade {}", q.slot_index + 1, grade); if let Some(r) = &q.rationale { line.push_str(&format!(": {r}")); } lines.push(line); } }
+        else if self.phase == "TechnicalFailure" || self.recovery.as_ref().is_some_and(|r| r.technical_failure) { lines.push("the session ended as a technical failure.".to_string()); lines.push("no evaluation was produced; the interview can be rescheduled.".to_string()); }
+        else if self.is_terminal() { lines.push("session ended.".to_string()); }
         lines.iter().map(|line| sanitize_display(line)).collect()
     }
 }
@@ -288,44 +288,44 @@ fn apply(status: &mut Option<String>, result: Result<Intent, CandidateRuntimeErr
 fn live_lines(state: &CandidateRunState, runtime: &CandidateRuntime<SshCandidateTransport>, status: &Option<String>) -> Vec<String> {
     let view = runtime.view();
     let mut lines = view.lines();
-    if runtime.connection_lost() { lines.push(CONNECTION_LOST.to_string()); lines.push("Press R to reconnect with a fresh string.".to_string()); }
-    lines.extend([format!("Other: {}", state.work.other_text()), format!("Redirect: {}", state.work.redirect_text()), format!("Message: {}", state.chat.input_text())]);
-    if state.paste_notice || state.chat.paste_notice() { lines.push("Pasting is blocked here; type instead.".to_string()); }
-    lines.push(if view.is_terminal() { "Enter quit".to_string() } else { "Focus: work/other/redirect/chat (Tab switches)".to_string() });
+    if runtime.connection_lost() { lines.push(CONNECTION_LOST.to_string()); lines.push("press R to reconnect with a fresh string.".to_string()); }
+    lines.extend([format!("other: {}", state.work.other_text()), format!("redirect: {}", state.work.redirect_text()), format!("message: {}", state.chat.input_text())]);
+    if state.paste_notice || state.chat.paste_notice() { lines.push("pasting is blocked here; type instead.".to_string()); }
+    lines.push(if view.is_terminal() { "enter quit".to_string() } else { "focus: work/other/redirect/chat (tab switches)".to_string() });
     if let Some(text) = status { lines.push(text.clone()); }
     lines.iter().map(|line| sanitize_display(line)).collect()
 }
 #[rustfmt::skip]
-fn handle_live_key(state: &mut CandidateRunState, runtime: &mut CandidateRuntime<SshCandidateTransport>, key: KeyEvent, status: &mut Option<String>) {
+pub fn handle_live_key<T: CandidateTransport>(state: &mut CandidateRunState, runtime: &mut CandidateRuntime<T>, key: KeyEvent, status: &mut Option<String>) {
     let control = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code { K::Esc => { state.app.quit(); return; } K::Char('c') if control => { state.app.quit(); return; } _ => {} }
-    if key.code == K::Char('?') && !control && !crate::tui::help::candidate_is_typing(state.app.screen(), state.focus) { state.show_help = !state.show_help; return; }
-    if state.show_help { return; }
-    if runtime.view().is_terminal() { match key.code { K::Enter => { state.app.quit(); }, K::Char('q') if !control => { state.app.quit(); }, _ => {} } return; }
+    if key.code == K::Char('?') && !control && !crate::tui::help::candidate_is_typing(CandidateScreen::Solving, state.focus) { if !state.show_help { state.show_help = true; } return; }
+    if state.show_help { if key.code == K::Char('b') && !control { state.show_help = false; } return; }
+    if runtime.view().is_terminal() { if key.code == K::Enter { state.app.quit(); } return; }
     match state.focus {
         CandidateFocus::Work => match key.code {
             K::Tab => state.focus = CandidateFocus::Other,
             K::Char(c) if !control => match c {
                 '1'..='4' => { apply(status, runtime.send_intent(IntentKind::SelectPreset { preset: c as u8 - b'1' })); } '5' | 'o' => state.focus = CandidateFocus::Other,
-                'c' => { apply(status, runtime.send_intent(IntentKind::Continue)); } 'd' => state.focus = CandidateFocus::Redirect,
+                'c' => { apply(status, runtime.send_intent(IntentKind::Continue)); } 'a' => { apply(status, runtime.send_intent(IntentKind::ChangeApproach)); } 'd' => state.focus = CandidateFocus::Redirect,
                 't' => { apply(status, runtime.send_intent(IntentKind::RequestTests)); } 's' => { apply(status, runtime.send_intent(IntentKind::Skip)); }
                 'f' => { if apply(status, runtime.send_intent(IntentKind::Finish)) { if let Err(err) = runtime.flush() { *status = Some(crate::tui::help::candidate_error_message(&err).to_string()); } } }
-                'r' => { apply(status, runtime.send_intent(IntentKind::RequestReQuestion)); } 'q' => { state.app.quit(); }, _ => {}
+                'r' => { apply(status, runtime.send_intent(IntentKind::RequestReQuestion)); }, _ => {}
             }, _ => {}
         },
         CandidateFocus::Other => match key.code {
             K::Tab => state.focus = CandidateFocus::Redirect,
-            K::Enter => { let text = state.work.other_text().to_string(); if apply(status, runtime.send_intent(IntentKind::SelectOther { text })) { state.work.set_other_text(""); state.focus = CandidateFocus::Work; } }
+            K::Enter => { let text = state.work.other_text().to_string(); if text.trim().is_empty() { *status = Some("type your own approach first, then press enter.".to_string()); } else if apply(status, runtime.send_intent(IntentKind::SelectOther { text })) { state.work.set_other_text(""); state.focus = CandidateFocus::Work; } }
             K::Backspace => { let text = pop_last(state.work.other_text()); state.work.set_other_text(&text); } K::Char(c) if !control => { let _ = other_insert(&mut state.work, &c.to_string(), false); } _ => {}
         },
         CandidateFocus::Redirect => match key.code {
             K::Tab => state.focus = CandidateFocus::Chat,
-            K::Enter => { let text = state.work.redirect_text().to_string(); if apply(status, runtime.send_intent(IntentKind::Redirect { text })) { state.work.set_redirect_text(""); state.focus = CandidateFocus::Work; } }
+            K::Enter => { let text = state.work.redirect_text().to_string(); if text.trim().is_empty() { *status = Some("type a redirect first, then press enter.".to_string()); } else if apply(status, runtime.send_intent(IntentKind::Redirect { text })) { state.work.set_redirect_text(""); state.focus = CandidateFocus::Work; } }
             K::Backspace => { let text = pop_last(state.work.redirect_text()); state.work.set_redirect_text(&text); } K::Char(c) if !control => state.work.push_redirect_char(c), _ => {}
         },
         CandidateFocus::Chat => match key.code {
             K::Tab => state.focus = CandidateFocus::Work,
-            K::Enter => { let text = state.chat.input_text().to_string(); if apply(status, runtime.send_chat(&text)) { state.chat.clear_input(); } }
+            K::Enter => { let text = state.chat.input_text().to_string(); if text.trim().is_empty() { *status = Some("type a message first, then press enter.".to_string()); } else if apply(status, runtime.send_chat(&text)) { state.chat.clear_input(); } }
             K::Backspace => state.chat.backspace_input(), K::Char(c) if !control => state.chat.type_char(c), _ => {}
         },
     }
@@ -348,14 +348,11 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut status: Option<String> = None;
     while state.app.screen() != CandidateScreen::Exited {
         if live { if let Some(active) = runtime.as_mut() { if let Err(err) = active.poll_snapshot() { status = Some(crate::tui::help::candidate_error_message(&err).to_string()); } } }
-        let (title, lines) = if live {
-            match runtime.as_ref() { Some(active) => (screen_title(CandidateScreen::Solving), if state.show_help { crate::tui::help::candidate_help_lines_for(state.app.screen(), state.focus) } else { live_lines(state, active, &status) }), None => (screen_title(state.app.screen()), candidate_screen_lines(state)) }
-        } else { let mut lines = candidate_screen_lines(state); if let Some(text) = &status { lines.push(text.clone()); } (screen_title(state.app.screen()), lines) };
+        let lines = if live {
+            match runtime.as_ref() { Some(active) => if state.show_help { crate::tui::help::candidate_help_lines_for(CandidateScreen::Solving, state.focus) } else { live_lines(state, active, &status) }, None => candidate_screen_lines(state) }
+        } else { let mut lines = candidate_screen_lines(state); if let Some(text) = &status { lines.push(text.clone()); } lines };
         let visible = crate::tui::viewport::visible_with_pinned(&lines, terminal.size().map(|s| s.height as usize).unwrap_or(24).saturating_sub(2));
-        let _ = terminal.draw(|frame| {
-            let widget = ratatui::widgets::Paragraph::new(visible.join("\n")).block(ratatui::widgets::Block::default().title(title).borders(ratatui::widgets::Borders::ALL));
-            frame.render_widget(widget, frame.area());
-        });
+        let _ = terminal.draw(|frame| crate::tui::render::draw_screen(frame, &visible, state.show_help));
         if crossterm::event::poll(Duration::from_millis(250)).unwrap_or(false) {
             match crossterm::event::read() {
                 Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => {
@@ -363,7 +360,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                         let lost = runtime.as_ref().map(|active| active.connection_lost()).unwrap_or(false);
                         if lost && key.code == K::Char('R') && !key.modifiers.contains(KeyModifiers::CONTROL) {
                             live = false; *state = CandidateRunState::new(); stash = fresh_verifier(state);
-                            status = Some("Paste the fresh connection string, then press Enter.".to_string());
+                            status = Some("paste the fresh connection string, then press enter.".to_string());
                         } else if let Some(active) = runtime.as_mut() { handle_live_key(state, active, key, &mut status); }
                     } else {
                         let connect_enter = state.app.screen() == CandidateScreen::Connect && key.code == K::Enter;

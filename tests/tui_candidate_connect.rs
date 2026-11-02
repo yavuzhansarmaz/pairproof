@@ -188,7 +188,8 @@ fn candidate_not_connected_until_verified() {
     app.push_text(&value.encoded);
     let err = app.submit_connection(1_000).expect_err("unavailable");
     assert_eq!(err, CandidateConnectError::Unavailable);
-    assert!(err.to_string().contains("Phase 10"));
+    assert!(err.to_string().contains("not available yet"));
+    assert!(!err.to_string().contains("Phase"));
     assert!(!app.is_connected());
     assert_eq!(app.screen(), CandidateScreen::Connect);
 
@@ -268,11 +269,11 @@ fn waiting_screen_uses_real_waiting_for_expert_state() {
     assert!(app
         .waiting_lines()
         .iter()
-        .any(|line| line == "Expert is preparing questions"));
+        .any(|line| line == "expert is preparing questions"));
     assert!(app
         .screen_lines()
         .iter()
-        .any(|line| line == "Expert is preparing questions"));
+        .any(|line| line == "expert is preparing questions"));
     assert!(!app.can_solve());
 }
 
@@ -311,7 +312,7 @@ fn candidate_input_editing_and_quit_from_any_screen() {
     assert_eq!(app.input_len(), 3);
     assert_eq!(
         app.connect_line(),
-        "Connection string: \u{2022}\u{2022}\u{2022} (3 characters)"
+        "connection string: \u{2022}\u{2022}\u{2022} (3 characters)"
     );
     app.backspace();
     assert_eq!(app.input_len(), 2);

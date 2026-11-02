@@ -107,11 +107,11 @@ fn paste_flag_is_visible_to_expert() {
     let view = monitor_view(&s, &BTreeMap::new(), 20);
     assert_eq!(
         view.paste_alerts,
-        vec!["Paste flag on Q1: 2 confirmed bulk paste(s)".to_string()]
+        vec!["paste flag on Q1: 2 confirmed bulk paste(s)".to_string()]
     );
     assert!(render_monitor_lines(&view)
         .join("\n")
-        .contains("Paste flag on Q1: 2 confirmed bulk paste(s)"));
+        .contains("paste flag on Q1: 2 confirmed bulk paste(s)"));
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn final_view_uses_real_breakdown_without_fabricated_report() {
         view.per_question[0]
     );
     assert!(
-        view.artefact_note.contains("Phase 10"),
+        !view.artefact_note.contains("Phase"),
         "{}",
         view.artefact_note
     );
@@ -221,7 +221,7 @@ fn monitor_refresh_shows_current_question_and_rating() {
     assert_eq!(v2.per_question_ms, Some(50));
     let lines = render_monitor_lines(&v2);
     assert_eq!(lines, render_monitor_lines(&v2));
-    assert!(lines.join("\n").contains("Live rating:"));
+    assert!(lines.join("\n").contains("live rating:"));
 }
 
 #[test]

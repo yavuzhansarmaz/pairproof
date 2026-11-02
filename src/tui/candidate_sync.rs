@@ -28,12 +28,19 @@ pub struct SyncView {
     pub lines: Vec<String>,
 }
 
-/// Builds the sync view; only the phase label is rendered.
+/// Builds the sync view; only the phase label is rendered,
+/// lowercased at the first letter for the candidate screen.
 pub fn sync_view(info: Option<&SyncSessionInfo>) -> SyncView {
     let phase = phase_for(info);
+    let label = phase.label();
+    let mut chars = label.chars();
+    let display = match chars.next() {
+        Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
+        None => label.to_string(),
+    };
     SyncView {
         phase,
-        lines: vec![sanitize_display(phase.label())],
+        lines: vec![sanitize_display(&display)],
     }
 }
 
@@ -45,9 +52,9 @@ pub fn sync_lines(info: Option<&SyncSessionInfo>) -> Vec<String> {
 /// Candidate-safe sync failure; raw diagnostics are never carried.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CandidateSyncError {
-    #[error("Sync problem \u{2014} ask the expert")]
+    #[error("sync problem \u{2014} ask the expert")]
     Unavailable,
-    #[error("Sync problem \u{2014} ask the expert")]
+    #[error("sync problem \u{2014} ask the expert")]
     Failed,
 }
 

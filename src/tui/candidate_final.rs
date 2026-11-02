@@ -19,7 +19,7 @@ pub enum CandidateFinal {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CandidateFinalError {
     /// The session has not reached a final state yet.
-    #[error("Session is not final yet.")]
+    #[error("session is not final yet.")]
     NotFinal,
     /// Monitor final-view failure.
     #[error(transparent)]
@@ -47,20 +47,20 @@ pub fn candidate_final_lines(final_result: &CandidateFinal) -> Vec<String> {
         CandidateFinal::Breakdown(view) => {
             let mut lines = vec![
                 "Final breakdown".to_string(),
-                format!("Final rating: {:.2}", view.rating),
+                format!("final rating: {:.2}", view.rating),
             ];
             lines.extend(view.lines.iter().cloned());
             lines.extend(view.per_question.iter().cloned());
-            lines.push(format!("Solved: {}", view.solved_count));
-            lines.push(format!("Finished: {}", view.finished_count));
-            lines.push(format!("Skipped: {}", view.skipped_count));
-            lines.push(format!("Paste flags: {}", view.paste_flag_count));
+            lines.push(format!("solved: {}", view.solved_count));
+            lines.push(format!("finished: {}", view.finished_count));
+            lines.push(format!("skipped: {}", view.skipped_count));
+            lines.push(format!("paste flags: {}", view.paste_flag_count));
             lines.push(view.artefact_note.clone());
             lines
         }
         CandidateFinal::TechnicalFailure => vec![
-            "The session ended as a technical failure.".to_string(),
-            "No evaluation was produced; the interview can be rescheduled.".to_string(),
+            "the session ended as a technical failure.".to_string(),
+            "no evaluation was produced; the interview can be rescheduled.".to_string(),
         ],
     };
     lines.iter().map(|line| sanitize_display(line)).collect()
@@ -70,11 +70,11 @@ pub fn candidate_final_lines(final_result: &CandidateFinal) -> Vec<String> {
 pub fn candidate_final_pinned_lines(final_result: &CandidateFinal) -> Vec<String> {
     match final_result {
         CandidateFinal::Breakdown(view) => vec![
-            format!("Final rating: {:.2}", view.rating),
-            format!("Solved: {}", view.solved_count),
-            format!("Finished: {}", view.finished_count),
-            format!("Skipped: {}", view.skipped_count),
-            format!("Paste flags: {}", view.paste_flag_count),
+            format!("final rating: {:.2}", view.rating),
+            format!("solved: {}", view.solved_count),
+            format!("finished: {}", view.finished_count),
+            format!("skipped: {}", view.skipped_count),
+            format!("paste flags: {}", view.paste_flag_count),
         ],
         CandidateFinal::TechnicalFailure => Vec::new(),
     }
