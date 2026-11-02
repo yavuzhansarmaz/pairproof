@@ -171,6 +171,7 @@ fn interactive_loop(
                 #[rustfmt::skip]
                 app::AppScreen::Monitor => {
                     lines.extend(monitor::render_monitor_lines(&active.monitor_view(now)));
+                    lines.extend(active.recovery_lines());
                     if let Some(fresh) = active.reissue_string() { lines.push(format!("Reissue: {}", fresh.encode())); lines.push(help::countdown_line(active.countdown_secs(now))); }
                     if active.is_disconnected() { lines.push("Press R to reissue a fresh connection string.".to_string()); }
                     lines.push("Press e to end the session.".to_string());
@@ -226,6 +227,7 @@ fn tick_runtime(
     match app.screen() {
         AppScreen::ConnectionWait => {
             let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
+            let _ = block_on(tokio_rt, active.poll_recovery(now_ms()));
             if let Some(PollOutcome::Connected) =
                 block_on(tokio_rt, active.poll_candidate(now_ms()))
             {
@@ -236,6 +238,7 @@ fn tick_runtime(
         AppScreen::SelectMedium | AppScreen::SelectHard | AppScreen::Monitor => {
             let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
             let outcome = block_on(tokio_rt, active.poll_candidate(now_ms()));
+            let _ = block_on(tokio_rt, active.poll_recovery(now_ms()));
             let _ = block_on(tokio_rt, active.drain_intents(now_ms()));
             let _ = block_on(tokio_rt, active.check_heartbeat(now_ms()));
             if active.is_disconnected() {

@@ -164,7 +164,7 @@ fn snapshot(session_id: &str, phase: &str, final_breakdown: Option<SnapshotFinal
     CandidateSnapshot { v: 1, session_id: session_id.to_string(), phase: phase.to_string(), sync_phase: "Sync: active".to_string(),
         current: Some(SnapshotQuestion { index: 0, title: "Two Sum".to_string(), slug: "two-sum".to_string(), statement: Some("Find two numbers that sum to target.".to_string()) }),
         options: vec![SnapshotOption { title: "Hash map".to_string(), summary: "One pass lookup".to_string() }], selected: Some("preset 0".to_string()),
-        latest_test: Some(SnapshotTest { passed: 3, failed: 1, at_ms: 10 }), chat_replies: vec!["Try a hash map.".to_string()], final_breakdown }
+        latest_test: Some(SnapshotTest { passed: 3, failed: 1, at_ms: 10 }), chat_replies: vec!["Try a hash map.".to_string()], final_breakdown, recovery: None }
 }
 
 #[rustfmt::skip] fn workspace(name: &str) -> PathBuf { let dir = std::env::temp_dir().join(format!("pairproof-candidate-runtime-{name}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).expect("workspace"); dir }
