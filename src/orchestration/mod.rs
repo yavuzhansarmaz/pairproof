@@ -4,11 +4,13 @@ pub mod chat;
 pub mod cleanup;
 pub mod coding;
 pub mod connection;
+pub mod consistency;
 pub mod control;
 pub mod control_client;
 pub mod control_codec;
 pub mod control_server;
 pub mod error;
+pub mod evidence;
 pub mod finalize;
 pub mod health;
 pub mod lifecycle;
@@ -32,6 +34,7 @@ pub use coding::{
 pub use connection::{
     ConnectionGate, ConnectionGateError, GatePhase, HostKeyVerifier, SshKeyscanVerifier,
 };
+pub use consistency::{compare_grade_runs, run_consistency, ConsistencyReport, QuestionDelta};
 pub use control::{
     build_snapshot, generate_intent_id, parse_intent_bytes, parse_intent_line, parse_snapshot,
     resolve_control_file, CandidateSnapshot, ControlError, Intent, IntentKind, ParsedIntents,
@@ -45,6 +48,10 @@ pub use control_server::{
     ControlTransports, DockerControlIo, LocalControlIo,
 };
 pub use error::OrchestratorError;
+pub use evidence::{
+    per_question_evidence, render_evidence, score_line_evidence, summary_evidence, EventRef,
+    PerQuestionEvidence, Provenance, ScoreEvidence, SummaryEvidence,
+};
 pub use finalize::{
     both_roles_final, compute_final, final_visible_to_candidate, grade_session, session_elapsed_ms,
     FinalizeError, GradeFuture, MetaQuestionGrader, QuestionGrader,
@@ -67,7 +74,7 @@ pub use pipeline::{
     MetaApproachGenerator, PipelineError, PipelineFuture, QuestionPipeline, StatementFetcher,
     TestRunRecord,
 };
-pub use report::{generate_report, ChatExcerpt};
+pub use report::{generate_report, limitations_footer, ChatExcerpt};
 pub use session::Orchestrator;
 pub use ssh_auth::{
     helper_script, run_ssh_command, run_ssh_command_with_stdin, ssh_invocation,

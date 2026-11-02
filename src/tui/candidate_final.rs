@@ -6,6 +6,7 @@ use crate::core::{Session, SessionStatus};
 use crate::scoring::{ApproachQuality, GradeOutcome};
 use crate::tui::monitor::{final_view, FinalView, MonitorError};
 use crate::tui::shared::sanitize_display;
+use crate::tui::viewport::visible_lines;
 
 /// Candidate-facing final outcome; technical failure has no rating.
 #[derive(Debug, Clone, PartialEq)]
@@ -63,4 +64,45 @@ pub fn candidate_final_lines(final_result: &CandidateFinal) -> Vec<String> {
         ],
     };
     lines.iter().map(|line| sanitize_display(line)).collect()
+}
+
+/// Returns the pinned completion lines kept visible on short terminals.
+pub fn candidate_final_pinned_lines(final_result: &CandidateFinal) -> Vec<String> {
+    match final_result {
+        CandidateFinal::Breakdown(view) => vec![
+            format!("Final rating: {:.2}", view.rating),
+            format!("Solved: {}", view.solved_count),
+            format!("Finished: {}", view.finished_count),
+            format!("Skipped: {}", view.skipped_count),
+            format!("Paste flags: {}", view.paste_flag_count),
+        ],
+        CandidateFinal::TechnicalFailure => Vec::new(),
+    }
+    .iter()
+    .map(|line| sanitize_display(line))
+    .collect()
+}
+
+/// Builds final lines for a terminal height, pinning the summary.
+pub fn candidate_final_lines_for_height(
+    final_result: &CandidateFinal,
+    height: usize,
+) -> Vec<String> {
+    match final_result {
+        CandidateFinal::Breakdown(view) => {
+            let mut content = vec!["Final breakdown".to_string()];
+            content.extend(view.lines.iter().cloned());
+            content.extend(view.per_question.iter().cloned());
+            content.push(view.artefact_note.clone());
+            let pinned = candidate_final_pinned_lines(final_result);
+            visible_lines(&content, height, &pinned)
+                .iter()
+                .map(|line| sanitize_display(line))
+                .collect()
+        }
+        CandidateFinal::TechnicalFailure => {
+            let lines = candidate_final_lines(final_result);
+            visible_lines(&lines, height, &[])
+        }
+    }
 }

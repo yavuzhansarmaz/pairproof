@@ -13,6 +13,7 @@ use crate::tui::candidate_actions::{
 use crate::tui::candidate_chat::{other_insert, ChatController};
 use crate::tui::candidate_final::{candidate_final, candidate_final_lines};
 use crate::tui::candidate_work::{work_lines, CandidateWork};
+use crate::tui::help::{candidate_help_lines_for, candidate_is_typing};
 use crate::tui::shared::sanitize_display;
 
 /// Focus pane while solving; Tab cycles Work, Other, Redirect, Chat.
@@ -32,6 +33,7 @@ pub struct CandidateRunState {
     pub chat: ChatController,
     pub focus: CandidateFocus,
     pub paste_notice: bool,
+    pub show_help: bool,
 }
 
 impl CandidateRunState {
@@ -52,6 +54,7 @@ impl CandidateRunState {
             chat,
             focus: CandidateFocus::Work,
             paste_notice: false,
+            show_help: false,
         }
     }
 
@@ -209,6 +212,14 @@ pub fn handle_candidate_key(state: &mut CandidateRunState, key: KeyEvent) {
         }
         _ => {}
     }
+    if key.code == K::Char('?') && !control && !candidate_is_typing(state.app.screen(), state.focus)
+    {
+        state.show_help = !state.show_help;
+        return;
+    }
+    if state.show_help {
+        return;
+    }
     match state.app.screen() {
         CandidateScreen::Connect => match key.code {
             K::Enter => {
@@ -269,6 +280,12 @@ pub fn handle_candidate_paste(state: &mut CandidateRunState, text: &str) {
 
 /// Builds sanitized candidate screen lines for the run state.
 pub fn candidate_screen_lines(state: &CandidateRunState) -> Vec<String> {
+    if state.show_help {
+        return candidate_help_lines_for(state.app.screen(), state.focus)
+            .iter()
+            .map(|line| sanitize_display(line))
+            .collect();
+    }
     let lines = match state.app.screen() {
         CandidateScreen::Solving => {
             let mut lines = match state.app.session() {
