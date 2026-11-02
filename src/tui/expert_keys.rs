@@ -2,6 +2,7 @@
 //! API-key entry, disclosure acknowledgement, and Enter actions.
 
 use crate::tui::app;
+use crate::tui::expert_loop::PendingWork;
 use crate::tui::expert_runtime::{self, ExpertRuntime, SelectionScreen};
 use crate::tui::expert_tty::{self, block_on, now_ms, set_error};
 use crate::tui::setup::{ExpertSetupFocus, ExpertSetupPastes};
@@ -54,9 +55,7 @@ pub(crate) fn handle_key(
     runtime: &mut Option<ExpertRuntime>,
     tokio_rt: &mut Option<tokio::runtime::Runtime>,
     pastes: &mut ExpertSetupPastes,
-    proposal_rx: &mut Option<
-        std::sync::mpsc::Receiver<Result<crate::ingest::ProposedContext, String>>,
-    >,
+    pending: &mut PendingWork,
     api_key_input: &mut String,
     code: crossterm::event::KeyCode,
 ) {
@@ -100,9 +99,19 @@ pub(crate) fn handle_key(
         {
             pastes.back_to_job_description()
         }
+        K::Backspace if app.screen() == AppScreen::Setup => pastes.backspace_focused(),
         K::Up if app.screen() == AppScreen::Setup => pastes.scroll_focused(-1),
         K::Down if app.screen() == AppScreen::Setup => pastes.scroll_focused(1),
-        K::Char('b') => _ = app.handle(AppEvent::Back),
+        K::Char('b') => {
+            // Leaving Session Setup backwards abandons the draft:
+            // re-entering starts with both boxes empty.
+            let was_setup = app.screen() == AppScreen::Setup;
+            let _ = app.handle(AppEvent::Back);
+            if was_setup && app.screen() != AppScreen::Setup {
+                *pastes = ExpertSetupPastes::new();
+                app.set_has_proposal(false);
+            }
+        }
         K::Char('m') if app.screen() == AppScreen::Preflight => open_api_key_change(app),
         K::Char('m') if app.screen() == AppScreen::Setup => {
             if app.handle(AppEvent::Back).is_ok() && app.screen() == AppScreen::Preflight {
@@ -131,15 +140,13 @@ pub(crate) fn handle_key(
         K::Char('R') if app.screen() == AppScreen::Monitor => {
             if let Some(active) = runtime.as_mut() {
                 match block_on(tokio_rt, active.reissue(now_ms())) {
-                    Some(Ok(fresh)) => {
-                        app.set_status_message(format!("fresh string ready: {}", fresh.encode()))
-                    }
+                    Some(Ok(_fresh)) => app.set_status_message("fresh string ready."),
                     Some(Err(err)) => set_error(app, "reissue failed", &err.to_string()),
                     None => set_error(app, "reissue failed", "runtime unavailable"),
                 }
             }
         }
-        K::Enter => advance(app, runtime, tokio_rt, pastes, proposal_rx),
+        K::Enter => advance(app, runtime, tokio_rt, pastes, pending),
         _ => {}
     }
 }
@@ -153,9 +160,7 @@ fn advance(
     runtime: &mut Option<ExpertRuntime>,
     tokio_rt: &mut Option<tokio::runtime::Runtime>,
     pastes: &mut ExpertSetupPastes,
-    proposal_rx: &mut Option<
-        std::sync::mpsc::Receiver<Result<crate::ingest::ProposedContext, String>>,
-    >,
+    pending: &mut PendingWork,
 ) {
     use app::{AppEvent, AppScreen};
     match app.screen() {
@@ -187,14 +192,14 @@ fn advance(
             }
             ExpertSetupFocus::AdditionalNotes => {
                 pastes.acknowledge_disclosure();
-                if proposal_rx.is_some() {
+                if pending.proposal_rx.is_some() {
                     return;
                 }
                 // Run the Meta request on its own thread so the TTY
                 // loop keeps drawing the animated loading screen;
                 // `poll_proposal` applies the result when it lands.
                 let (tx, rx) = std::sync::mpsc::channel();
-                *proposal_rx = Some(rx);
+                pending.proposal_rx = Some(rx);
                 let jd = pastes.jd().to_string();
                 let notes = pastes.notes().to_string();
                 std::thread::spawn(move || {
@@ -218,26 +223,37 @@ fn advance(
             }
         },
         AppScreen::Proposal => {
-            if runtime.is_none() {
-                let build = expert_runtime::build_expert_runtime(
-                    now_ms(),
-                    pastes.jd(),
-                    pastes.notes(),
-                    pastes.proposal(),
-                );
-                match block_on(tokio_rt, build) {
-                    Some(Ok(built)) => *runtime = Some(built),
-                    Some(Err(err)) => {
-                        set_error(app, "session setup failed", &err.to_string());
-                        return;
-                    }
-                    None => {
-                        set_error(app, "session setup failed", "runtime unavailable");
-                        return;
-                    }
-                }
+            if runtime.is_some() {
+                let _ = app.handle(AppEvent::ProposalConfirmed);
+                return;
             }
-            let _ = app.handle(AppEvent::ProposalConfirmed);
+            if pending.runtime_rx.is_some() {
+                return;
+            }
+            // Build the runtime on its own thread so the TTY loop
+            // keeps drawing the animated loading screen;
+            // `poll_runtime_build` stores it and confirms.
+            let (tx, rx) = std::sync::mpsc::channel();
+            pending.runtime_rx = Some(rx);
+            let jd = pastes.jd().to_string();
+            let notes = pastes.notes().to_string();
+            let proposal = pastes.proposal().cloned();
+            let now = now_ms();
+            std::thread::spawn(move || {
+                let result = (|| {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|e| e.to_string())?;
+                    runtime.block_on(expert_runtime::build_expert_runtime(
+                        now,
+                        &jd,
+                        &notes,
+                        proposal.as_ref(),
+                    ))
+                })();
+                let _ = tx.send(result);
+            });
         }
         AppScreen::ConnectionWait => {
             // Poll only: the lock comes from poll_candidate, never Enter.

@@ -132,6 +132,21 @@ fn connection_requires_locked_event_not_timer() {
 }
 
 #[test]
+fn back_from_connection_wait_returns_to_proposal() {
+    let mut app = ExpertApp::new();
+    advance_to_connection_wait(&mut app);
+    assert_eq!(app.screen(), AppScreen::ConnectionWait);
+    assert!(app.can_go_back());
+    assert_eq!(app.handle(AppEvent::Back), Ok(AppScreen::Proposal));
+    assert_eq!(app.screen(), AppScreen::Proposal);
+    // Re-confirming returns to the wait with the runtime intact.
+    assert_eq!(
+        app.handle(AppEvent::ProposalConfirmed),
+        Ok(AppScreen::ConnectionWait)
+    );
+}
+
+#[test]
 fn accidental_disconnect_stays_on_monitor() {
     let mut app = ExpertApp::new();
     advance_to_monitor(&mut app);

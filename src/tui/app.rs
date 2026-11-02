@@ -203,19 +203,23 @@ impl ExpertApp {
     }
 
     /// Returns true when Back can return to a previous screen.
-    /// Screens past Proposal commit external state (a built runtime,
-    /// a locked connection, a committed selection, a live or ended
-    /// session), so Back is not offered there.
+    /// Screens past Proposal commit external state (a locked
+    /// connection, a committed selection, a live or ended session),
+    /// so Back is not offered there. ConnectionWait is the exception:
+    /// the runtime stays built and re-confirming returns here.
     pub fn can_go_back(&self) -> bool {
         self.screen != AppScreen::Exited
-            && !is_irreversible(self.screen)
             && !self.history.is_empty()
+            && (!is_irreversible(self.screen) || self.screen == AppScreen::ConnectionWait)
     }
 
     /// Pops to the previous screen; RoleSelect/Exited and screens
-    /// past the runtime commit point are typed errors.
+    /// past the runtime commit point (except ConnectionWait) are
+    /// typed errors.
     pub fn back(&mut self) -> Result<AppScreen, AppError> {
-        if self.screen == AppScreen::Exited || is_irreversible(self.screen) {
+        if self.screen == AppScreen::Exited
+            || (is_irreversible(self.screen) && self.screen != AppScreen::ConnectionWait)
+        {
             return Err(self.invalid(AppEvent::Back));
         }
         match self.history.pop() {

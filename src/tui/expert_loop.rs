@@ -7,6 +7,15 @@ use crate::tui::expert_tty::{block_on, now_ms, set_error};
 use crate::tui::setup::ExpertSetupPastes;
 use crate::tui::{app, help, monitor, render, setup};
 
+/// Background work the TTY loop waits on: a proposal request and
+/// a deferred runtime build, both surfaced as the loading screen.
+#[derive(Default)]
+pub(crate) struct PendingWork {
+    pub(crate) proposal_rx:
+        Option<std::sync::mpsc::Receiver<Result<crate::ingest::ProposedContext, String>>>,
+    pub(crate) runtime_rx: Option<std::sync::mpsc::Receiver<Result<ExpertRuntime, String>>>,
+}
+
 /// Mutable state owned by the expert TTY loop.
 pub(crate) struct ExpertLoopState {
     pub(crate) runtime: Option<ExpertRuntime>,
@@ -18,8 +27,7 @@ pub(crate) struct ExpertLoopState {
     pub(crate) setup_drag: Option<setup::ExpertSetupFocus>,
     pub(crate) show_help: bool,
     pub(crate) show_disclosure: bool,
-    pub(crate) proposal_rx:
-        Option<std::sync::mpsc::Receiver<Result<crate::ingest::ProposedContext, String>>>,
+    pub(crate) pending: PendingWork,
     pub(crate) loading_tick: usize,
 }
 
@@ -35,7 +43,7 @@ impl Default for ExpertLoopState {
             setup_drag: None,
             show_help: false,
             show_disclosure: false,
-            proposal_rx: None,
+            pending: PendingWork::default(),
             loading_tick: 0,
         }
     }
@@ -50,8 +58,10 @@ impl ExpertLoopState {
             let now = now_ms();
             match app.screen() {
                 app::AppScreen::ConnectionWait => {
-                    if let Ok(current) = active.current_string(now) {
-                        lines.push(format!("Connection: {}", current.encode()));
+                    if let Ok(_current) = active.current_string(now) {
+                        // The string itself is never displayed; the
+                        // button copies it straight to the clipboard.
+                        lines.push("connection string: [COPY] (click to copy)".to_string());
                         lines.push(help::countdown_line(active.countdown_secs(now)));
                     }
                     lines.push("Waiting for candidate SSH login (no manual lock).".to_string());
@@ -59,8 +69,8 @@ impl ExpertLoopState {
                 app::AppScreen::Monitor => {
                     lines.extend(monitor::render_monitor_lines(&active.monitor_view(now)));
                     lines.extend(active.recovery_lines());
-                    if let Some(fresh) = active.reissue_string() {
-                        lines.push(format!("reissue: {}", fresh.encode()));
+                    if active.reissue_string().is_some() {
+                        lines.push("connection string: [COPY] (click to copy)".to_string());
                         lines.push(help::countdown_line(active.countdown_secs(now)));
                     }
                     if active.is_disconnected() {
@@ -94,15 +104,16 @@ impl ExpertLoopState {
             &mut self.runtime,
             &mut self.tokio_rt,
             &mut self.pastes,
-            &mut self.proposal_rx,
+            &mut self.pending,
             &mut self.api_key_input,
             code,
         );
     }
 
-    /// True while a proposal request runs in the background.
+    /// True while a background request (proposal or runtime build)
+    /// runs.
     pub(crate) fn is_loading(&self) -> bool {
-        self.proposal_rx.is_some()
+        self.pending.proposal_rx.is_some() || self.pending.runtime_rx.is_some()
     }
 
     /// Animated centred loading lines for one frame.
@@ -113,12 +124,12 @@ impl ExpertLoopState {
 
     /// Applies a finished background proposal request, if one landed.
     pub(crate) fn poll_proposal(&mut self, app: &mut app::ExpertApp) {
-        let Some(rx) = &self.proposal_rx else {
+        let Some(rx) = &self.pending.proposal_rx else {
             return;
         };
         match rx.try_recv() {
             Ok(Ok(proposed)) => {
-                self.proposal_rx = None;
+                self.pending.proposal_rx = None;
                 self.pastes.apply_proposal(proposed);
                 app.set_proposal_lines(self.pastes.proposal_lines());
                 app.set_has_proposal(true);
@@ -126,12 +137,36 @@ impl ExpertLoopState {
                 let _ = app.handle(app::AppEvent::ProposalReady);
             }
             Ok(Err(err)) => {
-                self.proposal_rx = None;
+                self.pending.proposal_rx = None;
                 set_error(app, "proposal failed", &err);
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.proposal_rx = None;
+                self.pending.proposal_rx = None;
                 set_error(app, "proposal failed", "request stopped unexpectedly");
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
+
+    /// Applies a finished background runtime build, if one landed:
+    /// storing it confirms the proposal and waits for the candidate.
+    pub(crate) fn poll_runtime_build(&mut self, app: &mut app::ExpertApp) {
+        let Some(rx) = &self.pending.runtime_rx else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(Ok(built)) => {
+                self.pending.runtime_rx = None;
+                self.runtime = Some(built);
+                let _ = app.handle(app::AppEvent::ProposalConfirmed);
+            }
+            Ok(Err(err)) => {
+                self.pending.runtime_rx = None;
+                set_error(app, "session setup failed", &err);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.pending.runtime_rx = None;
+                set_error(app, "session setup failed", "runtime unavailable");
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
@@ -146,7 +181,7 @@ impl ExpertLoopState {
         if key.kind == crossterm::event::KeyEventKind::Release {
             return;
         }
-        if self.proposal_rx.is_some() {
+        if self.is_loading() {
             // Loading: only quit keys are live; the rest is ignored
             // so the request cannot be re-entered or navigated away.
             let quit = key.code == crossterm::event::KeyCode::Esc
@@ -191,6 +226,21 @@ impl ExpertLoopState {
                 let _ = app.handle(app::AppEvent::Quit);
             }
             help::ExpertKeyAction::Dispatch => self.dispatch_key(app, key.code),
+        }
+    }
+
+    /// Returns the string a `[COPY]` button click should copy on
+    /// `screen`: the current connection string while waiting, the
+    /// reissued one on the monitor.
+    pub(crate) fn copy_token(&mut self, screen: app::AppScreen) -> Option<String> {
+        let active = self.runtime.as_mut()?;
+        match screen {
+            app::AppScreen::ConnectionWait => active
+                .current_string(now_ms())
+                .ok()
+                .map(|current| current.encode()),
+            app::AppScreen::Monitor => active.reissue_string().map(|fresh| fresh.encode()),
+            _ => None,
         }
     }
 

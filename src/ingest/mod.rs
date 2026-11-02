@@ -99,7 +99,9 @@ pub fn prepare_documents(
         return Err(IngestError::EmptyJobDescription);
     }
     let additional_trimmed = additional_paste.trim();
-    let additional = if additional_trimmed.is_empty() {
+    // The same text pasted into both boxes is a common slip: the
+    // additional notes are silently dropped, with no warning.
+    let additional = if additional_trimmed.is_empty() || additional_trimmed == jd_trimmed {
         BoundedText {
             text: String::new(),
             truncated: false,

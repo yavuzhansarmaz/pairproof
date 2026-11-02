@@ -387,11 +387,34 @@ impl ExpertSetupPastes {
         Ok(())
     }
     /// Enter on the job-description box: moves to additional notes
-    /// when a JD is present. Returns false when there is no JD yet.
+    /// when a JD is present, clearing any previously written notes
+    /// so re-entering after going back starts the notes fresh.
+    /// Returns false when there is no JD yet.
     pub fn confirm_job_description(&mut self) -> bool {
         if !self.is_ready() { return false; }
+        self.controller.set_additional("");
+        self.notes_received = false;
+        self.notes_scroll = 0;
         self.focus = ExpertSetupFocus::AdditionalNotes;
         true
+    }
+    /// Deletes the last character of the focused box, if any;
+    /// emptying the job description also un-marks it as received.
+    pub fn backspace_focused(&mut self) {
+        match self.focus {
+            ExpertSetupFocus::JobDescription => {
+                let mut text = self.controller.draft().jd.clone();
+                text.pop();
+                self.jd_received = !text.is_empty();
+                self.controller.set_jd(&text);
+            }
+            ExpertSetupFocus::AdditionalNotes => {
+                let mut text = self.controller.draft().additional.clone();
+                text.pop();
+                self.notes_received = !text.is_empty();
+                self.controller.set_additional(&text);
+            }
+        }
     }
     /// Returns focus to the job-description box; texts are kept.
     pub fn back_to_job_description(&mut self) { self.focus = ExpertSetupFocus::JobDescription; }

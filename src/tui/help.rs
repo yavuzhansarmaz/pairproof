@@ -28,6 +28,7 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
         AppScreen::Preflight => lines.extend(["  m change the Meta API key"]),
         AppScreen::Setup => lines.extend([
             "  paste into the focused box, enter moves on",
+            "  backspace deletes the last character",
             "  up/down scroll, drag a box border to resize",
             "  m change the Meta API key (back on Expert Setup)",
             "  b back a step, keeping your pasted text",
@@ -36,6 +37,8 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
         AppScreen::ConnectionWait => lines.extend([
             "  waiting for the candidate to connect",
             "  share the connection string shown on screen",
+            "  the [COPY] button copies the connection string on click",
+            "  b back to the proposal",
         ]),
         AppScreen::SelectMedium => lines.extend(["  enter load the medium questions"]),
         AppScreen::SelectHard => lines.extend(["  enter load the hard questions"]),

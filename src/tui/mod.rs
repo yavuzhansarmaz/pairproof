@@ -126,6 +126,7 @@ fn interactive_loop(
             run_preflight_check(app);
         }
         state.poll_proposal(app);
+        state.poll_runtime_build(app);
         tick_runtime(app, &mut state.runtime, &mut state.tokio_rt);
         let lines = if state.is_loading() {
             state.loading_lines()
@@ -136,7 +137,10 @@ fn interactive_loop(
         let visible = viewport::visible_with_pinned(&lines, height.saturating_sub(2));
         let centered = matches!(
             app.screen(),
-            app::AppScreen::RoleSelect | app::AppScreen::Preflight | app::AppScreen::Proposal
+            app::AppScreen::RoleSelect
+                | app::AppScreen::Preflight
+                | app::AppScreen::Proposal
+                | app::AppScreen::ConnectionWait
         ) || state.show_help
             || state.show_disclosure
             || state.is_loading();
@@ -183,6 +187,31 @@ fn interactive_loop(
                         ratatui::layout::Rect::new(0, 0, size.width, size.height),
                         mouse,
                     );
+                }
+                Ok(crossterm::event::Event::Mouse(mouse))
+                    if matches!(
+                        app.screen(),
+                        app::AppScreen::ConnectionWait | app::AppScreen::Monitor
+                    ) && !state.show_help
+                        && matches!(
+                            mouse.kind,
+                            crossterm::event::MouseEventKind::Down(
+                                crossterm::event::MouseButton::Left
+                            )
+                        ) =>
+                {
+                    let size = terminal.size().unwrap_or_default();
+                    if render::is_copy_button_at(
+                        &visible,
+                        ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                        mouse.column,
+                        mouse.row,
+                    ) {
+                        if let Some(token) = state.copy_token(app.screen()) {
+                            expert_tty::copy_to_clipboard(&token);
+                            app.set_status_message("connection string copied.");
+                        }
+                    }
                 }
                 _ => {}
             }

@@ -90,6 +90,8 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
         let prev_ok = |i: usize| i == 0 || matches!(bytes[i - 1], b' ' | b',' | b'(');
         let next_ok =
             |end: usize| end == bytes.len() || matches!(bytes[end], b' ' | b',' | b'.' | b')');
+        let is_copy =
+            text[i..].starts_with("[COPY]") && (i == 0 || bytes[i - 1] == b' ') && next_ok(i + 6);
         let is_pass =
             text[i..].starts_with("[PASS]") && (i == 0 || bytes[i - 1] == b' ') && next_ok(i + 6);
         let is_enter = text[i..].starts_with("enter") && prev_ok(i) && next_ok(i + 5);
@@ -103,11 +105,13 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
             && bytes[i - 1] == b' '
             && i + 1 < bytes.len()
             && bytes[i + 1] == b' ';
-        if is_pass || is_enter || is_esc || is_back || is_meta || is_help {
+        if is_copy || is_pass || is_enter || is_esc || is_back || is_meta || is_help {
             if raw_start < i {
                 spans.push(Span::raw(text[raw_start..i].to_string()));
             }
-            let (token, color, len) = if is_pass {
+            let (token, color, len) = if is_copy {
+                ("[COPY]", ENTER_KEY_COLOR, 6)
+            } else if is_pass {
                 ("[PASS]", ENTER_KEY_COLOR, 6)
             } else if is_enter {
                 ("enter", ENTER_KEY_COLOR, 5)
@@ -120,10 +124,15 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
             } else {
                 ("?", HELP_KEY_COLOR, 1)
             };
-            spans.push(Span::styled(
-                token,
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ));
+            let style = if is_copy {
+                Style::default()
+                    .fg(ENTER_KEY_COLOR)
+                    .bg(Color::Rgb(41, 52, 84))
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(color).add_modifier(Modifier::BOLD)
+            };
+            spans.push(Span::styled(token, style));
             i += len;
             raw_start = i;
         } else {
@@ -256,6 +265,26 @@ pub fn draw_screen(frame: &mut Frame, lines: &[String], centered: bool) {
                 .border_style(Style::default().fg(FRAME_COLOR)),
         );
     frame.render_widget(widget, area);
+}
+
+/// Returns true when `(column, row)` clicks on a `[COPY]` button
+/// line inside the centred panel; which string it copies is the
+/// caller's business (the string is never displayed).
+pub fn is_copy_button_at(lines: &[String], area: Rect, column: u16, row: u16) -> bool {
+    let panel = panel_area(area, lines, true);
+    for (index, line) in lines.iter().enumerate() {
+        let Some(pos) = line.find("[COPY]") else {
+            continue;
+        };
+        let button_row = panel.y.saturating_add(1).saturating_add(index as u16);
+        let indent = line[..pos].chars().count() as u16;
+        let button_start = panel.x.saturating_add(1).saturating_add(indent);
+        let button_end = button_start.saturating_add(6);
+        if row == button_row && column >= button_start && column < button_end {
+            return true;
+        }
+    }
+    false
 }
 
 /// Draws the centred loading panel; every line is soft white, with

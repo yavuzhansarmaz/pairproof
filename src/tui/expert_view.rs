@@ -35,7 +35,7 @@ fn footer(app: &ExpertApp) -> String {
         AppScreen::Setup => "enter continue, b back, esc quit, ? help".to_string(),
         // Proposal carries its keys on the wait line; no footer.
         AppScreen::Proposal => String::new(),
-        AppScreen::ConnectionWait => "esc quit, ? help".to_string(),
+        AppScreen::ConnectionWait => "b back, esc quit, ? help".to_string(),
         AppScreen::SelectMedium => "enter load medium questions, esc quit, ? help".to_string(),
         AppScreen::SelectHard => "enter load hard questions, esc quit, ? help".to_string(),
         AppScreen::Monitor => {

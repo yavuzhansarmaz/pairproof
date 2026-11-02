@@ -359,6 +359,29 @@ fn loading_screen_renders_white_not_navy() {
 }
 
 #[test]
+fn copy_button_click_hit_and_miss() {
+    use pairproof::tui::render::is_copy_button_at;
+    use pairproof::tui::shared::base64_encode;
+    assert_eq!(base64_encode("hello"), "aGVsbG8=");
+    assert_eq!(base64_encode(""), "");
+    // The string itself is never on screen; only the button is.
+    let lines = vec![
+        "Waiting for candidate".to_string(),
+        "waiting for candidate to connect.".to_string(),
+        "connection string: [COPY] (click to copy)".to_string(),
+        "expires in 42s.".to_string(),
+    ];
+    let area = ratatui::layout::Rect::new(0, 0, 100, 30);
+    let hit = (0..30)
+        .flat_map(|y| (0..100).map(move |x| (x, y)))
+        .find(|(x, y)| is_copy_button_at(&lines, area, *x, *y))
+        .expect("a clickable cell on the button");
+    assert!(is_copy_button_at(&lines, area, hit.0, hit.1));
+    assert!(!is_copy_button_at(&lines, area, 0, 0));
+    assert!(!is_copy_button_at(&lines, area, hit.0, hit.1 + 1));
+}
+
+#[test]
 fn loading_lines_cycle_one_to_three_dots() {
     use pairproof::tui::render::loading_lines;
     assert_eq!(loading_lines(0), vec!["working on your request, loading."]);

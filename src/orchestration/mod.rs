@@ -93,7 +93,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Source of monotonic wall-clock time in milliseconds.
-pub trait Clock {
+pub trait Clock: Send + Sync {
     /// Returns the current time in milliseconds.
     fn now_ms(&self) -> u64;
 }

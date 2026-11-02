@@ -157,6 +157,19 @@ pub fn save_disclosure_ack_default() {
     }
 }
 
+/// Copies text to the system clipboard via the terminal's OSC 52
+/// escape; unsupported terminals simply ignore it.
+pub fn copy_to_clipboard(text: &str) {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    let _ = write!(
+        out,
+        "\u{1b}]52;c;{}\u{7}",
+        crate::tui::shared::base64_encode(text)
+    );
+    let _ = out.flush();
+}
+
 pub fn now_ms() -> u64 {
     SystemClock.now_ms()
 }
