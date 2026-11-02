@@ -129,7 +129,7 @@ async fn make_expert(name: &str) -> (PathBuf, PathBuf, ExpertRuntime) {
     (root, control.clone(), ExpertRuntime::new(spec, deps, T0).await.unwrap())
 }
 #[rustfmt::skip]
-fn write_hello(control: &std::path::Path) { std::fs::write(control.join("inbox").join("hello.json"), serde_json::json!({ "v": 1, "session_id": "s1" }).to_string()).unwrap(); }
+fn write_hello(control: &std::path::Path) { std::fs::write(control.join("inbox").join("hello.json"), serde_json::json!({ "v": 1, "session_id": "s1", "app_version": env!("CARGO_PKG_VERSION") }).to_string()).unwrap(); }
 #[rustfmt::skip]
 async fn connect_expert(runtime: &mut ExpertRuntime, control: &std::path::Path) { write_hello(control); assert_eq!(runtime.poll_candidate(T0 + 1_000).await, PollOutcome::Connected); }
 #[rustfmt::skip]

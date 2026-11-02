@@ -12,19 +12,52 @@ use crate::orchestration::control::{
 /// the binding only by reading this file after SSH authentication.
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionBinding { pub v: u32, pub session_id: String }
+pub struct SessionBinding { pub v: u32, pub session_id: String, #[serde(default, skip_serializing_if = "Option::is_none")] pub app_version: Option<String> }
 /// Serializes the session binding for `session_id`.
 #[rustfmt::skip]
-pub fn session_binding_bytes(session_id: &str) -> Vec<u8> { serde_json::to_vec(&SessionBinding { v: SESSION_VERSION, session_id: session_id.into() }).unwrap_or_default() }
+pub fn session_binding_bytes(session_id: &str) -> Vec<u8> { serde_json::to_vec(&SessionBinding { v: SESSION_VERSION, session_id: session_id.into(), app_version: Some(env!("CARGO_PKG_VERSION").to_string()) }).unwrap_or_default() }
 /// Parses a session binding, rejecting a wrong version or empty id.
 #[rustfmt::skip]
-pub fn parse_session_binding(data: &[u8]) -> Result<String, ControlError> {
+pub fn parse_session_binding(data: &[u8]) -> Result<String, ControlError> { Ok(parse_session_binding_full(data)?.session_id) }
+/// Parses a full session binding, rejecting a wrong version or empty id.
+#[rustfmt::skip]
+pub fn parse_session_binding_full(data: &[u8]) -> Result<SessionBinding, ControlError> {
     if data.len() > MAX_CONTROL_READ_BYTES { return Err(ControlError::Oversized); }
     let binding: SessionBinding = serde_json::from_slice(data)?;
     if binding.v != SESSION_VERSION { return Err(ControlError::WrongVersion(u64::from(binding.v))); }
     let id = binding.session_id.trim();
     if id.is_empty() || id.len() > 128 || id.bytes().any(|b| b.is_ascii_control()) { return Err(ControlError::WrongSession); }
-    Ok(binding.session_id)
+    Ok(binding)
+}
+/// Returns the expert app version carried by a session binding, if any.
+#[rustfmt::skip]
+pub fn expert_version_from_binding(data: &[u8]) -> Result<Option<String>, ControlError> { Ok(parse_session_binding_full(data)?.app_version) }
+/// Candidate hello in `inbox/hello.json`.
+#[rustfmt::skip]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hello { pub v: u32, pub session_id: String, #[serde(default)] pub app_version: Option<String> }
+/// Serializes a candidate hello for `session_id` at `app_version`.
+#[rustfmt::skip]
+pub fn hello_bytes(session_id: &str, app_version: &str) -> Vec<u8> { serde_json::to_vec(&Hello { v: SESSION_VERSION, session_id: session_id.into(), app_version: Some(app_version.into()) }).unwrap_or_default() }
+/// Parses a hello, rejecting oversized data, wrong version, or wrong session.
+#[rustfmt::skip]
+pub fn parse_hello(data: &[u8], expected_session: &str) -> Result<Hello, ControlError> {
+    if data.len() > MAX_CONTROL_READ_BYTES { return Err(ControlError::Oversized); }
+    let hello: Hello = serde_json::from_slice(data)?;
+    if hello.v != SESSION_VERSION { return Err(ControlError::WrongVersion(u64::from(hello.v))); }
+    let id = hello.session_id.trim();
+    if id.is_empty() || id.len() > 128 || id.bytes().any(|b| b.is_ascii_control()) || hello.session_id != expected_session { return Err(ControlError::WrongSession); }
+    Ok(hello)
+}
+/// Requires exact app-version equality; missing/empty candidate is a mismatch.
+#[rustfmt::skip]
+pub fn check_app_versions(candidate: Option<&str>, expert: &str) -> Result<(), ControlError> {
+    let expert = expert.trim();
+    match candidate.map(str::trim) {
+        Some(c) if !c.is_empty() && c == expert => Ok(()),
+        Some(c) if !c.is_empty() => Err(ControlError::VersionMismatch { candidate: c.to_string(), expert: expert.to_string() }),
+        _ => Err(ControlError::VersionMismatch { candidate: "unknown".to_string(), expert: expert.to_string() }),
+    }
 }
 
 /// Candidate ack in `inbox/final-ack.json`: candidate saw the terminal final rating, exactly once.

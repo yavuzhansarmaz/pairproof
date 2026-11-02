@@ -71,6 +71,8 @@ pub enum ControlError {
     WrongVersion(u64),
     #[error("control message bound to another session")]
     WrongSession,
+    #[error("PairProof version mismatch: candidate is running {candidate}, expert is running {expert}; both must run the same version - update/restart PairProof and reconnect")]
+    VersionMismatch { candidate: String, expert: String },
     #[error("invalid intent id")]
     InvalidId,
     #[error("intent exceeds {MAX_INTENT_BYTES} bytes")]
@@ -345,9 +347,10 @@ pub fn build_snapshot_with_recovery(orch: &Orchestrator, pipe: &QuestionPipeline
 }
 
 pub use crate::orchestration::control_codec::{
-    final_ack_bytes, heartbeat_bytes, is_final_ack, parse_final_ack, parse_heartbeat,
-    parse_session_binding, parse_snapshot, session_binding_bytes, FinalAck, FinalAckOutcome,
-    Heartbeat, SessionBinding,
+    check_app_versions, expert_version_from_binding, final_ack_bytes, heartbeat_bytes, hello_bytes,
+    is_final_ack, parse_final_ack, parse_heartbeat, parse_hello, parse_session_binding,
+    parse_session_binding_full, parse_snapshot, session_binding_bytes, FinalAck, FinalAckOutcome,
+    Heartbeat, Hello, SessionBinding,
 };
 
 /// Resolves a fixed control-relative path under `root`, rejecting

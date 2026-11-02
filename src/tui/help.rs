@@ -133,6 +133,9 @@ pub fn candidate_error_message(err: &CandidateRuntimeError) -> &'static str {
             "Not connected; paste the connection string and try again."
         }
         CandidateRuntimeError::Ended => "The session has ended; ask the expert what to do next.",
+        CandidateRuntimeError::VersionMismatch { .. } => {
+            "PairProof version mismatch; update/restart PairProof and reconnect."
+        }
     }
 }
 

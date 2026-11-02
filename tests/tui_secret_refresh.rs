@@ -107,7 +107,7 @@ async fn make_runtime(name: &str) -> (PathBuf, PathBuf, ExpertRuntime) {
     (root, control, runtime)
 }
 
-#[rustfmt::skip] fn write_hello(control: &Path, session_id: &str) { let body = serde_json::json!({ "v": 1, "session_id": session_id }).to_string(); std::fs::write(control.join("inbox").join("hello.json"), body).unwrap(); }
+#[rustfmt::skip] fn write_hello(control: &Path, session_id: &str) { let body = serde_json::json!({ "v": 1, "session_id": session_id, "app_version": env!("CARGO_PKG_VERSION") }).to_string(); std::fs::write(control.join("inbox").join("hello.json"), body).unwrap(); }
 #[rustfmt::skip] fn write_ack(control: &Path, session_id: &str) { std::fs::write(control.join("inbox").join("final-ack.json"), final_ack_bytes(session_id)).unwrap(); }
 #[rustfmt::skip] fn arm(rt: &mut ExpertRuntime) -> Arc<FakePusher> { let p = Arc::new(FakePusher::new()); rt.set_secret_pusher(p.clone() as Arc<dyn SecretPush>); p }
 #[rustfmt::skip] fn arm_failing(rt: &mut ExpertRuntime, n: usize) -> Arc<FakePusher> { let p = Arc::new(FakePusher::failing(n)); rt.set_secret_pusher(p.clone() as Arc<dyn SecretPush>); p }

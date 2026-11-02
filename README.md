@@ -33,14 +33,81 @@ One Rust binary, two roles on the start screen.
 
 ## Prerequisites
 
-- Rust (stable)
+Users do not need Rust or Cargo — see [Install (Users)](#install-users) below.
+
+Developer prerequisites:
+
+- Rust (stable) — required only to build from source; see [Build (Developers)](#build-developers)
 - Docker (expert machine, required for the sandbox)
 - Mutagen (file sync)
 - `MODEL_API_KEY` in `.env` (untracked, never committed) for the Meta Model API
 
 Local/runtime outputs (`.env`, `.pairproof/`, `sessions/`, `artifacts/`, `connection-string*.txt`) are git-ignored.
 
-## Build
+## Install (Users)
+
+Install the latest stable release with one line — no Rust or Cargo required:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/yavuzhansarmaz/pairproof/main/install.sh | bash
+```
+
+Supported platforms:
+
+- Linux x86_64 (musl)
+- Linux aarch64 (musl)
+- macOS x86_64
+- macOS aarch64
+
+Windows is unsupported.
+
+The installer downloads the matching release archive, verifies its SHA-256 checksum before installing, and installs the single `pairproof` binary to `~/.local/bin/pairproof`. It requires no `sudo` and does not modify any shell configuration files. If `~/.local/bin` is not already in your `PATH`, add it yourself, for example in `~/.bashrc` or `~/.zshrc`:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Then start a new shell (or run the binary by its full path, `~/.local/bin/pairproof`).
+
+Docker and Mutagen are prerequisites for sandbox and file-sync features. The installer warns when they are missing but does not install them — install Docker and Mutagen separately if you need those features.
+
+Run PairProof:
+
+```sh
+pairproof
+pairproof --role expert
+pairproof --role candidate
+```
+
+Update to the latest stable release:
+
+```sh
+pairproof update
+```
+
+Check whether an update is available without downloading the release archive:
+
+```sh
+pairproof update --check
+```
+
+Uninstall:
+
+```sh
+pairproof uninstall
+pairproof uninstall --yes
+pairproof uninstall --keep-data
+pairproof uninstall --yes --keep-data
+```
+
+- `pairproof uninstall` asks for confirmation, then removes the binary and `~/.config/pairproof` (including any saved API key and config).
+- `pairproof uninstall --yes` skips the confirmation prompt.
+- `pairproof uninstall --keep-data` removes only the binary and keeps the saved API key and config in `~/.config/pairproof`.
+- Sessions and project files are never removed by uninstall.
+
+Checksum verification: the installer and `pairproof update` verify the SHA-256 checksum of the downloaded archive before installing. If the checksum does not match, the install or update aborts and any existing (old) binary is preserved untouched.
+
+## Build (Developers)
 
 ```sh
 cargo build

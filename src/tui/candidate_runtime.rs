@@ -1,7 +1,7 @@
 //! Candidate runtime: SSH auth, hello, isolated Mutagen sync, intents,
 //! and snapshot rendering. Candidate failures never carry secrets.
 #[rustfmt::skip] use crate::connection::ConnectionString;
-#[rustfmt::skip] use crate::orchestration::control::{final_ack_bytes, heartbeat_bytes, parse_session_binding, CandidateSnapshot, Intent, IntentKind, SnapshotFinal, SnapshotOption, SnapshotRecovery, SnapshotTest, FINAL_ACK_PATH, HEARTBEAT_PATH, SESSION_PATH};
+#[rustfmt::skip] use crate::orchestration::control::{final_ack_bytes, heartbeat_bytes, hello_bytes, parse_session_binding_full, CandidateSnapshot, Intent, IntentKind, SnapshotFinal, SnapshotOption, SnapshotRecovery, SnapshotTest, FINAL_ACK_PATH, HEARTBEAT_PATH, SESSION_PATH};
 #[rustfmt::skip] use crate::orchestration::control_client::{CandidateControlClient, SshControlClient};
 #[rustfmt::skip] use crate::orchestration::mutagen_auth::{run_mutagen, MutagenAuthEnv, PasswordFeeder};
 #[rustfmt::skip] use crate::orchestration::ssh_auth::{run_ssh_command, run_ssh_command_with_stdin, verify_and_key_line, AskpassSession, SshAuthError};
@@ -32,6 +32,7 @@ pub enum CandidateRuntimeError {
     #[error("candidate is not connected")] NotConnected,
     #[error("session has ended")] Ended,
     #[error("Connection problem \u{2014} ask the expert")] Transport,
+    #[error("PairProof version mismatch: candidate is running {candidate}, expert is running {expert}; both must run the same version - update/restart PairProof and reconnect")] VersionMismatch { candidate: String, expert: String },
 }
 /// Maps any SSH-auth failure to generic rejection; payloads are dropped.
 #[rustfmt::skip] pub fn candidate_connect_error_for_ssh(_err: &SshAuthError) -> CandidateConnectError { CandidateConnectError::Rejected }
@@ -40,6 +41,7 @@ pub enum CandidateRuntimeError {
 pub trait CandidateTransport {
     fn authenticate(&mut self, connection: &ConnectionString) -> Result<(), CandidateRuntimeError>;
     fn discover_session_id(&mut self) -> Result<String, CandidateRuntimeError> { Err(CandidateRuntimeError::Transport) }
+    fn expert_version(&self) -> Option<String> { None }
     fn write_hello(&mut self, session_id: &str) -> Result<(), CandidateRuntimeError>;
     fn start_sync(&mut self, session_id: &str, alpha: &Path) -> Result<(), CandidateRuntimeError>;
     fn send_intent(&mut self, intent: &Intent) -> Result<(), CandidateRuntimeError>;
@@ -112,6 +114,7 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
         self.phase = CandidateRuntimePhase::Authenticating;
         if let Err(err) = self.transport.authenticate(connection) { self.phase = CandidateRuntimePhase::Disconnected; return Err(err); }
         match self.transport.discover_session_id() { Ok(id) if !id.trim().is_empty() && crate::sandbox::validate::validate_session_id(&id).is_ok() && (self.session_id.is_empty() || self.session_id == id) => { self.session_id = id.clone(); self.sequencer = CandidateControlClient::new(&id); } _ => { self.phase = CandidateRuntimePhase::Disconnected; return Err(CandidateRuntimeError::Transport); } }
+        if let Some(ev) = self.transport.expert_version() { if ev.trim() != env!("CARGO_PKG_VERSION") { self.phase = CandidateRuntimePhase::Disconnected; return Err(CandidateRuntimeError::VersionMismatch { candidate: env!("CARGO_PKG_VERSION").to_string(), expert: ev.trim().to_string() }); } }
         if let Err(err) = self.transport.write_hello(&self.session_id) { self.phase = CandidateRuntimePhase::Disconnected; return Err(err); }
         self.phase = CandidateRuntimePhase::Syncing; self.transport.start_sync(&self.session_id, &self.workspace)?; self.phase = CandidateRuntimePhase::Connected; Ok(())
     }
@@ -167,12 +170,12 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
 #[rustfmt::skip]
 pub struct SshCandidateTransport {
     connection: Option<ConnectionString>, key_line: Option<String>, client: Option<SshControlClient>,
-    askpass: Option<AskpassSession>, sync_env: Option<MutagenAuthEnv>, feeder: Option<PasswordFeeder>,
+    askpass: Option<AskpassSession>, sync_env: Option<MutagenAuthEnv>, feeder: Option<PasswordFeeder>, expert_version: Option<String>,
 }
 #[rustfmt::skip]
 impl SshCandidateTransport {
-    pub fn new() -> Self { Self { connection: None, key_line: None, client: None, askpass: None, sync_env: None, feeder: None } }
-    pub fn from_verified(connection: &ConnectionString, key_line: String) -> Self { Self { connection: Some(connection.clone()), key_line: Some(key_line), client: None, askpass: None, sync_env: None, feeder: None } }
+    pub fn new() -> Self { Self { connection: None, key_line: None, client: None, askpass: None, sync_env: None, feeder: None, expert_version: None } }
+    pub fn from_verified(connection: &ConnectionString, key_line: String) -> Self { Self { connection: Some(connection.clone()), key_line: Some(key_line), client: None, askpass: None, sync_env: None, feeder: None, expert_version: None } }
     fn stored(&self) -> Result<(&ConnectionString, &str), CandidateRuntimeError> { match (&self.connection, &self.key_line) { (Some(c), Some(k)) => Ok((c, k.as_str())), _ => Err(CandidateRuntimeError::Transport) } }
 }
 #[rustfmt::skip] impl Default for SshCandidateTransport { fn default() -> Self { Self::new() } }
@@ -194,14 +197,15 @@ impl CandidateTransport for SshCandidateTransport {
     fn discover_session_id(&mut self) -> Result<String, CandidateRuntimeError> {
         let (conn, key_line) = self.stored()?; let conn = conn.clone(); let key_line = key_line.to_string();
         let text = run_ssh_command(conn.endpoint(), conn.username(), conn.secret(), &key_line, &["cat", SESSION_PATH], SSH_TIMEOUT).map_err(|_| CandidateRuntimeError::Transport)?;
-        parse_session_binding(text.as_bytes()).map_err(|_| CandidateRuntimeError::Transport)
+        let binding = parse_session_binding_full(text.as_bytes()).map_err(|_| CandidateRuntimeError::Transport)?; self.expert_version = binding.app_version.clone(); Ok(binding.session_id)
     }
+    fn expert_version(&self) -> Option<String> { self.expert_version.clone() }
     fn write_hello(&mut self, session_id: &str) -> Result<(), CandidateRuntimeError> {
         let (conn, key_line) = self.stored()?;
         let key_line = key_line.to_string();
         let client = SshControlClient::new(session_id, conn.endpoint().clone(), conn.username().clone(), conn.secret().clone(), key_line.clone());
-        let body = serde_json::json!({ "v": 1, "session_id": session_id }).to_string();
-        run_ssh_command_with_stdin(conn.endpoint(), conn.username(), conn.secret(), &key_line, &["tee", HELLO_PATH], Some(body.as_bytes()), SSH_TIMEOUT).map_err(|_| CandidateRuntimeError::Transport)?;
+        let body = hello_bytes(session_id, env!("CARGO_PKG_VERSION"));
+        run_ssh_command_with_stdin(conn.endpoint(), conn.username(), conn.secret(), &key_line, &["tee", HELLO_PATH], Some(&body), SSH_TIMEOUT).map_err(|_| CandidateRuntimeError::Transport)?;
         self.client = Some(client);
         Ok(())
     }

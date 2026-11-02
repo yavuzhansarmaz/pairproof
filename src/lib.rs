@@ -1,5 +1,6 @@
 pub mod connection;
 pub mod core;
+pub mod distribution;
 pub mod ingest;
 pub mod leetcode;
 pub mod llm;

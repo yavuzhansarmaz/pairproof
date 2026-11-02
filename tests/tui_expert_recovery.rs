@@ -191,7 +191,7 @@ fn push_intent(control: &std::path::Path, seq: u64, kind: IntentKind) {
     file.write_all(format!("{}\n", intent.to_line().unwrap()).as_bytes()).unwrap();
 }
 #[rustfmt::skip]
-fn write_hello(control: &std::path::Path) { let body = serde_json::json!({ "v": 1, "session_id": "s1" }).to_string(); std::fs::write(control.join("inbox").join("hello.json"), body).unwrap(); }
+fn write_hello(control: &std::path::Path) { let body = serde_json::json!({ "v": 1, "session_id": "s1", "app_version": env!("CARGO_PKG_VERSION") }).to_string(); std::fs::write(control.join("inbox").join("hello.json"), body).unwrap(); }
 #[rustfmt::skip]
 fn write_ack(control: &std::path::Path) { std::fs::write(control.join("inbox").join("final-ack.json"), final_ack_bytes("s1")).unwrap(); }
 #[rustfmt::skip]
