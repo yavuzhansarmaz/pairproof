@@ -3,6 +3,7 @@ pub mod core;
 pub mod ingest;
 pub mod leetcode;
 pub mod llm;
+pub mod orchestration;
 pub mod sandbox;
 pub mod scoring;
 pub mod sync;
