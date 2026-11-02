@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate tag matches Cargo.toml version
+        if: "startsWith(github.ref, 'refs/tags/')"
+        shell: sh
+        run: |
+          set -eu
+          TAG="${GITHUB_REF_NAME}"
+          printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "error: tag '$TAG' does not match ^v[0-9]+\.[0-9]+\.[0-9]+$" >&2
+            exit 1
+          }
+          TAG_VERSION="${TAG#v}"
+          CARGO_VERSION="$(awk -F '"' '/^version[[:space:]]*=/ { print $2; exit }' Cargo.toml)"
+          if [ -z "$CARGO_VERSION" ]; then
+            echo "error: could not extract CARGO_VERSION from Cargo.toml" >&2
+            exit 1
+          fi
+          echo "TAG_VERSION=$TAG_VERSION"
+          echo "CARGO_VERSION=$CARGO_VERSION"
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "error: tag version '$TAG_VERSION' does not match Cargo.toml version '$CARGO_VERSION'" >&2
+            exit 1
+          fi
+      - name: Install Rust toolchain
+        shell: sh
+        run: |
+          set -eu
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --component clippy,rustfmt
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Run tests
+        run: cargo test
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-22.04
+            asset: pairproof-linux-x86_64-unknown-linux-musl.tar.gz
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-22.04
+            asset: pairproof-linux-aarch64-unknown-linux-musl.tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-14
+            asset: pairproof-darwin-x86_64-apple-darwin.tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            asset: pairproof-darwin-aarch64-apple-darwin.tar.gz
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install Rust toolchain
+        shell: sh
+        run: |
+          set -eu
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --target "${{ matrix.target }}" --component clippy,rustfmt
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Install musl cross tools
+        if: runner.os == 'Linux'
+        shell: sh
+        run: |
+          set -eu
+          sudo apt-get update
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
+            sudo apt-get install -y musl-tools
+          elif [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
+            # aarch64-linux-gnu-gcc is used only as the linker driver for
+            # the aarch64 musl target; rustc still produces musl objects.
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+          fi
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} --locked
+      - name: Package release asset
+        shell: sh
+        run: |
+          set -eu
+          mkdir -p staging dist
+          cp "target/${{ matrix.target }}/release/pairproof" staging/pairproof
+          chmod 0755 staging/pairproof
+          tar -czf "dist/${{ matrix.asset }}" -C staging pairproof
+          if command -v sha256sum >/dev/null 2>&1; then
+            HEX="$(sha256sum "dist/${{ matrix.asset }}" | awk '{ print $1 }')"
+          else
+            HEX="$(shasum -a 256 "dist/${{ matrix.asset }}" | awk '{ print $1 }')"
+          fi
+          printf '%s  %s\n' "$HEX" "${{ matrix.asset }}" > "dist/${{ matrix.asset }}.sha256"
+          cat "dist/${{ matrix.asset }}.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/${{ matrix.asset }}
+            dist/${{ matrix.asset }}.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [validate, build]
+    if: "startsWith(github.ref, 'refs/tags/v')"
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Verify release assets
+        shell: sh
+        run: |
+          set -eu
+          ls -l dist
+          sh scripts/check_release_assets.sh dist
+      - name: Create GitHub release
+        shell: sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          sh scripts/check_release_assets.sh dist
+          gh release create "$TAG" --title "pairproof $TAG" --notes "pairproof $TAG" dist/pairproof-linux-x86_64-unknown-linux-musl.tar.gz dist/pairproof-linux-x86_64-unknown-linux-musl.tar.gz.sha256 dist/pairproof-linux-aarch64-unknown-linux-musl.tar.gz dist/pairproof-linux-aarch64-unknown-linux-musl.tar.gz.sha256 dist/pairproof-darwin-x86_64-apple-darwin.tar.gz dist/pairproof-darwin-x86_64-apple-darwin.tar.gz.sha256 dist/pairproof-darwin-aarch64-apple-darwin.tar.gz dist/pairproof-darwin-aarch64-apple-darwin.tar.gz.sha256

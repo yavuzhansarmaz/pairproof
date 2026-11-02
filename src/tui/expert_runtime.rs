@@ -15,7 +15,7 @@ use crate::leetcode::selection::{select_questions_with_fallback, FallbackReport,
 use crate::leetcode::LeetCodeClient;
 use crate::llm::extraction::{extract_context, ExtractionResult};
 #[rustfmt::skip]
-use crate::orchestration::control::{parse_final_ack, parse_heartbeat, FinalAckOutcome};
+use crate::orchestration::control::{check_app_versions, parse_final_ack, parse_heartbeat, parse_hello, FinalAckOutcome};
 #[rustfmt::skip]
 use crate::orchestration::{build_snapshot_with_recovery, compute_final, generate_report, grade_session, publish_snapshot, run_cancellable, ApplyOutcome, ApplyReport, ApproachGenerator, ChatTransport, CleanupCoordinator, CleanupReport, CleanupSequence, Clock, CodingTransport, ConnectionGate, ConnectionGateError, ControlError, ControlExecutor, ControlIo, ControlTransports, FetchedStatement, GatePhase, HealthGate, KillReport, LeetCodeProbe, LifecycleError, MetaProbe, Orchestrator, OrchestratorError, PauseClock, PipelineError, QuestionGrader, QuestionPipeline, RecoveryController, RecoveryOutcome, RequestSupervisor, SandboxIo, SessionSyncPhase, StatementFetcher};
 use crate::sandbox::SandboxHandle;
@@ -47,11 +47,7 @@ pub enum ExpertRuntimeError {
 /// Outcome of one candidate poll on the connection screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[rustfmt::skip]
-pub enum PollOutcome { Waiting, Connected, WrongSession, AlreadyConnected }
-
-#[derive(serde::Deserialize)]
-#[rustfmt::skip]
-struct HelloFile { v: u32, session_id: String }
+pub enum PollOutcome { Waiting, Connected, WrongSession, AlreadyConnected, VersionMismatch }
 
 pub use crate::sandbox::preflight::first_free_port;
 pub(crate) use crate::tui::expert_session::select_sandbox_port;
@@ -157,7 +153,7 @@ pub struct ExpertRuntime {
     loaded_index: Option<usize>, cleanup_report: Option<CleanupReport>, last_kill: Option<KillReport>,
     final_ack_outcome: Option<FinalAckOutcome>, ack_waited: bool, hb_timeout_ms: u64, last_seen_ms: u64, clock: Option<Arc<dyn Clock>>,
     last_hb_at: Option<u64>, reissued: Option<ConnectionString>, username: EphemeralUsername,
-    selection_note: Option<String>, medium_failed_at: Option<u64>, hard_failed_at: Option<u64>, pushed_window: Option<u64>, secret_pusher: Option<Arc<dyn crate::orchestration::secret_push::SecretPush>>, hello_pending_consume: bool, recovery: RecoveryController, pause_clock: PauseClock, recovery_rx: Option<(u64, tokio::sync::oneshot::Receiver<RecoveryOutcome>)>, recovery_cancel: Option<crate::orchestration::CancelToken>, leetcode_probe: Option<Arc<dyn LeetCodeProbe>>, meta_probe: Option<Arc<dyn MetaProbe>>, recovery_timed_out: bool,
+    selection_note: Option<String>, medium_failed_at: Option<u64>, hard_failed_at: Option<u64>, pushed_window: Option<u64>, secret_pusher: Option<Arc<dyn crate::orchestration::secret_push::SecretPush>>, hello_pending_consume: bool, version_mismatch: Option<(String, String)>, recovery: RecoveryController, pause_clock: PauseClock, recovery_rx: Option<(u64, tokio::sync::oneshot::Receiver<RecoveryOutcome>)>, recovery_cancel: Option<crate::orchestration::CancelToken>, leetcode_probe: Option<Arc<dyn LeetCodeProbe>>, meta_probe: Option<Arc<dyn MetaProbe>>, recovery_timed_out: bool,
 }
 
 #[rustfmt::skip]
@@ -176,7 +172,7 @@ impl ExpertRuntime {
             coding: deps.coding, sandbox_io: deps.sandbox_io, chat: deps.chat, grader: deps.grader, pool: deps.leetcode.map(|c| Arc::new(c) as Arc<dyn PoolClient>),
             sandbox_handle: deps.sandbox_handle, layout, topics: deps.topics, level: deps.level, sync_phase: deps.sync_phase,
             started: false, ended: false, pending_medium: None, pending_load: None, loaded_index: None, cleanup_report: None, last_kill: None, final_ack_outcome: None, ack_waited: false,
-            hb_timeout_ms: HEARTBEAT_TIMEOUT_MS, last_seen_ms: now_ms, last_hb_at: None, reissued: None, username: spec.username, selection_note: None, medium_failed_at: None, hard_failed_at: None, pushed_window: None, secret_pusher, hello_pending_consume: false, clock: None, recovery: RecoveryController::new(60_000), pause_clock: PauseClock::new(), recovery_rx: None, recovery_cancel: None, leetcode_probe: None, meta_probe: None, recovery_timed_out: false })
+            hb_timeout_ms: HEARTBEAT_TIMEOUT_MS, last_seen_ms: now_ms, last_hb_at: None, reissued: None, username: spec.username, selection_note: None, medium_failed_at: None, hard_failed_at: None, pushed_window: None, secret_pusher, hello_pending_consume: false, version_mismatch: None, clock: None, recovery: RecoveryController::new(60_000), pause_clock: PauseClock::new(), recovery_rx: None, recovery_cancel: None, leetcode_probe: None, meta_probe: None, recovery_timed_out: false })
     }
 
     pub fn orchestrator(&self) -> &Orchestrator { &self.orch } pub fn gate_phase(&self) -> GatePhase { self.gate.phase() }
@@ -201,6 +197,7 @@ impl ExpertRuntime {
     pub fn countdown_secs(&self, now_ms: u64) -> u64 { self.gate.countdown_secs(now_ms) }
     pub fn set_heartbeat_timeout(&mut self, timeout_ms: u64) { self.hb_timeout_ms = timeout_ms; } fn fresh_now(&self, fallback: u64) -> u64 { self.clock.as_ref().map_or(fallback, |clock| clock.now_ms()) } pub fn is_disconnected(&self) -> bool { self.started && !self.ended && !self.orch.is_connected() }
     pub fn reissue_string(&self) -> Option<&ConnectionString> { self.reissued.as_ref() } pub fn username(&self) -> &EphemeralUsername { &self.username }
+    pub fn version_mismatch(&self) -> Option<(String, String)> { self.version_mismatch.clone() }
 
     /// Polls for candidate hello evidence. Only a first valid
     /// session-bound hello locks the gate and starts the interview;
@@ -211,13 +208,13 @@ impl ExpertRuntime {
         // Persistent rm failure implies broken container exec, so snapshot
         // publish is broken too; expert End/cleanup paths never need hello.
         if self.hello_pending_consume { if self.hello.consume_hello().await.is_err() { return PollOutcome::Waiting; } self.hello_pending_consume = false; }
-        let Some(bytes) = self.hello.read_hello().await else { return PollOutcome::Waiting; }; let Ok(hello) = serde_json::from_slice::<HelloFile>(&bytes) else { return PollOutcome::Waiting; };
-        if hello.v != 1 { return PollOutcome::Waiting; }
-        if hello.session_id != self.orch.session_id() { return PollOutcome::WrongSession; }
+        let Some(bytes) = self.hello.read_hello().await else { return PollOutcome::Waiting; };
+        let hello = match parse_hello(&bytes, self.orch.session_id()) { Ok(h) => h, Err(ControlError::WrongSession) => return PollOutcome::WrongSession, Err(_) => return PollOutcome::Waiting };
+        if let Err(ControlError::VersionMismatch { candidate, expert }) = check_app_versions(hello.app_version.as_deref(), env!("CARGO_PKG_VERSION")) { self.version_mismatch = Some((candidate, expert)); return PollOutcome::VersionMismatch; }
         if self.gate.accept_after_ssh_auth(&mut self.orch, now_ms).is_err() { return PollOutcome::Waiting; }
         self.hello_pending_consume = self.hello.consume_hello().await.is_err();
         if !self.started { if self.orch.start(now_ms).is_err() { return PollOutcome::Waiting; } self.started = true; } else { self.reissued = None; }
-        self.last_seen_ms = now_ms;
+        self.version_mismatch = None; self.last_seen_ms = now_ms;
         self.maybe_trigger_load();
         PollOutcome::Connected
     }

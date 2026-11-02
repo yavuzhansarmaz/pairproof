@@ -125,7 +125,7 @@ async fn make_runtime(name: &str) -> (PathBuf, PathBuf, ExpertRuntime) {
     (root, control, runtime)
 }
 #[rustfmt::skip]
-fn write_hello(control: &std::path::Path) { let body = serde_json::json!({ "v": 1, "session_id": "s1" }).to_string(); std::fs::write(control.join("inbox").join("hello.json"), body).unwrap(); }
+fn write_hello(control: &std::path::Path) { let body = serde_json::json!({ "v": 1, "session_id": "s1", "app_version": env!("CARGO_PKG_VERSION") }).to_string(); std::fs::write(control.join("inbox").join("hello.json"), body).unwrap(); }
 #[rustfmt::skip]
 fn write_ack(control: &std::path::Path) { std::fs::write(control.join("inbox").join("final-ack.json"), final_ack_bytes("s1")).unwrap(); }
 #[rustfmt::skip]

@@ -37,33 +37,17 @@ pub fn dispatch_role(role: Role) -> RoleDestination {
 }
 
 /// Parses arguments and hands control to role dispatch.
+#[rustfmt::skip]
 pub fn run() -> anyhow::Result<()> {
+    let original: Vec<String> = std::env::args().skip(1).collect();
     let args = args::Args::parse();
+    if let Some(command) = &args.command { return args::run_command(command); }
+    // Startup auto-update only on interactive (TTY) launches; non-TTY keeps placeholder behaviour. --help/--version exit in parse above.
+    if std::io::stdout().is_terminal() && crate::distribution::startup::startup_gate(&original)? == crate::distribution::StartupGate::Reexec { return Ok(()); }
     match args.role {
-        Some(Role::Candidate) => {
-            if std::io::stdout().is_terminal() {
-                run_candidate_interactive()
-            } else {
-                println!("pairproof: {}", candidate::placeholder_message());
-                Ok(())
-            }
-        }
-        Some(Role::Expert) => {
-            if std::io::stdout().is_terminal() {
-                run_interactive(Some(Role::Expert))
-            } else {
-                println!("pairproof: expert flow \u{2014} run preflight before starting a session");
-                Ok(())
-            }
-        }
-        None => {
-            if std::io::stdout().is_terminal() {
-                run_interactive(None)
-            } else {
-                println!("pairproof: select a role with --role expert or --role candidate");
-                Ok(())
-            }
-        }
+        Some(Role::Candidate) => if std::io::stdout().is_terminal() { run_candidate_interactive() } else { println!("pairproof: {}", candidate::placeholder_message()); Ok(()) },
+        Some(Role::Expert) => if std::io::stdout().is_terminal() { run_interactive(Some(Role::Expert)) } else { println!("pairproof: expert flow \u{2014} run preflight before starting a session"); Ok(()) },
+        None => if std::io::stdout().is_terminal() { run_interactive(None) } else { println!("pairproof: select a role with --role expert or --role candidate"); Ok(()) },
     }
 }
 
@@ -228,11 +212,17 @@ fn tick_runtime(
         AppScreen::ConnectionWait => {
             let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
             let _ = block_on(tokio_rt, active.poll_recovery(now_ms()));
-            if let Some(PollOutcome::Connected) =
-                block_on(tokio_rt, active.poll_candidate(now_ms()))
-            {
-                app.set_connected(true);
-                let _ = app.handle(AppEvent::ConnectionLocked);
+            match block_on(tokio_rt, active.poll_candidate(now_ms())) {
+                Some(PollOutcome::Connected) => {
+                    app.set_connected(true);
+                    let _ = app.handle(AppEvent::ConnectionLocked);
+                }
+                Some(PollOutcome::VersionMismatch) => {
+                    if let Some((c, e)) = active.version_mismatch() {
+                        app.set_status_message(format!("Version mismatch: candidate {c}, you {e}. Candidate must update/restart PairProof; session not started."));
+                    }
+                }
+                _ => {}
             }
         }
         AppScreen::SelectMedium | AppScreen::SelectHard | AppScreen::Monitor => {
