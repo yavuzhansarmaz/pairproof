@@ -20,7 +20,9 @@ pub trait ChatService {
     fn complete(&mut self, messages: &[Message]) -> Result<String, ChatServiceError>;
 }
 
-/// Chat service used until Phase 10 relay wiring.
+/// Legacy Phase-9 seam: always `ChatServiceError::Unavailable`, never
+/// fakes a reply. Live Phase-10 path bypasses it via chat intents in
+/// `candidate_runtime`; retained for deterministic tests and offline use.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnavailableChatService;
 
@@ -307,7 +309,8 @@ impl ChatController {
 }
 
 impl Default for ChatController {
-    /// Creates a controller with the unavailable Phase 10 service.
+    /// Creates a controller with the legacy Phase-9 unavailable service;
+    /// the live Phase-10 path sends chat via intents, not this default.
     fn default() -> Self {
         Self::new(UnavailableChatService)
     }

@@ -1,5 +1,18 @@
-use crate::leetcode::Difficulty;
 use serde::{Deserialize, Serialize};
+
+/// Canonical session-id rule for every boundary (core, sandbox, sync, artifacts):
+/// `[A-Za-z0-9_-]{1,40}`, rejecting leading `-` and `net-` (network-name collision).
+/// Production ids `e{pid}x{ms}` conform. This is the single implementation;
+/// other boundaries delegate here and map to their own error type.
+pub fn validate_session_id(raw: &str) -> bool {
+    !raw.is_empty()
+        && !raw.starts_with('-')
+        && !raw.starts_with("net-")
+        && raw.len() <= 40
+        && raw
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
 
 /// Errors returned by core session operations.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -58,6 +71,25 @@ pub enum CoreError {
     CandidateDisconnected,
     #[error("paste flag size must be greater than zero")]
     InvalidPasteFlag,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Difficulty {
+    Easy,
+    Medium,
+    Hard,
+}
+
+impl Difficulty {
+    /// Returns the GraphQL filter value for this difficulty.
+    pub fn as_filter(self) -> &'static str {
+        match self {
+            Difficulty::Easy => "EASY",
+            Difficulty::Medium => "MEDIUM",
+            Difficulty::Hard => "HARD",
+        }
+    }
 }
 
 /// Supported solution language for a session.

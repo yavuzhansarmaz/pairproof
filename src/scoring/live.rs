@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::core::types::Difficulty;
 use crate::core::{EventKind, QuestionRef, QuestionStatus, Session};
-use crate::leetcode::Difficulty;
 use crate::scoring::types::ApproachQuality;
 
 /// One component of a rating breakdown line, in display order.

@@ -3,7 +3,7 @@
 use serde::Deserialize;
 
 use crate::core::{Language, Session};
-use crate::llm::common::{language_name, strip_code_fences, LlmError, LlmOutcome};
+use crate::llm::common::{decode, language_name, LlmError, LlmOutcome};
 use crate::llm::{Message, MetaClient, Usage};
 
 /// Inputs for one coding step on the active question.
@@ -76,8 +76,7 @@ pub fn build_coding_messages(input: &CodingStepInput) -> Vec<Message> {
 
 /// Parses a model reply into a coding step output.
 pub fn parse_coding_step(content: &str) -> Result<CodingStepOutput, LlmError> {
-    let wire: CodingStepWire = serde_json::from_str(strip_code_fences(content))
-        .map_err(|e| LlmError::Parse(e.to_string()))?;
+    let wire: CodingStepWire = decode(content)?;
     if wire.code.trim().is_empty() {
         return Err(LlmError::Parse("coding step code must not be empty".into()));
     }

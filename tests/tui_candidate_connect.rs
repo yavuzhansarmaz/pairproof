@@ -205,6 +205,23 @@ fn candidate_not_connected_until_verified() {
 }
 
 #[test]
+fn candidate_new_unavailable_is_explicit_legacy_default() {
+    let value = valid(10_000);
+    let mut app = CandidateApp::new_unavailable();
+    assert_eq!(app.screen(), CandidateScreen::Connect);
+    app.push_text(&value.encoded);
+    let err = app.submit_connection(1_000).expect_err("unavailable");
+    assert_eq!(err, CandidateConnectError::Unavailable);
+    assert!(!app.is_connected());
+    let mut legacy = CandidateApp::new();
+    legacy.push_text(&value.encoded);
+    assert_eq!(
+        legacy.submit_connection(1_000),
+        Err(CandidateConnectError::Unavailable)
+    );
+}
+
+#[test]
 fn candidate_rules_require_explicit_acceptance() {
     let mut fresh = CandidateApp::new();
     assert!(fresh.accept_rules().is_err());

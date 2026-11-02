@@ -5,30 +5,11 @@ use crate::connection::EphemeralUsername;
 use crate::core::Language;
 
 use super::command::exec_as;
-use super::error::{bounded_stderr, SandboxError};
+use super::error::{command_failed, map_docker_not_found, SandboxError};
 use super::lifecycle::{SandboxHandle, OP_TIMEOUT};
 use super::parse::{is_path_within_workspace, parse_realpath};
 use super::process::{run_bounded, CommandOutcome, DEFAULT_MAX_OUTPUT, EXEC_MAX_OUTPUT};
 use super::validate::{question_layout, WorkspacePath, MAX_FILE_BYTES, WORKSPACE_ROOT};
-
-/// Maps a missing docker binary to the docker-specific error.
-fn map_docker_not_found(err: SandboxError) -> SandboxError {
-    match err {
-        SandboxError::ExecutableNotFound { program } if program == "docker" => {
-            SandboxError::DockerNotFound
-        }
-        other => other,
-    }
-}
-
-/// Builds a bounded command-failure error from an outcome.
-fn failed(operation: &'static str, outcome: &CommandOutcome) -> SandboxError {
-    SandboxError::CommandFailed {
-        operation,
-        exit_code: outcome.exit_code,
-        stderr: bounded_stderr(&outcome.stderr),
-    }
-}
 
 /// Runs one argv as the ephemeral user without a shell.
 async fn run_user(
@@ -57,7 +38,7 @@ async fn run_user_ok(
     if outcome.success() {
         Ok(outcome)
     } else {
-        Err(failed(operation, &outcome))
+        Err(command_failed(operation, &outcome))
     }
 }
 
@@ -175,7 +156,7 @@ pub async fn read_file(
     if !probe_out.success() {
         // `test` prints nothing on plain-false; docker-level failures print to stderr.
         if !probe_out.stderr.is_empty() || probe_out.exit_code != Some(1) {
-            return Err(failed("read_probe", &probe_out));
+            return Err(command_failed("read_probe", &probe_out));
         }
         return Err(SandboxError::ContainerFileNotFound(target));
     }

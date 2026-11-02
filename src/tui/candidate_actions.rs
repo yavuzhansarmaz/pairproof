@@ -37,7 +37,9 @@ pub trait TestRunner {
     fn run_tests(&mut self, code: &str, language: Language) -> Result<(u32, u32), RunnerError>;
 }
 
-/// Coding runner used until Phase 10 transport wiring.
+/// Legacy Phase-9 seam: always `RunnerError::Unavailable` (callers set
+/// `WorkPhase::RunnerUnavailable`), never fakes code. Live Phase-10 path
+/// bypasses it via intents in `candidate_runtime`; retained for tests/offline.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnavailableCodingRunner;
 
@@ -47,7 +49,9 @@ impl CodingRunner for UnavailableCodingRunner {
     }
 }
 
-/// Test runner used until Phase 10 transport wiring.
+/// Legacy Phase-9 seam: always `RunnerError::Unavailable`, never fakes
+/// counts. Live Phase-10 path bypasses it via intents in
+/// `candidate_runtime`; retained for deterministic tests and offline use.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnavailableTestRunner;
 
@@ -67,7 +71,9 @@ pub trait OtherGrader {
     ) -> Result<ApproachGrade, RunnerError>;
 }
 
-/// Other grader used until Phase 10 transport wiring.
+/// Legacy Phase-9 seam: always `RunnerError::Unavailable` (callers set
+/// `WorkPhase::RunnerUnavailable`), never fakes a grade. Live Phase-10
+/// path bypasses it via intents in `candidate_runtime`; tests/offline only.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnavailableOtherGrader;
 

@@ -7,7 +7,7 @@ use crate::connection::EphemeralUsername;
 use crate::core::Language;
 
 use super::command::{exec_as, exec_root};
-use super::error::{bounded_stderr, SandboxError};
+use super::error::{command_failed, map_docker_not_found, SandboxError};
 use super::lifecycle::SandboxHandle;
 use super::process::{run_bounded, CommandOutcome, CommandSpec, EXEC_MAX_OUTPUT};
 use super::validate::WorkspacePath;
@@ -34,25 +34,6 @@ fn validate_run_argv(argv: &[String]) -> Result<(), SandboxError> {
         return Err(SandboxError::InvalidCommand(first.to_string()));
     }
     Ok(())
-}
-
-/// Maps a missing docker binary to the docker-specific error.
-fn map_docker_not_found(err: SandboxError) -> SandboxError {
-    match err {
-        SandboxError::ExecutableNotFound { program } if program == "docker" => {
-            SandboxError::DockerNotFound
-        }
-        other => other,
-    }
-}
-
-/// Builds a bounded command-failure error from an outcome.
-fn failed(operation: &'static str, outcome: &CommandOutcome) -> SandboxError {
-    SandboxError::CommandFailed {
-        operation,
-        exit_code: outcome.exit_code,
-        stderr: bounded_stderr(&outcome.stderr),
-    }
 }
 
 fn timeout_ms(timeout: Duration) -> u64 {
@@ -222,7 +203,7 @@ async fn check_sql_runnability(handle: &SandboxHandle, user: &EphemeralUsername,
     let content = read_file(handle, user, path).await?;
     let setup = timeout_argv(&root_mariadb_argv("DROP DATABASE IF EXISTS pp_runnable; CREATE DATABASE pp_runnable"), timeout);
     let setup_out = run_root(handle, &setup, None, timeout).await?;
-    if !setup_out.success() { return Err(failed("sql_scratch_setup", &setup_out)); }
+    if !setup_out.success() { return Err(command_failed("sql_scratch_setup", &setup_out)); }
     let run = ppcheck_mariadb_argv(timeout);
     let outcome = run_root(handle, &run, Some(&content), timeout).await?;
     let drop = timeout_argv(&root_mariadb_argv("DROP DATABASE IF EXISTS pp_runnable"), timeout);
