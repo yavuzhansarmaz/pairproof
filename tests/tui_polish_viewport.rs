@@ -76,7 +76,7 @@ fn final_rating_remains_visible_on_short_terminal() {
     let CandidateFinal::Breakdown(view) = &result else {
         panic!("expected breakdown");
     };
-    let rating_line = format!("Final rating: {:.2}", view.rating);
+    let rating_line = format!("final rating: {:.2}", view.rating);
     for height in [12_usize, 8, 5] {
         let visible = candidate_final_lines_for_height(&result, height);
         assert!(visible.len() <= height, "{visible:?}");
@@ -122,7 +122,7 @@ fn long_statement_does_not_hide_final_summary() {
     let visible = visible_with_pinned(&lines, 12);
     assert!(visible.len() <= 12, "{visible:?}");
     assert!(
-        visible.iter().any(|l| l.contains("Final rating: 8.25")),
+        visible.iter().any(|l| l.contains("final rating: 8.25")),
         "{visible:?}"
     );
     assert!(
@@ -130,12 +130,12 @@ fn long_statement_does_not_hide_final_summary() {
         "{visible:?}"
     );
     let content: Vec<String> = (0..60).map(|i| format!("line {i}")).collect();
-    let pinned = vec!["Final rating: 8.25".to_string()];
+    let pinned = vec!["final rating: 8.25".to_string()];
     let visible = visible_lines(&content, 6, &pinned);
     assert_eq!(visible.len(), 6);
     assert_eq!(
         visible.last().map(String::as_str),
-        Some("Final rating: 8.25")
+        Some("final rating: 8.25")
     );
 }
 
@@ -147,7 +147,7 @@ fn terminal_resize_preserves_usable_layout() {
     let full = candidate_final_lines(&result);
     let rating_line = full
         .iter()
-        .find(|l| l.contains("Final rating:"))
+        .find(|l| l.contains("final rating:"))
         .expect("rating line")
         .clone();
     for height in [50_usize, 24, 12, 6, 3, 2, 1, 0] {
@@ -171,9 +171,9 @@ fn terminal_resize_preserves_usable_layout() {
     assert_eq!(regrown, full);
     assert!(visible_lines(&[], 0, &[]).is_empty());
     assert_eq!(visible_lines(&[String::new()], 1, &[]), vec![String::new()]);
-    let edge = visible_lines(&["x".repeat(500)], 2, &["Final rating: 1.00".to_string()]);
+    let edge = visible_lines(&["x".repeat(500)], 2, &["final rating: 1.00".to_string()]);
     assert_eq!(edge.len(), 2);
-    assert_eq!(edge[1], "Final rating: 1.00");
+    assert_eq!(edge[1], "final rating: 1.00");
 }
 
 #[test]
@@ -182,19 +182,19 @@ fn viewport_markers_and_pinned_split_are_exact() {
         truncation_marker(3),
         "... 3 more lines \u{2014} scroll/resize for full text"
     );
-    assert!(is_pinned_summary("  Final rating: 8.25"));
-    assert!(is_pinned_summary(" Live rating: 8.25"));
-    assert!(is_pinned_summary("   Solved: 3"));
+    assert!(is_pinned_summary("  final rating: 8.25"));
+    assert!(is_pinned_summary(" live rating: 8.25"));
+    assert!(is_pinned_summary("   solved: 3"));
     assert!(!is_pinned_summary(
         "Given an array of integers, return the indices."
     ));
     assert!(!is_pinned_summary("  The final rating is pending."));
     let lines = vec![
         "Statement A".to_string(),
-        "Final rating: 8.25".to_string(),
+        "final rating: 8.25".to_string(),
         "Statement B".to_string(),
-        "  Solved: 3".to_string(),
-        "Live rating: 8.00".to_string(),
+        "  solved: 3".to_string(),
+        "live rating: 8.00".to_string(),
     ];
     let (content, pinned) = split_pinned(&lines);
     assert_eq!(
@@ -204,9 +204,9 @@ fn viewport_markers_and_pinned_split_are_exact() {
     assert_eq!(
         pinned,
         vec![
-            "Final rating: 8.25".to_string(),
-            "  Solved: 3".to_string(),
-            "Live rating: 8.00".to_string(),
+            "final rating: 8.25".to_string(),
+            "  solved: 3".to_string(),
+            "live rating: 8.00".to_string(),
         ]
     );
 }
@@ -397,6 +397,27 @@ fn session_setup_boxes_show_five_and_two_lines() {
     assert!(!rendered.contains("JD line 6"), "{rendered}");
     assert!(rendered.contains("Note line 2"), "{rendered}");
     assert!(!rendered.contains("Note line 3"), "{rendered}");
+    assert!(rendered.contains("paste the job description"), "{rendered}");
+    assert!(
+        !rendered.contains("Paste the job description"),
+        "{rendered}"
+    );
+    // No phantom blank row: with no status, the footer sits
+    // directly under the notes box.
+    let rows: Vec<String> = (0..24)
+        .map(|y| {
+            (0..80)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect()
+        })
+        .collect();
+    let footer_y = rows
+        .iter()
+        .position(|row| row.contains("up/down scroll"))
+        .expect("footer row");
+    let (_, notes_box) =
+        pairproof::tui::render::setup_box_areas(ratatui::layout::Rect::new(0, 0, 80, 24), 5, 2);
+    assert_eq!(footer_y as u16, notes_box.y + notes_box.height);
     // Full-size screen: the outer frame fills the terminal.
     assert_eq!(buffer[(0, 0)].symbol(), "\u{250c}");
 }
@@ -453,11 +474,11 @@ fn candidate_final_pinned_lines_are_the_completion_summary() {
     assert_eq!(
         candidate_final_pinned_lines(&CandidateFinal::Breakdown(view)),
         vec![
-            "Final rating: 8.25".to_string(),
-            "Solved: 3".to_string(),
-            "Finished: 7".to_string(),
-            "Skipped: 2".to_string(),
-            "Paste flags: 1".to_string(),
+            "final rating: 8.25".to_string(),
+            "solved: 3".to_string(),
+            "finished: 7".to_string(),
+            "skipped: 2".to_string(),
+            "paste flags: 1".to_string(),
         ]
     );
     assert_eq!(

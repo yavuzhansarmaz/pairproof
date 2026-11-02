@@ -69,7 +69,7 @@ fn meta_client() -> Result<crate::llm::MetaClient, String> { if let Ok(client) =
 pub fn expert_context_from_extraction(result: &ExtractionResult) -> (Vec<String>, String, Language) { (result.topics.clone(), result.level.clone(), result.proposed_language.unwrap_or(Language::Python)) }
 /// Builds the expert-visible note for a widened selection report.
 #[rustfmt::skip]
-fn widened_note(report: &FallbackReport) -> Option<String> { if !report.widened { return None; } let tags = if report.tags_used.is_empty() { "unfiltered".to_string() } else { report.tags_used.join(", ") }; Some(format!("Selection widened beyond topics ({tags}).")) }
+fn widened_note(report: &FallbackReport) -> Option<String> { if !report.widened { return None; } let tags = if report.tags_used.is_empty() { "unfiltered".to_string() } else { report.tags_used.join(", ") }; Some(format!("selection widened beyond topics ({tags}).")) }
 /// Resolves Setup pastes to stored documents plus runtime context.
 #[rustfmt::skip]
 async fn resolve_expert_context(jd: &str, notes: &str) -> Result<(Option<ExpertDocuments>, Vec<String>, String, Language), String> {

@@ -204,7 +204,7 @@ fn candidate_selection_never_enters_expert_flow() {
     assert!(app.handle(AppEvent::SelectExpert).is_err());
     assert_eq!(app.screen(), AppScreen::Exited);
     let lines = screen_lines(&app).join("\n");
-    assert!(lines.contains("Candidate"));
+    assert!(lines.contains("candidate:"));
     assert!(!lines.contains("Phase 9"));
     assert!(!lines.contains("not implemented"));
 }
@@ -235,7 +235,7 @@ fn back_is_rejected_past_the_runtime_commit_point() {
     assert_eq!(app.screen(), AppScreen::Monitor);
     let lines = screen_lines(&app).join("\n");
     assert!(!lines.contains("b back"), "{lines}");
-    assert!(lines.contains("Press e to end the session."), "{lines}");
+    assert!(lines.contains("press e to end the session."), "{lines}");
     assert!(!lines.contains("Press Enter to end"), "{lines}");
     app.handle(AppEvent::EndSession).expect("to final");
     assert!(!app.can_go_back());
@@ -315,6 +315,14 @@ fn screen_lines_are_sanitized_with_footers() {
     assert!(!role_lines.contains("Select role"), "{role_lines}");
     assert!(role_lines.contains("e  Expert"), "{role_lines}");
     assert!(role_lines.contains("c  Candidate"), "{role_lines}");
+    assert!(
+        role_lines.contains("judgment, not typing speed"),
+        "{role_lines}"
+    );
+    assert!(
+        role_lines.contains("choose your role to begin."),
+        "{role_lines}"
+    );
     assert!(role_lines.contains("esc quit"));
     assert!(!role_lines.contains("q quit"));
     assert!(!role_lines.contains("Enter advance"), "{role_lines}");
@@ -328,7 +336,7 @@ fn screen_lines_are_sanitized_with_footers() {
     assert!(joined.contains("Meta disclosure"), "{joined}");
     assert!(joined.contains("Meta API key:"), "{joined}");
     assert!(
-        joined.contains("Press Enter to acknowledge the disclosure."),
+        joined.contains("press enter to acknowledge the disclosure."),
         "{joined}"
     );
     assert_eq!(
@@ -349,7 +357,7 @@ fn expert_setup_steps_ack_then_api_key_then_continue() {
     app.set_preflight_passed(true);
     let before = screen_lines(&app).join("\n");
     assert!(before.contains("will be sent"), "{before}");
-    assert!(before.contains("Press Enter to acknowledge"), "{before}");
+    assert!(before.contains("press enter to acknowledge"), "{before}");
     assert_eq!(
         app.handle(AppEvent::PreflightCompleted),
         Err(AppError::DisclosureRequired)
@@ -358,9 +366,9 @@ fn expert_setup_steps_ack_then_api_key_then_continue() {
         .expect("acknowledge");
     let after = screen_lines(&app).join("\n");
     assert!(!after.contains("will be sent"), "{after}");
-    assert!(after.contains("Disclosure: acknowledged."), "{after}");
+    assert!(after.contains("disclosure: acknowledged."), "{after}");
     assert!(
-        after.contains("Press Enter to add your Meta API key."),
+        after.contains("press enter to add your Meta API key."),
         "{after}"
     );
     assert_eq!(

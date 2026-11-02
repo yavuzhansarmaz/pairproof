@@ -29,7 +29,7 @@ fn candidate_role_does_not_enter_expert_flow() {
 fn candidate_sync_error_is_generic() {
     assert_eq!(
         candidate_sync_message(),
-        "Sync problem \u{2014} ask the expert"
+        "sync problem \u{2014} ask the expert"
     );
     let msg = candidate_sync_message();
     assert!(!msg.contains("ssh"));
@@ -44,7 +44,7 @@ fn candidate_sync_error_is_generic() {
 fn candidate_placeholder_state() {
     assert_eq!(
         placeholder_message(),
-        "Candidate: run pairproof --role candidate in a terminal, \
+        "candidate: run pairproof --role candidate in a terminal, \
          then paste the connection string from the expert."
     );
 }
@@ -118,7 +118,7 @@ fn binary_candidate_role_shows_candidate_hint() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
     assert!(stdout.contains("pairproof"));
-    assert!(stdout.contains("Candidate"));
+    assert!(stdout.contains("candidate"));
     assert!(stdout.contains("connection string"));
     assert!(!stdout.contains("Phase 9"));
     assert!(!stdout.contains("not implemented"));

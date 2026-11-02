@@ -297,7 +297,7 @@ fn candidate_runtime_hides_final_until_snapshot_final() {
     assert!(view.final_breakdown.is_some());
     assert!(view.is_terminal());
     let lines = view.lines().join("\n");
-    assert!(lines.contains("Final rating: 7.50"), "{lines}");
+    assert!(lines.contains("final rating: 7.50"), "{lines}");
     assert!(lines.contains("grade 8.0"), "{lines}");
     assert!(lines.contains("Solid approach"), "{lines}");
     let _ = std::fs::remove_dir_all(dir);
@@ -314,7 +314,7 @@ fn candidate_runtime_sync_failure_is_generic() {
     let err = value.connect(&conn).expect_err("sync must fail");
     assert_eq!(err, CandidateRuntimeError::SyncFailed);
     assert_eq!(err.to_string(), candidate_sync_message());
-    assert_eq!(err.to_string(), "Sync problem \u{2014} ask the expert");
+    assert_eq!(err.to_string(), "sync problem \u{2014} ask the expert");
     assert_eq!(value.phase(), CandidateRuntimePhase::Syncing);
     assert_ne!(value.phase(), CandidateRuntimePhase::Connected);
     assert_eq!(
@@ -390,7 +390,7 @@ fn candidate_acks_final_snapshot_once() {
     value.poll_snapshot().expect("poll final"); assert_eq!(value.transport().acks, vec!["s1".to_string()]); assert!(value.final_ack_sent());
     value.poll_snapshot().expect("poll final again"); value.poll_snapshot().expect("poll final third");
     assert_eq!(value.transport().acks.len(), 1, "ack must be written exactly once: {:?}", value.transport().ops);
-    assert!(value.view().lines().join("\n").contains("Final rating: 7.50"));
+    assert!(value.view().lines().join("\n").contains("final rating: 7.50"));
     let _ = std::fs::remove_dir_all(dir);
 }
 

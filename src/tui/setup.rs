@@ -80,9 +80,9 @@ impl SetupController {
 
     /// Returns disclosure text shown before any text is sent to Meta.
     pub fn disclosure_message() -> &'static str {
-        "Your job description and additional notes (each bounded to 50,000 \
+        "your job description and additional notes (each bounded to 50,000 \
          characters) will be sent to the Meta API to propose interview \
-         topics, level, and language. Acknowledge before continuing."
+         topics, level, and language. acknowledge before continuing."
     }
 
     /// Returns the current draft.

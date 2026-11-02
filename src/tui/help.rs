@@ -26,29 +26,29 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
             "  c candidate — join with a connection string",
         ]),
         AppScreen::Preflight => lines.extend([
-            "  Enter follows the step shown on screen:",
+            "  enter follows the step shown on screen:",
             "  acknowledge, add the API key, then continue",
             "  r re-run the environment checks",
             "  b back to the main menu",
         ]),
         AppScreen::Setup => lines.extend([
-            "  Paste into the focused box, Enter moves on",
-            "  Up/Down scroll, drag a box border to resize",
+            "  paste into the focused box, enter moves on",
+            "  up/down scroll, drag a box border to resize",
             "  b back a step, keeping your pasted text",
         ]),
-        AppScreen::Proposal => lines.extend(["  Enter confirm and wait for the candidate"]),
+        AppScreen::Proposal => lines.extend(["  enter confirm and wait for the candidate"]),
         AppScreen::ConnectionWait => lines.extend([
-            "  Waiting for the candidate to connect",
-            "  Share the connection string shown on screen",
+            "  waiting for the candidate to connect",
+            "  share the connection string shown on screen",
         ]),
-        AppScreen::SelectMedium => lines.extend(["  Enter load the medium questions"]),
-        AppScreen::SelectHard => lines.extend(["  Enter load the hard questions"]),
+        AppScreen::SelectMedium => lines.extend(["  enter load the medium questions"]),
+        AppScreen::SelectHard => lines.extend(["  enter load the hard questions"]),
         AppScreen::Monitor => lines.extend([
             "  R reissue a fresh connection string after a disconnect",
             "  e end the session and build the final report",
         ]),
-        AppScreen::Final => lines.extend(["  Enter close"]),
-        AppScreen::Exited => lines.extend(["  Goodbye."]),
+        AppScreen::Final => lines.extend(["  enter close"]),
+        AppScreen::Exited => lines.extend(["  goodbye."]),
     }
     lines.extend([
         "",
@@ -70,15 +70,15 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
 pub fn disclosure_lines() -> Vec<String> {
     clean(vec![
         "Meta disclosure",
-        "Your job description and additional notes (each",
+        "your job description and additional notes (each",
         "up to 50,000 characters) will be sent to the Meta",
         "API to propose interview topics, level, and",
         "language for the session.",
         "",
-        "Nothing is sent before you acknowledge this on",
-        "the Expert Setup screen. The acknowledgement is",
+        "nothing is sent before you acknowledge this on",
+        "the Expert Setup screen. the acknowledgement is",
         "remembered on this machine, so you will not be",
-        "asked again. The raw pastes are deleted when",
+        "asked again. the raw pastes are deleted when",
         "the session ends.",
         "",
         "esc quit, b back to help.",
@@ -95,45 +95,45 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
     let mut lines = vec!["Help"];
     match (screen, focus) {
         (CandidateScreen::Connect, _) => lines.extend([
-            "Paste the connection string from the expert.",
-            "Enter connect",
-            "Backspace delete a character",
+            "paste the connection string from the expert.",
+            "enter connect",
+            "backspace delete a character",
             "esc quit",
         ]),
-        (CandidateScreen::Rules, _) => lines.extend(["Enter accept the rules", "esc quit"]),
-        (CandidateScreen::Waiting, _) => lines.extend(["Waiting for the expert.", "esc quit"]),
+        (CandidateScreen::Rules, _) => lines.extend(["enter accept the rules", "esc quit"]),
+        (CandidateScreen::Waiting, _) => lines.extend(["waiting for the expert.", "esc quit"]),
         (CandidateScreen::Solving, CandidateFocus::Work) => lines.extend([
             "1-4 choose an approach",
             "5 or o describe your own approach",
             "c continue, d redirect, a change approach",
             "t run tests, f finish the question, s skip the question",
             "r request a new question",
-            "Tab switch pane",
+            "tab switch pane",
             "esc quit",
         ]),
         (CandidateScreen::Solving, CandidateFocus::Other) => lines.extend([
-            "Type your own approach.",
-            "Enter confirm the approach",
-            "Backspace delete a character",
-            "Tab next pane",
+            "type your own approach.",
+            "enter confirm the approach",
+            "backspace delete a character",
+            "tab next pane",
         ]),
         (CandidateScreen::Solving, CandidateFocus::Redirect) => lines.extend([
-            "Type a redirect instruction.",
-            "Enter send the redirect",
-            "Backspace delete a character",
-            "Tab next pane",
+            "type a redirect instruction.",
+            "enter send the redirect",
+            "backspace delete a character",
+            "tab next pane",
         ]),
         (CandidateScreen::Solving, CandidateFocus::Chat) => lines.extend([
-            "Type a message.",
-            "Enter send the message",
-            "Backspace delete a character",
-            "Tab next pane",
+            "type a message.",
+            "enter send the message",
+            "backspace delete a character",
+            "tab next pane",
         ]),
-        (CandidateScreen::Final, _) => lines.extend(["Enter close", "esc quit"]),
-        (CandidateScreen::Exited, _) => lines.extend(["Goodbye."]),
+        (CandidateScreen::Final, _) => lines.extend(["enter close", "esc quit"]),
+        (CandidateScreen::Exited, _) => lines.extend(["goodbye."]),
     }
     if !candidate_is_typing(screen, focus) {
-        lines.push("Press b to close help.");
+        lines.push("press b to close help.");
     }
     clean(lines)
 }
@@ -154,16 +154,16 @@ pub fn candidate_is_typing(screen: CandidateScreen, focus: CandidateFocus) -> bo
 pub fn candidate_connect_message(err: &CandidateConnectError) -> &'static str {
     match err {
         CandidateConnectError::Malformed => {
-            "Connection string is malformed; check it and try again."
+            "connection string is malformed; check it and try again."
         }
         CandidateConnectError::Expired => {
-            "Connection string expired; ask the expert for the current string"
+            "connection string expired; ask the expert for the current string"
         }
         CandidateConnectError::Rejected => {
-            "Connection was rejected; check the string and try again."
+            "connection was rejected; check the string and try again."
         }
         CandidateConnectError::Unavailable => {
-            "Connection is not available; ask the expert for help."
+            "connection is not available; ask the expert for help."
         }
     }
 }
@@ -172,14 +172,14 @@ pub fn candidate_connect_message(err: &CandidateConnectError) -> &'static str {
 pub fn candidate_error_message(err: &CandidateRuntimeError) -> &'static str {
     match err {
         CandidateRuntimeError::Auth(inner) => candidate_connect_message(inner),
-        CandidateRuntimeError::SyncFailed => "Sync problem \u{2014} ask the expert",
+        CandidateRuntimeError::SyncFailed => "sync problem \u{2014} ask the expert",
         CandidateRuntimeError::WrongSession | CandidateRuntimeError::Transport => {
-            "Connection problem \u{2014} ask the expert"
+            "connection problem \u{2014} ask the expert"
         }
         CandidateRuntimeError::NotConnected => {
-            "Not connected; paste the connection string and try again."
+            "not connected; paste the connection string and try again."
         }
-        CandidateRuntimeError::Ended => "The session has ended; ask the expert what to do next.",
+        CandidateRuntimeError::Ended => "the session has ended; ask the expert what to do next.",
         CandidateRuntimeError::VersionMismatch { .. } => {
             "PairProof version mismatch; update/restart PairProof and reconnect."
         }
@@ -196,7 +196,7 @@ pub fn expert_error_message(context: &str, detail: &str) -> String {
         );
     }
     format!(
-        "{}: {} Check the session state and try again.",
+        "{}: {} check the session state and try again.",
         sanitize_display(context),
         detail
     )
@@ -204,7 +204,7 @@ pub fn expert_error_message(context: &str, detail: &str) -> String {
 
 /// Formats a countdown that came from the live runtime state.
 pub fn countdown_line(secs: u64) -> String {
-    format!("Expires in {secs}s.")
+    format!("expires in {secs}s.")
 }
 
 /// How the expert loop routes one key while help may be open.

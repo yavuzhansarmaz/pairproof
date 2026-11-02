@@ -285,15 +285,15 @@ pub fn candidate_screen_lines(state: &CandidateRunState) -> Vec<String> {
         CandidateScreen::Solving => {
             let mut lines = match state.app.session() {
                 Some(session) => work_lines(session, &state.work),
-                None => vec!["No active question.".to_string()],
+                None => vec!["no active question.".to_string()],
             };
             let chat_shows_notice =
                 state.focus == CandidateFocus::Chat && state.chat.paste_notice();
             if state.paste_notice && !chat_shows_notice {
-                lines.push("Pasting is blocked here; type instead.".to_string());
+                lines.push("pasting is blocked here; type instead.".to_string());
             }
             lines.extend(state.chat.chat_lines());
-            lines.push("Focus: work/other/redirect/chat (Tab switches)".to_string());
+            lines.push("focus: work/other/redirect/chat (tab switches)".to_string());
             lines
         }
         CandidateScreen::Final => match state.app.session() {

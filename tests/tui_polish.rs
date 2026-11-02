@@ -95,10 +95,10 @@ fn help_screen_lists_role_specific_keybindings() {
     assert!(monitor.contains("R reissue"), "{monitor}");
     assert!(monitor.contains("e end the session"), "{monitor}");
     let wait = expert_help_lines(AppScreen::ConnectionWait).join("\n");
-    assert!(wait.contains("Waiting for the candidate"), "{wait}");
+    assert!(wait.contains("waiting for the candidate"), "{wait}");
     let solving = candidate_help_lines(CandidateScreen::Solving).join("\n");
     assert!(solving.contains("1-4 choose an approach"), "{solving}");
-    assert!(solving.contains("Tab switch pane"), "{solving}");
+    assert!(solving.contains("tab switch pane"), "{solving}");
     assert!(solving.contains("esc quit"), "{solving}");
     assert!(!solving.contains("q quit"), "{solving}");
     assert!(role.contains("pairproof update"), "{role}");
@@ -123,12 +123,12 @@ fn help_screen_lists_role_specific_keybindings() {
         "{disclosure}"
     );
     let connect = candidate_help_lines(CandidateScreen::Connect).join("\n");
-    assert!(connect.contains("Enter connect"), "{connect}");
+    assert!(connect.contains("enter connect"), "{connect}");
     let other =
         candidate_help_lines_for(CandidateScreen::Solving, CandidateFocus::Other).join("\n");
-    assert!(other.contains("Enter confirm the approach"), "{other}");
+    assert!(other.contains("enter confirm the approach"), "{other}");
     let chat = candidate_help_lines_for(CandidateScreen::Solving, CandidateFocus::Chat).join("\n");
-    assert!(chat.contains("Enter send the message"), "{chat}");
+    assert!(chat.contains("enter send the message"), "{chat}");
 }
 
 #[test]
@@ -172,13 +172,13 @@ fn candidate_help_does_not_expose_expert_controls() {
 
 #[test]
 fn error_messages_are_actionable_and_secret_safe() {
-    let expert = expert_error_message("Selection failed", "\u{1b}[31mbroken\u{7}");
-    assert!(expert.contains("Selection failed"), "{expert}");
+    let expert = expert_error_message("selection failed", "\u{1b}[31mbroken\u{7}");
+    assert!(expert.contains("selection failed"), "{expert}");
     assert!(expert.contains("try again"), "{expert}");
     assert!(!expert.contains('\u{1b}'), "{expert}");
     assert!(!expert.contains('\u{7}'), "{expert}");
-    let blank = expert_error_message("End failed", "  ");
-    assert!(blank.contains("End failed"), "{blank}");
+    let blank = expert_error_message("end failed", "  ");
+    assert!(blank.contains("end failed"), "{blank}");
     assert!(blank.contains("try again"), "{blank}");
     for err in [
         CandidateRuntimeError::SyncFailed,
@@ -200,7 +200,7 @@ fn error_messages_are_actionable_and_secret_safe() {
 fn candidate_errors_remain_generic() {
     assert_eq!(
         candidate_error_message(&CandidateRuntimeError::WrongSession),
-        "Connection problem \u{2014} ask the expert"
+        "connection problem \u{2014} ask the expert"
     );
     assert_ne!(
         candidate_error_message(&CandidateRuntimeError::WrongSession),
@@ -208,7 +208,7 @@ fn candidate_errors_remain_generic() {
     );
     assert_eq!(
         candidate_connect_message(&CandidateConnectError::Expired),
-        "Connection string expired; ask the expert for the current string"
+        "connection string expired; ask the expert for the current string"
     );
     let mut messages = vec![
         candidate_error_message(&CandidateRuntimeError::SyncFailed),
@@ -239,7 +239,7 @@ fn candidate_errors_remain_generic() {
     app.push_text("canary-value-123");
     assert!(app.submit_connection(1_000).is_err());
     let lines = app.screen_lines().join("\n");
-    assert!(lines.contains("Connection string is malformed"), "{lines}");
+    assert!(lines.contains("connection string is malformed"), "{lines}");
     assert!(!lines.contains("canary-value-123"), "{lines}");
 }
 
@@ -254,18 +254,18 @@ fn countdown_rendering_tracks_actual_state() {
         T0,
     );
     assert_eq!(gate.countdown_secs(T0), 60);
-    assert_eq!(countdown_line(gate.countdown_secs(T0)), "Expires in 60s.");
+    assert_eq!(countdown_line(gate.countdown_secs(T0)), "expires in 60s.");
     assert_eq!(
         countdown_line(gate.countdown_secs(T0 + 30_000)),
-        "Expires in 30s."
+        "expires in 30s."
     );
     assert_eq!(
         countdown_line(gate.countdown_secs(T0 + 59_000)),
-        "Expires in 1s."
+        "expires in 1s."
     );
     assert_eq!(
         countdown_line(gate.countdown_secs(T0 + 60_000)),
-        "Expires in 0s."
+        "expires in 0s."
     );
 }
 
@@ -283,7 +283,7 @@ fn waiting_state_renders_without_blocking() {
     assert_eq!(app.accept_rules(), Ok(CandidateScreen::Waiting));
     assert_eq!(
         app.waiting_lines(),
-        vec!["Expert is preparing questions".to_string()]
+        vec!["expert is preparing questions".to_string()]
     );
     let lines = candidate_screen_lines(&CandidateRunState::with_parts(
         app,
@@ -291,7 +291,7 @@ fn waiting_state_renders_without_blocking() {
         ChatController::default(),
     ))
     .join("\n");
-    assert!(lines.contains("Expert is preparing questions"), "{lines}");
+    assert!(lines.contains("expert is preparing questions"), "{lines}");
     let mut state = solving_state(begun());
     state.app.attach_session({
         let mut s = begun();
@@ -321,7 +321,7 @@ fn waiting_state_renders_without_blocking() {
     assert_eq!(expert.screen(), AppScreen::ConnectionWait);
     assert!(screen_lines(&expert)
         .join("\n")
-        .contains("Waiting for candidate to connect."));
+        .contains("waiting for candidate to connect."));
 }
 
 #[test]

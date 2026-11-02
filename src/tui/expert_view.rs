@@ -27,20 +27,20 @@ fn footer(app: &ExpertApp) -> String {
         AppScreen::RoleSelect => "e expert, c candidate, esc quit, ? help".to_string(),
         AppScreen::Preflight => {
             if app.api_key_entry {
-                "Backspace delete, esc quit".to_string()
+                "backspace delete, esc quit".to_string()
             } else {
                 "b back, r re-run, esc quit, ? help".to_string()
             }
         }
-        AppScreen::Setup => "Enter continue, b back, esc quit, ? help".to_string(),
-        AppScreen::Proposal => "Enter confirm, b back, esc quit, ? help".to_string(),
+        AppScreen::Setup => "enter continue, b back, esc quit, ? help".to_string(),
+        AppScreen::Proposal => "enter confirm, b back, esc quit, ? help".to_string(),
         AppScreen::ConnectionWait => "esc quit, ? help".to_string(),
-        AppScreen::SelectMedium => "Enter load medium questions, esc quit, ? help".to_string(),
-        AppScreen::SelectHard => "Enter load hard questions, esc quit, ? help".to_string(),
+        AppScreen::SelectMedium => "enter load medium questions, esc quit, ? help".to_string(),
+        AppScreen::SelectHard => "enter load hard questions, esc quit, ? help".to_string(),
         AppScreen::Monitor => {
             "e end the session, R reissue after disconnect, esc quit, ? help".to_string()
         }
-        AppScreen::Final => "Enter close, esc quit".to_string(),
+        AppScreen::Final => "enter close, esc quit".to_string(),
     }
 }
 
@@ -59,23 +59,24 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
     } else {
         match screen {
             S::RoleSelect => lines.extend([
-                "AI-native technical interviews.".into(),
-                "The AI writes the code; candidates are scored".into(),
-                "on how well they direct, check, and correct it.".into(),
+                "interviewing for the AI era.".into(),
+                "the AI writes the code. the candidate directs it.".into(),
+                "every prompt, check, and correction is scored —".into(),
+                "so what shows is judgment, not typing speed.".into(),
                 "".into(),
-                "  e  Expert     Set up and run a live interview".into(),
-                "  c  Candidate  Join with a connection string".into(),
+                "  e  Expert     set up and run a live interview".into(),
+                "  c  Candidate  join a session with a connection string".into(),
                 "".into(),
-                "Choose a role to continue.".into(),
+                "choose your role to begin.".into(),
             ]),
             S::Preflight => {
                 lines.extend([
-                    "Everything PairProof needs on this machine,".into(),
+                    "everything PairProof needs on this machine,".into(),
                     "checked before you invite a candidate.".into(),
                     "".into(),
                 ]);
                 if app.preflight_lines.is_empty() {
-                    lines.push("  Running environment checks...".into());
+                    lines.push("  running environment checks...".into());
                 } else {
                     for check in &app.preflight_lines {
                         lines.push(format!("  {check}"));
@@ -92,11 +93,11 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                     ));
                 }
                 if app.disclosure_acknowledged {
-                    lines.push("  Disclosure: acknowledged.".into());
+                    lines.push("  disclosure: acknowledged.".into());
                 } else {
                     lines.extend([
                         "Meta disclosure".into(),
-                        "  Your job description and additional notes".into(),
+                        "  your job description and additional notes".into(),
                         "  (each up to 50,000 characters) will be sent".into(),
                         "  to the Meta API to propose interview topics,".into(),
                         "  level, and language.".into(),
@@ -104,55 +105,55 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                 }
                 lines.push("".into());
                 lines.push(if app.api_key_entry {
-                    "Press Enter to save the key.".into()
+                    "press enter to save the key.".into()
                 } else if !app.disclosure_acknowledged {
-                    "Press Enter to acknowledge the disclosure.".into()
+                    "press enter to acknowledge the disclosure.".into()
                 } else if !app.api_key_ready {
-                    "Press Enter to add your Meta API key.".into()
+                    "press enter to add your Meta API key.".into()
                 } else if !app.preflight_passed {
-                    "Fix failing checks, then press r to re-run them.".into()
+                    "fix failing checks, then press r to re-run them.".into()
                 } else {
-                    "Ready. Press Enter to continue.".into()
+                    "ready. press enter to continue.".into()
                 });
             }
             S::Setup => {
                 lines.extend([
-                    "Paste the job description first.".into(),
-                    "Additional notes are optional.".into(),
+                    "paste the job description first.".into(),
+                    "additional notes are optional.".into(),
                     "".into(),
                 ]);
                 lines.push(if app.has_proposal {
-                    "Proposal ready. Press Enter to review it.".into()
+                    "proposal ready. press enter to review it.".into()
                 } else {
-                    "Waiting for the job description paste.".into()
+                    "waiting for the job description paste.".into()
                 });
             }
             S::Proposal => {
-                lines.push("Review the proposal. Press Enter to wait for the candidate.".into())
+                lines.push("review the proposal. press enter to wait for the candidate.".into())
             }
             S::ConnectionWait => lines.push(if app.connected {
-                "Candidate connected.".into()
+                "candidate connected.".into()
             } else {
-                "Waiting for candidate to connect.".into()
+                "waiting for candidate to connect.".into()
             }),
-            S::SelectMedium => lines.push("Press Enter to load 3 medium questions.".into()),
+            S::SelectMedium => lines.push("press enter to load 3 medium questions.".into()),
             S::SelectHard => {
-                lines.push("Press Enter to load 2 hard questions and open the monitor.".into())
+                lines.push("press enter to load 2 hard questions and open the monitor.".into())
             }
             S::Monitor => {
                 lines.push(if app.disconnected {
-                    "Candidate disconnected. Session is still live.".into()
+                    "candidate disconnected. session is still live.".into()
                 } else {
-                    "Session live.".into()
+                    "session live.".into()
                 });
-                lines.push("Press e to end the session.".into());
+                lines.push("press e to end the session.".into());
             }
-            S::Final => lines.push("Session ended.".into()),
-            S::Exited => lines.push("Goodbye.".into()),
+            S::Final => lines.push("session ended.".into()),
+            S::Exited => lines.push("goodbye.".into()),
         }
     }
     if let Some(message) = app.status_message() {
-        lines.push(format!("Status: {}", sanitize_display(message)));
+        lines.push(format!("status: {}", sanitize_display(message)));
     }
     lines.push(footer(app));
     lines.iter().map(|line| sanitize_display(line)).collect()

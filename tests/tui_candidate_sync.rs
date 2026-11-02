@@ -51,7 +51,7 @@ async fn candidate_sync_uses_existing_lifecycle_api() {
     let ensured = candidate_ensure_sync("bad id!;rm", "relative/path", &endpoint, &user).await;
     let err = ensured.expect_err("invalid ensure must fail");
     assert_eq!(err.to_string(), candidate_sync_message());
-    assert_eq!(err.to_string(), "Sync problem \u{2014} ask the expert");
+    assert_eq!(err.to_string(), "sync problem \u{2014} ask the expert");
     let status = candidate_sync_status("bad/id").await;
     let err = status.expect_err("invalid status id must fail");
     assert_eq!(err.to_string(), candidate_sync_message());
@@ -67,13 +67,18 @@ fn candidate_sync_status_reflects_actual_result() {
     assert_eq!(SyncPhase::Active.label(), "Sync: active");
     let view = sync_view(Some(&active));
     assert_eq!(view.phase, SyncPhase::Active);
-    assert_eq!(view.lines, vec!["Sync: active".to_string()]);
+    assert_eq!(view.lines, vec!["sync: active".to_string()]);
     let paused = info("pairproof-sync-s1", "Watching", true, 0);
     assert_eq!(phase_for(Some(&paused)), SyncPhase::Paused);
     assert_eq!(SyncPhase::Paused.label(), "Sync: paused");
-    assert_eq!(sync_lines(Some(&paused)), vec!["Sync: paused".to_string()]);
-    assert_eq!(sync_lines(None), vec!["Sync: not started".to_string()]);
-    assert_eq!(SyncPhase::Problem.label(), candidate_sync_message());
+    assert_eq!(sync_lines(Some(&paused)), vec!["sync: paused".to_string()]);
+    assert_eq!(sync_lines(None), vec!["sync: not started".to_string()]);
+    // The sync-gate label stays canonical; the candidate screen
+    // message is its lowercase rendering of the same text.
+    assert_eq!(
+        SyncPhase::Problem.label(),
+        "Sync problem \u{2014} ask the expert"
+    );
 }
 
 #[test]
@@ -86,7 +91,7 @@ fn candidate_sync_failure_is_generic() {
     let mapped = map_sync_error(&raw);
     assert_eq!(mapped, CandidateSyncError::Failed);
     let shown = mapped.to_string();
-    assert_eq!(shown, "Sync problem \u{2014} ask the expert");
+    assert_eq!(shown, "sync problem \u{2014} ask the expert");
     for secret in [
         "ssh",
         "root@",
@@ -103,7 +108,7 @@ fn candidate_sync_failure_is_generic() {
 fn candidate_sync_never_renders_paths_or_ssh_target() {
     let secret = info("pairproof-sync-secret", "Watching", false, 0);
     let lines = sync_lines(Some(&secret));
-    assert_eq!(lines, vec!["Sync: active".to_string()]);
+    assert_eq!(lines, vec!["sync: active".to_string()]);
     let joined = lines.join("\n");
     for needle in ["pairproof-sync-secret", "Watching", "ssh", "/", "secret"] {
         assert!(!joined.contains(needle), "rendered {needle}");
@@ -123,7 +128,7 @@ fn candidate_sync_conflict_is_not_reported_as_clean() {
     );
     assert_eq!(
         sync_lines(Some(&conflicted)),
-        vec![phase.label().to_string()]
+        vec!["sync: conflict needs attention \u{2014} ask the expert".to_string()]
     );
 }
 
@@ -232,7 +237,7 @@ fn candidate_sync_missing_backend_is_generic() {
         CandidateSyncError::Unavailable
     );
     let shown = CandidateSyncError::Unavailable.to_string();
-    assert_eq!(shown, "Sync problem \u{2014} ask the expert");
+    assert_eq!(shown, "sync problem \u{2014} ask the expert");
     assert_eq!(shown, candidate_sync_message());
     assert_eq!(
         CandidateSyncError::Failed.to_string(),

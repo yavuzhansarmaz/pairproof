@@ -269,11 +269,11 @@ fn waiting_screen_uses_real_waiting_for_expert_state() {
     assert!(app
         .waiting_lines()
         .iter()
-        .any(|line| line == "Expert is preparing questions"));
+        .any(|line| line == "expert is preparing questions"));
     assert!(app
         .screen_lines()
         .iter()
-        .any(|line| line == "Expert is preparing questions"));
+        .any(|line| line == "expert is preparing questions"));
     assert!(!app.can_solve());
 }
 
@@ -312,7 +312,7 @@ fn candidate_input_editing_and_quit_from_any_screen() {
     assert_eq!(app.input_len(), 3);
     assert_eq!(
         app.connect_line(),
-        "Connection string: \u{2022}\u{2022}\u{2022} (3 characters)"
+        "connection string: \u{2022}\u{2022}\u{2022} (3 characters)"
     );
     app.backspace();
     assert_eq!(app.input_len(), 2);

@@ -24,11 +24,11 @@ impl WorkPhase {
     /// Returns the candidate-safe phase line for this phase.
     pub fn label(self) -> &'static str {
         match self {
-            WorkPhase::Idle => "Phase: waiting for an approach choice",
-            WorkPhase::CodingReady => "Phase: code ready",
-            WorkPhase::RunnerUnavailable => "Phase: coding step not available yet",
+            WorkPhase::Idle => "phase: waiting for an approach choice",
+            WorkPhase::CodingReady => "phase: code ready",
+            WorkPhase::RunnerUnavailable => "phase: coding step not available yet",
             WorkPhase::RunnerFailed => {
-                "Phase: The coding step failed; ask the expert if it persists."
+                "phase: the coding step failed; ask the expert if it persists."
             }
         }
     }
@@ -41,7 +41,7 @@ pub enum CandidateWorkError {
     #[error(transparent)]
     Core(#[from] CoreError),
     /// No approach set has been provided for this question.
-    #[error("Approaches are not available yet.")]
+    #[error("approaches are not available yet.")]
     NoApproaches,
     /// Preset index is outside the available approach set.
     #[error("invalid approach preset {0}")]
@@ -241,41 +241,41 @@ pub fn work_view(session: &Session, work: &CandidateWork) -> WorkView {
 pub fn work_lines(session: &Session, work: &CandidateWork) -> Vec<String> {
     let view = work_view(session, work);
     let Some(label) = view.question_label.clone() else {
-        return vec!["No active question.".to_string()];
+        return vec!["no active question.".to_string()];
     };
     let mut lines = vec![label];
     match &view.statement {
         Some(statement) => lines.push(statement.clone()),
-        None => lines.push("Statement is not available yet.".to_string()),
+        None => lines.push("statement is not available yet.".to_string()),
     }
     if view.approaches_available {
         for (index, option) in view.approaches.iter().enumerate() {
             lines.push(format!("{}: {} - {}", index, option.title, option.summary));
         }
-        lines.push("Other: describe your own approach".to_string());
+        lines.push("other: describe your own approach".to_string());
     } else {
-        lines.push("Approaches are not available yet.".to_string());
+        lines.push("approaches are not available yet.".to_string());
     }
     lines.push(format!(
-        "Selected approach: {}",
+        "selected approach: {}",
         view.selected_approach.as_deref().unwrap_or("none")
     ));
     lines.push(format!(
-        "Latest test: {}",
+        "latest test: {}",
         view.latest_test.as_deref().unwrap_or("no test run yet")
     ));
     if view.tests_unavailable {
-        lines.push("Tests are not available yet.".to_string());
+        lines.push("tests are not available yet.".to_string());
     }
     if view.tests_failed {
-        lines.push("Tests could not be run; ask the expert if it persists.".to_string());
+        lines.push("tests could not be run; ask the expert if it persists.".to_string());
     }
     if view.re_question_pending {
-        lines.push("Re-question requested; waiting for the expert.".to_string());
+        lines.push("re-question requested; waiting for the expert.".to_string());
     } else if view.can_request_requestion {
-        lines.push("Re-question: available".to_string());
+        lines.push("re-question: available".to_string());
     } else {
-        lines.push("Re-question: not available".to_string());
+        lines.push("re-question: not available".to_string());
     }
     lines.push(view.phase_line.clone());
     lines.iter().map(|line| sanitize_display(line)).collect()

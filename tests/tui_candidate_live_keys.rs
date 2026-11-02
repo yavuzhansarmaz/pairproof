@@ -106,7 +106,7 @@ fn empty_chat_enter_sends_nothing() {
     assert!(
         status
             .as_ref()
-            .is_some_and(|s| s.contains("Type a message")),
+            .is_some_and(|s| s.contains("type a message")),
         "{status:?}"
     );
 }

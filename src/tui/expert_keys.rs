@@ -24,10 +24,10 @@ pub(crate) fn handle_paste(
     match pastes.apply_focused_paste(text) {
         Ok(()) => app.set_status_message(match pastes.focus() {
             ExpertSetupFocus::JobDescription => {
-                "Job description pasted. Press Enter to continue."
+                "job description pasted. press enter to continue."
             }
             ExpertSetupFocus::AdditionalNotes => {
-                "Additional notes pasted. Press Enter to review the proposal."
+                "additional notes pasted. press enter to review the proposal."
             }
         }),
         Err(reason) => app.set_status_message(reason),
@@ -91,8 +91,8 @@ pub(crate) fn handle_key(
                         app.clear_status_message();
                         let _ = app.handle(AppEvent::EndSession);
                     }
-                    Some(Err(err)) => set_error(app, "End failed", &err.to_string()),
-                    None => set_error(app, "End failed", "runtime unavailable"),
+                    Some(Err(err)) => set_error(app, "end failed", &err.to_string()),
+                    None => set_error(app, "end failed", "runtime unavailable"),
                 }
             }
         }
@@ -100,10 +100,10 @@ pub(crate) fn handle_key(
             if let Some(active) = runtime.as_mut() {
                 match block_on(tokio_rt, active.reissue(now_ms())) {
                     Some(Ok(fresh)) => {
-                        app.set_status_message(format!("Fresh string ready: {}", fresh.encode()))
+                        app.set_status_message(format!("fresh string ready: {}", fresh.encode()))
                     }
-                    Some(Err(err)) => set_error(app, "Reissue failed", &err.to_string()),
-                    None => set_error(app, "Reissue failed", "runtime unavailable"),
+                    Some(Err(err)) => set_error(app, "reissue failed", &err.to_string()),
+                    None => set_error(app, "reissue failed", "runtime unavailable"),
                 }
             }
         }
@@ -150,10 +150,10 @@ fn advance(
                 if pastes.confirm_job_description() {
                     app.set_has_proposal(true);
                     app.set_status_message(
-                        "Additional notes are optional. Paste notes or press Enter to skip.",
+                        "additional notes are optional. paste notes or press enter to skip.",
                     );
                 } else {
-                    app.set_status_message("Paste the job description first.");
+                    app.set_status_message("paste the job description first.");
                 }
             }
             ExpertSetupFocus::AdditionalNotes => {
@@ -168,11 +168,11 @@ fn advance(
                 match block_on(tokio_rt, build) {
                     Some(Ok(built)) => *runtime = Some(built),
                     Some(Err(err)) => {
-                        set_error(app, "Session setup failed", &err.to_string());
+                        set_error(app, "session setup failed", &err.to_string());
                         return;
                     }
                     None => {
-                        set_error(app, "Session setup failed", "runtime unavailable");
+                        set_error(app, "session setup failed", "runtime unavailable");
                         return;
                     }
                 }
@@ -195,8 +195,8 @@ fn advance(
                         }
                         let _ = app.handle(AppEvent::MediumSelected);
                     }
-                    Some(Err(err)) => set_error(app, "Selection failed", &err.to_string()),
-                    None => set_error(app, "Selection failed", "runtime unavailable"),
+                    Some(Err(err)) => set_error(app, "selection failed", &err.to_string()),
+                    None => set_error(app, "selection failed", "runtime unavailable"),
                 }
             }
         }
@@ -213,8 +213,8 @@ fn advance(
                         app.set_expert_selection_done(true);
                         let _ = app.handle(AppEvent::ExpertSelectionDone);
                     }
-                    Some(Err(err)) => set_error(app, "Selection failed", &err.to_string()),
-                    None => set_error(app, "Selection failed", "runtime unavailable"),
+                    Some(Err(err)) => set_error(app, "selection failed", &err.to_string()),
+                    None => set_error(app, "selection failed", "runtime unavailable"),
                 }
             }
         }

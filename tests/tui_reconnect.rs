@@ -303,7 +303,7 @@ fn candidate_marks_connection_lost_on_transport_failure() {
     value.transport_mut().read_err = Some(CandidateRuntimeError::Transport);
     let err = value.poll_snapshot_at(T0 + 6_000).expect_err("transport down");
     assert_eq!(err, CandidateRuntimeError::Transport);
-    assert_eq!(err.to_string(), "Connection problem \u{2014} ask the expert");
+    assert_eq!(err.to_string(), "connection problem \u{2014} ask the expert");
     assert!(value.connection_lost());
     assert_eq!(value.status_text().as_deref(), Some(CONNECTION_LOST));
     assert_eq!(value.transport().heartbeats.len(), 2, "heartbeat still attempted while failing");

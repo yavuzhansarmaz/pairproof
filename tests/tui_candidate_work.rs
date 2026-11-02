@@ -114,7 +114,7 @@ fn candidate_approach_list_preserves_four_plus_other() {
     let mut work = CandidateWork::new();
     let missing = work_lines(&session, &work).join("\n");
     assert!(
-        missing.contains("Approaches are not available yet."),
+        missing.contains("approaches are not available yet."),
         "{missing}"
     );
     work.set_approaches(approach_set());
@@ -131,7 +131,7 @@ fn candidate_approach_list_preserves_four_plus_other() {
     ] {
         assert!(lines.contains(title), "{lines}");
     }
-    assert!(lines.contains("Other:"), "{lines}");
+    assert!(lines.contains("other:"), "{lines}");
     for banned in [
         "Best", "Workable", "Weak", "score", "rating", "1111", "2222", "3333", "4444",
     ] {
@@ -217,7 +217,7 @@ fn candidate_select_approach_uses_core_contract() {
     );
     assert_eq!(input.language, Language::Python);
     let lines = work_lines(&session, &work).join("\n");
-    assert!(lines.contains("Selected approach: preset 1"), "{lines}");
+    assert!(lines.contains("selected approach: preset 1"), "{lines}");
     assert!(!lines.contains("2222"), "{lines}");
     let mut unavailable_session = started();
     let mut unavailable_work = CandidateWork::new();
@@ -313,7 +313,7 @@ fn candidate_illegal_actions_return_typed_error() {
     );
     let no_active_lines = work_lines(&session, &work).join("\n");
     assert!(
-        no_active_lines.contains("No active question."),
+        no_active_lines.contains("no active question."),
         "{no_active_lines}"
     );
 }

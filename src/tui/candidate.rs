@@ -9,12 +9,12 @@ use crate::tui::shared::sanitize_display;
 
 /// Returns the one-line hint shown when no terminal is available.
 pub fn placeholder_message() -> &'static str {
-    "Candidate: run pairproof --role candidate in a terminal, then paste the connection string from the expert."
+    "candidate: run pairproof --role candidate in a terminal, then paste the connection string from the expert."
 }
 
 /// Returns the generic candidate-safe sync message.
 pub fn candidate_sync_message() -> &'static str {
-    "Sync problem \u{2014} ask the expert"
+    "sync problem \u{2014} ask the expert"
 }
 
 /// Screen shown by the candidate flow.
@@ -33,16 +33,16 @@ pub enum CandidateScreen {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CandidateConnectError {
     /// The pasted string could not be parsed.
-    #[error("Connection string is malformed; check it and try again.")]
+    #[error("connection string is malformed; check it and try again.")]
     Malformed,
     /// The pasted string is past its expiry time.
-    #[error("Connection string expired; ask the expert for the current string")]
+    #[error("connection string expired; ask the expert for the current string")]
     Expired,
     /// The verifier rejected the pasted string.
-    #[error("Connection was rejected; check the string and try again.")]
+    #[error("connection was rejected; check the string and try again.")]
     Rejected,
     /// No verifier is wired up yet in this slice.
-    #[error("Connection verification is not available yet.")]
+    #[error("connection verification is not available yet.")]
     Unavailable,
 }
 
@@ -228,10 +228,10 @@ impl CandidateApp {
     /// Returns the masked connect line; raw input is never included.
     pub fn connect_line(&self) -> String {
         if self.input.is_empty() {
-            "Connection string: (empty)".to_string()
+            "connection string: (empty)".to_string()
         } else {
             format!(
-                "Connection string: {} ({} characters)",
+                "connection string: {} ({} characters)",
                 "\u{2022}".repeat(self.input_len()),
                 self.input_len()
             )
@@ -275,9 +275,9 @@ impl CandidateApp {
     /// Returns the rules lines, including workspace and paste notes.
     pub fn rules_lines(&self) -> Vec<String> {
         [
-            "Work in a single workspace only; it is the only workspace.",
-            "You need no external resources for this session.",
-            "Please write your own work: bulk pastes are flagged.",
+            "work in a single workspace only; it is the only workspace.",
+            "you need no external resources for this session.",
+            "please write your own work: bulk pastes are flagged.",
         ]
         .iter()
         .map(|line| sanitize_display(line))
@@ -314,9 +314,9 @@ impl CandidateApp {
     /// Returns the waiting lines for the current session status.
     pub fn waiting_lines(&self) -> Vec<String> {
         if self.session_status() == Some(SessionStatus::WaitingForExpert) {
-            vec!["Expert is preparing questions".to_string()]
+            vec!["expert is preparing questions".to_string()]
         } else {
-            vec!["Waiting for the expert.".to_string()]
+            vec!["waiting for the expert.".to_string()]
         }
     }
 
@@ -326,19 +326,19 @@ impl CandidateApp {
             CandidateScreen::Connect => {
                 let mut lines = vec![
                     "Candidate connection".to_string(),
-                    "Paste the connection string from the expert.".to_string(),
+                    "paste the connection string from the expert.".to_string(),
                     self.connect_line(),
                 ];
                 if let Some(error) = self.last_error {
-                    lines.push(format!("Error: {}", candidate_connect_message(&error)));
+                    lines.push(format!("error: {}", candidate_connect_message(&error)));
                 }
-                lines.push("Enter connect, esc quit".to_string());
+                lines.push("enter connect, esc quit".to_string());
                 lines
             }
             CandidateScreen::Rules => {
                 let mut lines = vec!["Candidate rules".to_string()];
                 lines.extend(self.rules_lines());
-                lines.push("Enter accept rules, esc quit".to_string());
+                lines.push("enter accept rules, esc quit".to_string());
                 lines
             }
             CandidateScreen::Waiting => {
@@ -349,16 +349,16 @@ impl CandidateApp {
             }
             CandidateScreen::Solving => vec![
                 "Candidate session".to_string(),
-                "Session in progress.".to_string(),
+                "session in progress.".to_string(),
                 "esc quit".to_string(),
             ],
             CandidateScreen::Final => vec![
                 "Candidate session".to_string(),
-                "Session ended.".to_string(),
+                "session ended.".to_string(),
                 "esc quit".to_string(),
             ],
             CandidateScreen::Exited => {
-                vec!["Exited".to_string(), "Goodbye.".to_string()]
+                vec!["Exited".to_string(), "goodbye.".to_string()]
             }
         };
         lines.iter().map(|line| sanitize_display(line)).collect()

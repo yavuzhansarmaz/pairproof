@@ -167,7 +167,7 @@ async fn expert_renders_active_recovery_state() {
     let joined = lines.join("\n");
     assert_eq!(lines.len(), 2, "{lines:?}");
     assert!(lines[0].contains("Meta"), "{joined}");
-    assert_eq!(lines[0], "Service temporarily unavailable: Meta");
+    assert_eq!(lines[0], "service temporarily unavailable: Meta");
     assert!(lines[1].contains("seconds remaining."), "{joined}");
     assert!(!joined.contains("ms remaining"), "{joined}");
     assert!(!joined.contains("attempt"), "{joined}");
@@ -188,14 +188,14 @@ fn candidate_renders_active_recovery_state() {
     let lines = view.lines();
     let joined = lines.join("\n");
     assert!(
-        joined.contains("Technical problem - service temporarily unavailable."),
+        joined.contains("technical problem - service temporarily unavailable."),
         "{joined}"
     );
     assert!(
-        joined.contains("Retrying... about 45 seconds remaining."),
+        joined.contains("retrying... about 45 seconds remaining."),
         "{joined}"
     );
-    assert!(joined.contains("Your progress is preserved."), "{joined}");
+    assert!(joined.contains("your progress is preserved."), "{joined}");
     assert!(!joined.contains("ms remaining"), "{joined}");
 }
 
@@ -221,7 +221,7 @@ async fn both_roles_render_authoritative_countdown() {
     let lines = runtime.recovery_lines();
     let joined = lines.join("\n");
     assert_eq!(
-        lines[0], "Service temporarily unavailable: LeetCode",
+        lines[0], "service temporarily unavailable: LeetCode",
         "{joined}"
     );
     assert!(joined.contains("about 62 seconds remaining."), "{joined}");
@@ -249,7 +249,7 @@ fn candidate_recovery_ui_hides_internal_diagnostics() {
         assert!(!joined.contains(banned), "{banned} leaked: {joined}");
     }
     assert!(
-        joined.contains("Technical problem - service temporarily unavailable."),
+        joined.contains("technical problem - service temporarily unavailable."),
         "{joined}"
     );
     assert!(joined.contains("about 5 seconds remaining."), "{joined}");
@@ -287,7 +287,7 @@ async fn recovery_success_restores_normal_screen() {
     // Candidate normal screen: no recovery lines.
     let view = candidate_view(None);
     let joined = view.lines().join("\n");
-    assert!(!joined.contains("Technical problem"), "{joined}");
+    assert!(!joined.contains("technical problem"), "{joined}");
     assert!(!joined.contains("Retrying"), "{joined}");
     assert!(joined.contains("Two Sum"), "{joined}");
 }
@@ -318,8 +318,8 @@ async fn recovery_timeout_renders_technical_failure() {
     assert_eq!(
         runtime.recovery_lines(),
         vec![
-            "Service recovery failed.".to_string(),
-            "Session ended as a technical failure.".to_string()
+            "service recovery failed.".to_string(),
+            "session ended as a technical failure.".to_string()
         ]
     );
     // Candidate technical-failure screen.
@@ -327,11 +327,11 @@ async fn recovery_timeout_renders_technical_failure() {
     view.phase = "TechnicalFailure".to_string();
     let joined = view.lines().join("\n");
     assert!(
-        joined.contains("The session ended as a technical failure."),
+        joined.contains("the session ended as a technical failure."),
         "{joined}"
     );
     assert!(
-        joined.contains("No evaluation was produced; the interview can be rescheduled."),
+        joined.contains("no evaluation was produced; the interview can be rescheduled."),
         "{joined}"
     );
     assert!(!joined.contains("Meta"), "{joined}");
@@ -374,14 +374,14 @@ fn recovery_ui_preserves_existing_candidate_progress() {
         "{joined}"
     );
     assert!(joined.contains("Hash map"), "{joined}");
-    assert!(joined.contains("Selected approach: preset 0"), "{joined}");
+    assert!(joined.contains("selected approach: preset 0"), "{joined}");
     assert!(
-        joined.contains("Technical problem - service temporarily unavailable."),
+        joined.contains("technical problem - service temporarily unavailable."),
         "{joined}"
     );
     assert!(
-        joined.contains("Retrying... about 30 seconds remaining."),
+        joined.contains("retrying... about 30 seconds remaining."),
         "{joined}"
     );
-    assert!(joined.contains("Your progress is preserved."), "{joined}");
+    assert!(joined.contains("your progress is preserved."), "{joined}");
 }

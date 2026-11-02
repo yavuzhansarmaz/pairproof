@@ -245,7 +245,7 @@ fn request_tests_shows_only_real_test_outcome() {
     let view = work_view(&unavailable_session, &unavailable_work);
     assert!(view.tests_unavailable);
     let lines = work_lines(&unavailable_session, &unavailable_work).join("\n");
-    assert!(lines.contains("Tests are not available yet"), "{lines}");
+    assert!(lines.contains("tests are not available yet"), "{lines}");
     assert!(lines.contains("no test run yet"), "{lines}");
     let mut failed_session = started();
     let mut failed_work = CandidateWork::new();
@@ -321,7 +321,7 @@ fn candidate_cannot_resolve_expert_only_requestion() {
     assert!(!work.can_request_requestion(&session));
     let lines = work_lines(&session, &work).join("\n");
     assert!(
-        lines.contains("Re-question requested; waiting for the expert."),
+        lines.contains("re-question requested; waiting for the expert."),
         "{lines}"
     );
     let mut runner = OkCodingRunner::default();

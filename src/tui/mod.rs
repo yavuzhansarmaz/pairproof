@@ -20,6 +20,7 @@ pub mod help;
 pub mod monitor;
 pub mod render;
 pub mod setup;
+pub mod setup_panel;
 pub mod shared;
 pub mod viewport;
 
@@ -128,9 +129,9 @@ fn interactive_loop(
                 app::AppScreen::Monitor => {
                     lines.extend(monitor::render_monitor_lines(&active.monitor_view(now)));
                     lines.extend(active.recovery_lines());
-                    if let Some(fresh) = active.reissue_string() { lines.push(format!("Reissue: {}", fresh.encode())); lines.push(help::countdown_line(active.countdown_secs(now))); }
-                    if active.is_disconnected() { lines.push("Press R to reissue a fresh connection string.".to_string()); }
-                    lines.push("Press e to end the session.".to_string());
+                    if let Some(fresh) = active.reissue_string() { lines.push(format!("reissue: {}", fresh.encode())); lines.push(help::countdown_line(active.countdown_secs(now))); }
+                    if active.is_disconnected() { lines.push("press R to reissue a fresh connection string.".to_string()); }
+                    lines.push("press e to end the session.".to_string());
                 }
                 _ => {}
             }

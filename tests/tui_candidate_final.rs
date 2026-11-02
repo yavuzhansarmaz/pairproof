@@ -130,14 +130,14 @@ fn candidate_final_view_uses_real_final_breakdown() {
     let joined = lines.join("\n");
     assert!(joined.contains("Final breakdown"), "{joined}");
     assert!(
-        joined.contains(&format!("Final rating: {:.2}", expected.rating)),
+        joined.contains(&format!("final rating: {:.2}", expected.rating)),
         "{joined}"
     );
     assert!(joined.contains("grade 9.0"), "{joined}");
-    assert!(joined.contains("Solved:"), "{joined}");
-    assert!(joined.contains("Finished:"), "{joined}");
-    assert!(joined.contains("Skipped:"), "{joined}");
-    assert!(joined.contains("Paste flags:"), "{joined}");
+    assert!(joined.contains("solved:"), "{joined}");
+    assert!(joined.contains("finished:"), "{joined}");
+    assert!(joined.contains("skipped:"), "{joined}");
+    assert!(joined.contains("paste flags:"), "{joined}");
 }
 
 #[test]
@@ -171,8 +171,8 @@ fn candidate_final_view_does_not_fabricate_report_or_artifacts() {
     assert_eq!(
         lines,
         vec![
-            "The session ended as a technical failure.".to_string(),
-            "No evaluation was produced; the interview can be rescheduled.".to_string(),
+            "the session ended as a technical failure.".to_string(),
+            "no evaluation was produced; the interview can be rescheduled.".to_string(),
         ]
     );
     let joined = lines.join("\n");
