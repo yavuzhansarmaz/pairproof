@@ -54,8 +54,8 @@ pub struct PasteFlag {
 // sync-observed bulk inserts are candidate-side edits. A large AI-sized
 // rewrite above threshold is ALSO a candidate: two snapshots cannot tell who
 // authored the bytes, so the detector reports size, never authorship.
-// Scoring counts only CONFIRMED flags (structure.md section 13, "per
-// confirmed bulk paste"); confirmation is expert judgment in Phase 8+.
+// Scoring counts only CONFIRMED flags ("per confirmed bulk paste");
+// confirmation is expert judgment in Phase 8+.
 // Limits: same-size rewrites are invisible (byte delta zero), a delete-then-
 // paste within one poll interval nets out, and bytes are counted, not chars.
 //
