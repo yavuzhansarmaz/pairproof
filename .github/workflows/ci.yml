@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      # Three hermetic orchestrator_sync tests shell out to the real
+      # mutagen binary (absent-session paths); install it so they pass.
+      - name: Install Mutagen
+        run: |
+          curl -fsSL https://github.com/mutagen-io/mutagen/releases/download/v0.18.1/mutagen_linux_amd64_v0.18.1.tar.gz | tar -xz
+          sudo install -m 0755 mutagen /usr/local/bin/mutagen
+          sudo install -m 0644 mutagen-agents.tar.gz /usr/local/bin/mutagen-agents.tar.gz
+          mutagen version
+      - run: cargo test
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+
+  # Manual only: skipped on push/pull_request via the job-level `if`.
+  # Requires the MODEL_API_KEY repository secret plus Docker, Mutagen,
+  # and network access; a stock GitHub runner without those will fail.
+  # Ordinary CI (`check` above) stays hermetic and does not need them.
+  live:
+    name: Live (manual only, needs secrets/Docker/Mutagen/network)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install Mutagen
+        run: |
+          curl -fsSL https://github.com/mutagen-io/mutagen/releases/download/v0.18.1/mutagen_linux_amd64_v0.18.1.tar.gz | tar -xz
+          sudo install -m 0755 mutagen /usr/local/bin/mutagen
+          sudo install -m 0644 mutagen-agents.tar.gz /usr/local/bin/mutagen-agents.tar.gz
+          mutagen version
+      - name: Check live prerequisites
+        env:
+          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+        run: |
+          set -eu
+          if [ -z "${MODEL_API_KEY:-}" ]; then
+            echo "::error::MODEL_API_KEY repository secret is not set. Add it under Settings > Secrets and variables > Actions, then re-run."
+            exit 1
+          fi
+          echo "MODEL_API_KEY secret: present (value not shown)"
+          docker version
+          docker info --format 'Docker server: {{.ServerVersion}}'
+          command -v mutagen
+          mutagen version
+          command -v ssh
+          command -v ssh-keyscan
+      - run: cargo test -- --ignored
+        env:
+          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}

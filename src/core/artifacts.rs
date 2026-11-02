@@ -210,18 +210,13 @@ impl ArtifactLayout {
     }
 }
 
-/// Validates a session id as a single safe path component.
+/// Validates a session id with the canonical rule in
+/// `crate::core::types::validate_session_id`, mapped to `ArtifactError`.
 fn validate_session_id(session_id: &str) -> Result<(), ArtifactError> {
-    let invalid = session_id.is_empty()
-        || session_id == "."
-        || session_id == ".."
-        || !session_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-    if invalid {
-        Err(ArtifactError::InvalidSessionId(session_id.to_string()))
-    } else {
+    if crate::core::types::validate_session_id(session_id) {
         Ok(())
+    } else {
+        Err(ArtifactError::InvalidSessionId(session_id.to_string()))
     }
 }
 

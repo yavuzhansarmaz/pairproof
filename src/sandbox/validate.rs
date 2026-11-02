@@ -8,16 +8,10 @@ pub const WORKSPACE_ROOT: &str = "/workspace";
 /// Maximum size of a single workspace file.
 pub const MAX_FILE_BYTES: usize = 1024 * 1024;
 
-/// Validates `[A-Za-z0-9_-]{1,40}`, rejecting leading `-` and `net-` (network-name collision).
+/// Delegates to the canonical session-id rule in
+/// `crate::core::types::validate_session_id`, mapped to `SandboxError`.
 pub fn validate_session_id(raw: &str) -> Result<(), SandboxError> {
-    let ok = !raw.is_empty()
-        && !raw.starts_with('-')
-        && !raw.starts_with("net-")
-        && raw.len() <= 40
-        && raw
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
-    if ok {
+    if crate::core::types::validate_session_id(raw) {
         Ok(())
     } else {
         Err(SandboxError::InvalidSessionId(raw.to_string()))

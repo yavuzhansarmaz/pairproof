@@ -1,14 +1,12 @@
-//! Candidate run state, key and paste dispatch, and the TTY loop.
+//! Candidate run state, key and paste dispatch, and the terminal guard.
 
 use std::collections::BTreeMap;
-use std::error::Error;
-use std::time::Duration;
 
-use crossterm::event::{Event, KeyCode as K, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode as K, KeyEvent, KeyModifiers};
 
 use crate::core::Session;
 use crate::llm::chat::ChatState;
-use crate::tui::candidate::{screen_title, CandidateApp, CandidateScreen};
+use crate::tui::candidate::{CandidateApp, CandidateScreen};
 use crate::tui::candidate_actions::{
     UnavailableCodingRunner, UnavailableOtherGrader, UnavailableTestRunner,
 };
@@ -310,41 +308,4 @@ impl Drop for CandidateTtyGuard {
             crossterm::event::DisableBracketedPaste
         );
     }
-}
-
-/// Runs the candidate TTY loop until the app reaches Exited.
-pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error>> {
-    let _guard = CandidateTtyGuard;
-    crossterm::terminal::enable_raw_mode()?;
-    crossterm::execute!(
-        std::io::stdout(),
-        crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableBracketedPaste
-    )?;
-    let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    while state.app.screen() != CandidateScreen::Exited {
-        let title = screen_title(state.app.screen());
-        let lines = candidate_screen_lines(state);
-        let _ = terminal.draw(|frame| {
-            let widget = ratatui::widgets::Paragraph::new(lines.join("\n")).block(
-                ratatui::widgets::Block::default()
-                    .title(title)
-                    .borders(ratatui::widgets::Borders::ALL),
-            );
-            frame.render_widget(widget, frame.area());
-        });
-        if crossterm::event::poll(Duration::from_millis(250)).unwrap_or(false) {
-            match crossterm::event::read() {
-                Ok(Event::Key(key)) => {
-                    if key.kind != KeyEventKind::Release {
-                        handle_candidate_key(state, key);
-                    }
-                }
-                Ok(Event::Paste(text)) => handle_candidate_paste(state, &text),
-                _ => {}
-            }
-        }
-    }
-    Ok(())
 }

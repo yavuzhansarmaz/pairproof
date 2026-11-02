@@ -28,8 +28,25 @@ fn started() -> Session {
     s.start(3).expect("start");
     s
 }
-fn ok() -> Result<(), String> {
-    Ok(())
+fn ok_step() -> CleanupStep {
+    Box::new(|| Box::pin(async { Ok(()) }))
+}
+fn fail_step(msg: &'static str) -> CleanupStep {
+    Box::new(move || Box::pin(async move { Err(msg.to_string()) }))
+}
+fn cancel_step(supported: bool) -> CleanupStep {
+    Box::new(move || {
+        Box::pin(async move {
+            if supported {
+                Ok(())
+            } else {
+                Err("unsupported: transport cannot cancel (Phase 10 wire-up)".to_string())
+            }
+        })
+    })
+}
+fn cleanup_seq(cancel: CleanupStep, stop_sync: CleanupStep) -> CleanupSequence {
+    CleanupSequence::new(cancel, ok_step(), stop_sync, ok_step(), ok_step())
 }
 fn graded(slot: usize, grade: f64, corr: f64) -> GradeOutcome {
     GradeOutcome::Graded(
@@ -110,20 +127,11 @@ fn accidental_disconnect_does_not_finalize_session() {
     assert_eq!(s.status(), SessionStatus::InProgress);
 }
 
-#[test]
-fn kill_switch_attempts_all_cleanup_after_one_failure() {
-    let mut ks = KillSwitch::new();
-    let report = ks.execute(true, ok, || Err("sync boom".to_string()), ok, ok);
-    assert_eq!(
-        report.attempted,
-        vec![
-            "cancel_inflight",
-            "terminate_connection",
-            "stop_sync",
-            "destroy_sandbox",
-            "delete_raw"
-        ]
-    );
+#[tokio::test]
+async fn cleanup_sequence_attempts_all_after_one_failure() {
+    let mut seq = cleanup_seq(ok_step(), fail_step("sync boom"));
+    let report = seq.run().await;
+    assert_eq!(report.attempted, CLEANUP_STEP_NAMES);
     assert!(report
         .succeeded
         .contains(&"terminate_connection".to_string()));
@@ -137,34 +145,28 @@ fn kill_switch_attempts_all_cleanup_after_one_failure() {
     assert!(!report.all_succeeded());
 }
 
-#[test]
-fn kill_switch_cancels_supported_inflight_work() {
-    assert_eq!(try_cancel_inflight(true), CancelOutcome::Cancelled);
-    assert_eq!(
-        CancellationSeam::try_cancel_inflight(true),
-        CancelOutcome::Cancelled
-    );
-    let report = execute_kill_switch(true, ok, ok, ok, ok);
+#[tokio::test]
+async fn cleanup_sequence_cancels_supported_inflight_work() {
+    let mut seq = cleanup_seq(cancel_step(true), ok_step());
+    let report = seq.run().await;
     assert_eq!(report.attempted[0], "cancel_inflight");
     assert!(report.succeeded.contains(&"cancel_inflight".to_string()));
     assert_eq!(report.cancel_outcome(), Some(CancelOutcome::Cancelled));
     assert!(report.all_succeeded());
 }
 
-#[test]
-fn kill_switch_is_idempotent() {
-    let mut ks = KillSwitch::new();
-    let first = ks.execute(true, ok, ok, ok, ok);
+#[tokio::test]
+async fn cleanup_sequence_is_idempotent() {
+    let mut seq = cleanup_seq(ok_step(), ok_step());
+    assert!(!seq.is_done());
+    let first = seq.run().await;
     assert!(!first.already_done);
     assert_eq!(first.attempted.len(), 5);
-    let second = ks.execute(true, ok, ok, ok, ok);
+    assert!(seq.is_done());
+    let second = seq.run().await;
     assert!(second.already_done);
     assert!(second.attempted.is_empty());
     assert!(second.succeeded.is_empty());
-    let mut gate = ShutdownGate::new();
-    assert!(gate.begin());
-    assert!(!gate.begin());
-    assert!(gate.is_done());
 }
 
 #[test]
@@ -239,14 +241,10 @@ fn disconnect_reconnect_resumes_same_question() {
     assert_eq!(s2.current_index(), Some(0));
 }
 
-#[test]
-fn cancellation_unsupported_seam_is_recorded_not_cancelled() {
-    assert_eq!(try_cancel_inflight(false), CancelOutcome::Unsupported);
-    assert_eq!(
-        CancellationSeam::try_cancel_inflight(false),
-        CancelOutcome::Unsupported
-    );
-    let report = execute_kill_switch(false, ok, ok, ok, ok);
+#[tokio::test]
+async fn cancellation_unsupported_is_recorded_not_cancelled() {
+    let mut seq = cleanup_seq(cancel_step(false), ok_step());
+    let report = seq.run().await;
     assert!(report.attempted.contains(&"cancel_inflight".to_string()));
     assert!(!report.succeeded.contains(&"cancel_inflight".to_string()));
     assert!(
@@ -264,35 +262,29 @@ fn cancellation_unsupported_seam_is_recorded_not_cancelled() {
     assert!(!report.all_succeeded());
 }
 
-#[test]
-fn kill_switch_cleanup_order_is_fixed() {
-    let report = execute_kill_switch(true, ok, ok, ok, ok);
+#[tokio::test]
+async fn cleanup_sequence_order_is_fixed_raw_deleted_last() {
+    let mut seq = cleanup_seq(ok_step(), ok_step());
+    let report = seq.run().await;
+    assert_eq!(report.attempted, CLEANUP_STEP_NAMES);
     assert_eq!(
-        report.attempted,
-        vec![
-            "cancel_inflight",
-            "terminate_connection",
-            "stop_sync",
-            "destroy_sandbox",
-            "delete_raw"
-        ]
+        report.attempted.last().map(String::as_str),
+        Some("delete_raw")
     );
     assert_eq!(report.succeeded, report.attempted);
     assert!(report.all_succeeded());
     assert!(!report.already_done);
 }
 
-#[test]
-fn kill_switch_blocks_new_actions_after_kill() {
-    let mut ks = KillSwitch::new();
-    assert!(ks.accepts_new_actions());
-    ks.execute(true, ok, ok, ok, ok);
-    assert!(!ks.accepts_new_actions());
-    assert!(ks.is_done());
-    let mut s = started();
-    let mut ks2 = KillSwitch::new();
-    let report = ks2.execute(true, ok, ok, ok, ok);
+#[tokio::test]
+async fn cleanup_sequence_done_blocks_rerun() {
+    let mut seq = cleanup_seq(ok_step(), ok_step());
+    assert!(!seq.is_done());
+    let report = seq.run().await;
     assert!(report.all_succeeded());
+    assert!(seq.is_done());
+    assert!(seq.run().await.already_done);
+    let mut s = started();
     handle_expert_end(&mut s, 99).expect("expert end");
     assert_eq!(s.status(), SessionStatus::EndedByExpert);
     assert!(is_final_after(s.status()));

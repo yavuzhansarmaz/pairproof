@@ -35,6 +35,7 @@ pub enum AppEvent {
     ExpertSelectionDone,
     EndSession,
     AccidentalDisconnect,
+    CandidateReconnected,
     Back,
     Quit,
     Retry,
@@ -74,6 +75,7 @@ fn event_name(event: AppEvent) -> &'static str {
         AppEvent::ExpertSelectionDone => "ExpertSelectionDone",
         AppEvent::EndSession => "EndSession",
         AppEvent::AccidentalDisconnect => "AccidentalDisconnect",
+        AppEvent::CandidateReconnected => "CandidateReconnected",
         AppEvent::Back => "Back",
         AppEvent::Quit => "Quit",
         AppEvent::Retry => "Retry",
@@ -239,6 +241,10 @@ impl ExpertApp {
             }
             (S::Monitor, E::AccidentalDisconnect) => {
                 self.disconnected = true;
+                Ok(self.screen)
+            }
+            (S::Monitor, E::CandidateReconnected) => {
+                self.disconnected = false;
                 Ok(self.screen)
             }
             _ => {

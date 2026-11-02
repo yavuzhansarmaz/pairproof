@@ -5,7 +5,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use crate::core::{ApproachChoice, EventKind, QuestionStatus, Session, TestSummary};
-use crate::llm::common::{strip_code_fences, LlmError, LlmOutcome};
+use crate::llm::common::{decode, LlmError, LlmOutcome};
 use crate::llm::{Message, MetaClient};
 use crate::scoring::{GradeOutcome, QuestionGrade};
 
@@ -166,8 +166,7 @@ struct QuestionGradeWire {
 
 /// Parses a model reply into a validated grade for `slot_index`.
 pub fn parse_question_grade(content: &str, slot_index: usize) -> Result<QuestionGrade, LlmError> {
-    let wire: QuestionGradeWire = serde_json::from_str(strip_code_fences(content))
-        .map_err(|e| LlmError::Parse(e.to_string()))?;
+    let wire: QuestionGradeWire = decode(content)?;
     Ok(QuestionGrade::new(
         slot_index,
         wire.grade,

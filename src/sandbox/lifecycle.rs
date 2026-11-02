@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::connection::{Endpoint, EphemeralUsername, Fingerprint, Secret};
 
 use super::command::{container_remove, container_run, exec_root, network_create, network_remove};
-use super::error::{bounded_stderr, SandboxError};
+use super::error::{command_failed, map_docker_not_found, SandboxError};
 use super::image::{check_docker_available, effective_image_tag, ensure_image};
 use super::parse::parse_host_key_fingerprint;
 use super::process::{run_bounded, CommandOutcome, CommandSpec, DEFAULT_MAX_OUTPUT};
@@ -56,25 +56,6 @@ fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|p| (*p).to_string()).collect()
 }
 
-/// Maps a docker spawn failure to the docker-specific error.
-fn map_docker_not_found(err: SandboxError) -> SandboxError {
-    match err {
-        SandboxError::ExecutableNotFound { program } if program == "docker" => {
-            SandboxError::DockerNotFound
-        }
-        other => other,
-    }
-}
-
-/// Builds a bounded command-failure error from an outcome.
-fn failed(operation: &'static str, outcome: &CommandOutcome) -> SandboxError {
-    SandboxError::CommandFailed {
-        operation,
-        exit_code: outcome.exit_code,
-        stderr: bounded_stderr(&outcome.stderr),
-    }
-}
-
 /// Runs a command and returns its outcome, mapping a missing docker binary.
 async fn run_outcome(
     spec: &CommandSpec,
@@ -95,7 +76,7 @@ async fn run_ok(
     if outcome.success() {
         Ok(outcome)
     } else {
-        Err(failed(operation, &outcome))
+        Err(command_failed(operation, &outcome))
     }
 }
 
@@ -131,7 +112,7 @@ pub async fn create_network(handle: &SandboxHandle) -> Result<(), SandboxError> 
     if outcome.success() || outcome.stderr_text().contains("already exists") {
         Ok(())
     } else {
-        Err(failed("network_create", &outcome))
+        Err(command_failed("network_create", &outcome))
     }
 }
 
@@ -210,7 +191,7 @@ pub async fn provision_user(
     )?;
     let outcome = run_outcome(&useradd, None).await?;
     if !outcome.success() && !outcome.stderr_text().contains("already exists") {
-        return Err(failed("useradd", &outcome));
+        return Err(command_failed("useradd", &outcome));
     }
     let owner = format!("{name}:{name}");
     let chown = exec_root(
@@ -244,7 +225,7 @@ pub async fn provision_database_user(handle: &SandboxHandle, user: &EphemeralUse
     poll_root_test(handle, &argv(&["test", "-S", "/run/mysqld/mysqld.sock"]), "provision_database_user", "mariadb socket did not appear within 30s").await?;
     let add = exec_root(&handle.container, &argv(&["useradd", "-M", "-s", "/usr/sbin/nologin", "ppcheck"]), false)?;
     let added = run_outcome(&add, None).await?;
-    if !added.success() && !added.stderr_text().contains("already exists") { return Err(failed("useradd_ppcheck", &added)); }
+    if !added.success() && !added.stderr_text().contains("already exists") { return Err(command_failed("useradd_ppcheck", &added)); }
     let name = user.as_str();
     let sql = format!("CREATE DATABASE IF NOT EXISTS pairproof;\nCREATE USER IF NOT EXISTS '{name}'@'localhost' IDENTIFIED VIA unix_socket;\nGRANT ALL PRIVILEGES ON pairproof.* TO '{name}'@'localhost';\nCREATE USER IF NOT EXISTS 'ppcheck'@'localhost' IDENTIFIED VIA unix_socket;\nGRANT ALL PRIVILEGES ON pp_runnable.* TO 'ppcheck'@'localhost';\n");
     let spec = exec_root(&handle.container, &argv(&["mariadb", "-u", "root"]), true)?;
@@ -306,7 +287,7 @@ pub async fn destroy(handle: &SandboxHandle) -> Result<(), SandboxError> {
     match run_outcome(&container_spec, None).await {
         Ok(outcome) => {
             if !outcome.success() && !outcome.stderr_text().contains("No such container") {
-                first_error = Some(failed("container_remove", &outcome));
+                first_error = Some(command_failed("container_remove", &outcome));
             }
         }
         Err(err) => first_error = Some(err),
@@ -317,7 +298,7 @@ pub async fn destroy(handle: &SandboxHandle) -> Result<(), SandboxError> {
             let stderr = outcome.stderr_text();
             let missing = stderr.contains("not found") || stderr.contains("No such network");
             if !outcome.success() && !missing && first_error.is_none() {
-                first_error = Some(failed("network_remove", &outcome));
+                first_error = Some(command_failed("network_remove", &outcome));
             }
         }
         Err(err) => {
@@ -341,33 +322,4 @@ pub async fn destroy_by_session_id(session_id: &str) -> Result<(), SandboxError>
         endpoint_port: 0,
     };
     destroy(&handle).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn docker_missing_maps_to_docker_not_found() {
-        let e = SandboxError::ExecutableNotFound {
-            program: "docker".into(),
-        };
-        assert_eq!(map_docker_not_found(e), SandboxError::DockerNotFound);
-    }
-    #[test]
-    fn other_program_passes_through() {
-        let e = SandboxError::ExecutableNotFound {
-            program: "mutagen".into(),
-        };
-        assert_eq!(map_docker_not_found(e.clone()), e);
-    }
-    #[test]
-    fn other_variant_passes_through() {
-        let timeout = SandboxError::Timeout {
-            program: "docker".into(),
-            timeout_ms: 1,
-        };
-        for e in [SandboxError::DockerNotFound, timeout] {
-            assert_eq!(map_docker_not_found(e.clone()), e);
-        }
-    }
 }

@@ -49,6 +49,11 @@ pub(crate) fn strip_code_fences(text: &str) -> &str {
     stripped.trim()
 }
 
+/// Decodes a fenced JSON model reply, preserving `Parse` error wording.
+pub(crate) fn decode<T: serde::de::DeserializeOwned>(content: &str) -> Result<T, LlmError> {
+    serde_json::from_str(strip_code_fences(content)).map_err(|e| LlmError::Parse(e.to_string()))
+}
+
 /// Parses a quality word case-insensitively.
 pub(crate) fn parse_quality(text: &str) -> Result<ApproachQuality, LlmError> {
     match text.trim().to_ascii_lowercase().as_str() {
@@ -73,6 +78,21 @@ mod tests {
         assert_eq!(strip_code_fences("```json\n{\"a\":1}"), "{\"a\":1}");
         assert_eq!(strip_code_fences(""), "");
         assert_eq!(strip_code_fences("```"), "");
+    }
+
+    #[test]
+    fn decode_parses_fenced_json_and_wraps_errors_as_parse() {
+        #[derive(Debug, PartialEq, serde::Deserialize)]
+        struct Wire {
+            a: u32,
+        }
+        assert_eq!(
+            decode::<Wire>("```json\n{\"a\":1}\n```").ok(),
+            Some(Wire { a: 1 })
+        );
+        assert_eq!(decode::<Wire>("{\"a\":2}").ok(), Some(Wire { a: 2 }));
+        let err = decode::<Wire>("not json").err();
+        assert!(matches!(err, Some(LlmError::Parse(_))), "{err:?}");
     }
 
     #[test]

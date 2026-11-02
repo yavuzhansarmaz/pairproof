@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::core::types::Difficulty;
 use crate::core::{QuestionStatus, Session, TestSummary};
-use crate::leetcode::Difficulty;
 use crate::scoring::live::{
     live_rating, multiplier_and_detail, token_band_step, ScoreComponent, ScoreLine,
 };
