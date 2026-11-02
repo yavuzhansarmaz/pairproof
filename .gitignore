@@ -1,6 +1,9 @@
 /target
+/dist
 
 .env
+.env.*
+!.env.example
 *.local.toml
 .pairproof/
 pairproof-workspace/
@@ -8,8 +11,15 @@ sessions/
 artifacts/
 
 *.pdf
+*.log
+*.tar.gz
+*.tar.gz.sha256
 connection-string*.txt
 
 .DS_Store
 .idea/
 .vscode/
+*~
+*.swp
+*.swo
+*.rs.bk
