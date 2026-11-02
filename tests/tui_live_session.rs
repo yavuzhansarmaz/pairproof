@@ -123,7 +123,7 @@ async fn flow(
         artifact_root: artifacts.clone(),
         topics: Vec::new(),
         level: "live".into(),
-        sync_phase: "Sync: live".into(),
+        sync_phase: SessionSyncPhase::NotStarted,
     };
     let mut expert = ExpertRuntime::new(spec, deps, now_ms())
         .await

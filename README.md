@@ -55,6 +55,162 @@ Live suites (need network/key, Docker, Mutagen):
 cargo test -- --ignored
 ```
 
+## Compatibility notes
+
+### Session-id validation (tightened)
+
+The canonical session-id rule is `validate_session_id` in
+[src/core/types.rs](src/core/types.rs). Core, sandbox, sync, and artifact
+boundaries all delegate to it. An id is valid only when it matches
+`[A-Za-z0-9_-]{1,40}` and does not start with `-` or `net-`.
+
+Ids that were previously accepted in some places are now **rejected**
+everywhere, including:
+
+- dotted ids such as `sess.1` (`.` is not an allowed character);
+- ids longer than 40 characters;
+- ids with a leading `-`;
+- ids starting with `net-` (reserved to avoid network-name collisions).
+
+**There is no automatic migration.** An existing `sessions/<id>/`
+directory whose name no longer conforms (for example a dotted or
+over-long name) is orphaned: PairProof will not rename or convert it.
+An operator must either rename the directory to a conforming id or
+remove it.
+
+### Monitor lifecycle types (moved)
+
+The following public items have been **removed** from
+`pairproof::tui::monitor`: `KillSwitch`, `ShutdownGate`,
+`CancellationSeam`, `try_cancel_inflight`, and the monitor-defined
+`CleanupReport` type. Lifecycle orchestration is the sole owner now:
+the single `CleanupReport` definition lives in
+`pairproof::orchestration::lifecycle`.
+
+External consumers must import from there instead, for example
+`pairproof::orchestration::lifecycle::{CancelToken, CancelOutcome,
+CleanupReport, CleanupSequence, CleanupStep, RequestSupervisor,
+run_cancellable, CLEANUP_STEP_NAMES}` (also re-exported at
+`pairproof::orchestration`). In particular:
+
+- use `RequestSupervisor::kill_switch` plus `CleanupSequence` instead
+  of the old `KillSwitch`;
+- use `CleanupSequence` (a second run is a no-op) instead of the old
+  `ShutdownGate`;
+- use `CancelToken` / `run_cancellable` and read
+  `CleanupReport::cancel_outcome()` (`CancelOutcome::Cancelled` or
+  `CancelOutcome::Unsupported`) instead of the old `CancellationSeam`
+  and `try_cancel_inflight`.
+
+`src/tui/monitor.rs` only re-exports the lifecycle cleanup types so the
+monitor view shares the one definition; it defines no lifecycle type of
+its own. No automatic migration is provided for the removed monitor
+items either — update imports to `orchestration::lifecycle` manually.
+
+### Expert snapshot sync label (changed default)
+
+The default `sync_phase` label published in expert snapshots changed
+from `Sync: unknown` to `Sync: not started`
+(`SessionSyncPhase::NotStarted`). This is the truthful default: the
+expert runtime starts no sync itself. `SNAPSHOT_VERSION` stays `1`,
+the `sync_phase` wire field and its format are unchanged, and the
+labels for the other phases (`Sync: active`, `Sync: paused`,
+`Sync: conflict needs attention — ask the expert`, and the
+candidate-safe sync-problem message) are unchanged.
+
+### Snapshot builder signature (breaking: `&str` -> `SessionSyncPhase`)
+
+`pairproof::orchestration::control::build_snapshot` (also re-exported
+as `pairproof::orchestration::build_snapshot`) changed its
+`sync_phase` parameter type: `sync_phase: &str` -> `sync_phase:
+SessionSyncPhase`. `SessionSyncPhase` is
+`pairproof::orchestration::sync_gate::SessionSyncPhase` (also
+re-exported as `pairproof::orchestration::SessionSyncPhase`).
+Callers that passed a label string such as `"Sync: active"` must now
+pass the enum, for example `SessionSyncPhase::Active`; the published
+label is derived with `SessionSyncPhase::label()`.
+
+This is a source-level breaking change only. The wire format is
+unchanged: the snapshot JSON `sync_phase` field is still a string
+with the same labels, and `SNAPSHOT_VERSION=1` is unchanged
+(`SNAPSHOT_VERSION` stays `1`).
+
+### Mutable session access (narrowed: `pub` -> `pub(crate)`)
+
+`Orchestrator::session_mut`
+(`pairproof::orchestration::Orchestrator::session_mut`, in
+[src/orchestration/session.rs](src/orchestration/session.rs)) and
+`CandidateApp::session_mut`
+(`pairproof::tui::candidate::CandidateApp::session_mut`, in
+[src/tui/candidate.rs](src/tui/candidate.rs)) changed from `pub` to
+`pub(crate)`: `pub` -> `pub(crate)`. External crates can no longer
+call `Orchestrator::session_mut` or `CandidateApp::session_mut`;
+they are no longer part of the public API. Use the immutable
+`session()` accessors and the typed `Orchestrator` / `CandidateApp`
+operations instead. In-crate pipeline transports unaffected: the
+in-crate pipeline, coding, and chat transports that use
+`session_mut` internally keep working unchanged.
+
+### Expert runtime sync-phase field (breaking: `String` -> `SessionSyncPhase`)
+
+`ExpertRuntimeDeps.sync_phase`
+(`pairproof::tui::expert_runtime::ExpertRuntimeDeps::sync_phase`,
+in [src/tui/expert_runtime.rs](src/tui/expert_runtime.rs)) changed
+its public field type: `String` -> `SessionSyncPhase`. The
+`ExpertRuntime` sync state changed the same way (`String` ->
+`SessionSyncPhase`): the stored `sync_phase` state, the
+`ExpertRuntime::sync_phase()` return type, and the
+`ExpertRuntime::set_sync_phase(...)` parameter are now
+`SessionSyncPhase`, not `String`. Constructors that wrote
+`sync_phase: "Sync: unknown".to_string()` (or any label string)
+must now write e.g. `sync_phase: SessionSyncPhase::NotStarted`.
+As with `build_snapshot` above, the published snapshot wire JSON
+`sync_phase` string and `SNAPSHOT_VERSION=1` are unchanged.
+
+### Removed TUI controllers (accepted removals)
+
+`pairproof::tui::connection::ConnectionController` and
+`pairproof::tui::selection::SelectionController` have been **deleted**.
+Behavioral coverage now lives in
+`pairproof::orchestration::connection::ConnectionGate` together with
+the core `Session` type.
+
+The following named helpers have no direct equivalent in the new API:
+`error_is_expired`, `cached_string`/`display_string`, and the
+pending-medium accessors / `MediumRequired`. Use the gate's
+`current_string` and the `ExpertRuntime` pending-medium staging
+instead. No automatic migration is provided for these removals —
+update call sites manually.
+
+### Service-failure HealthGate (implemented, not wired)
+
+`HealthGate` / `await_recovery` in
+[src/orchestration/health.rs](src/orchestration/health.rs) (exposed on
+the expert side only as `ExpertRuntime::health_gate`) is implemented
+gate logic, **NOT wired into TTY loop; wiring pending product/design
+decision on interception point + countdown propagation + non-blocking
+tick**. It has no production caller: `ExpertRuntime` stores only the
+gate value and no LeetCode/Meta probes, `Clock`, or `Sleeper`, and the
+synchronous TTY tick in `src/tui/mod.rs` drives the runtime through
+bounded `block_on` steps, so awaiting the 60-second recovery window
+inline would block key input, drawing, and heartbeat handling.
+
+Before wiring, a product/design decision must specify exactly:
+
+- **Interception point:** which failing operation(s) pause the flow,
+  how each maps to an `InterruptedStep`, and how resume versus
+  `TechnicalFailure` (no candidate evaluation) is applied on both
+  expert and candidate screens.
+- **Countdown propagation:** how the unreachable service(s) and the
+  remaining countdown reach both screens (new snapshot/control field
+  or another channel) and when they clear.
+- **Non-blocking tick:** how recovery runs without blocking the TTY
+  loop (for example a spawned task plus channel, following the
+  existing pending-load pattern), including cancellation on end/kill.
+
+Until that decision is made there is **no behavior change**: sessions
+do not pause, count down, resume, or terminate via the health gate.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).

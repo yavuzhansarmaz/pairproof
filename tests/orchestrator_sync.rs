@@ -168,7 +168,7 @@ async fn sync_cleanup_is_idempotent() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH (real local two-way sync roundtrip)"]
 async fn live_mutagen_two_way_sync_round_trip() {
     let session_id = format!("rtgate{}", std::process::id());
     let base = temp_base("live");

@@ -28,24 +28,7 @@ query questionData($titleSlug: String!) {
   }
 }"#;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum Difficulty {
-    Easy,
-    Medium,
-    Hard,
-}
-
-impl Difficulty {
-    /// Returns the GraphQL filter value for this difficulty.
-    pub fn as_filter(self) -> &'static str {
-        match self {
-            Difficulty::Easy => "EASY",
-            Difficulty::Medium => "MEDIUM",
-            Difficulty::Hard => "HARD",
-        }
-    }
-}
+pub use crate::core::types::Difficulty;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TopicTag {

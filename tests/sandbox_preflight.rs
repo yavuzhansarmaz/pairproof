@@ -1,8 +1,8 @@
 use std::net::{Ipv4Addr, TcpListener};
 
 use pairproof::sandbox::preflight::{
-    classify_ipv4, compute_preflight, gather_preflight, port_is_free, primary_local_ipv4,
-    CheckKind, CheckStatus, IpClass, PreflightInputs, PreflightReport,
+    classify_ipv4, compute_preflight, first_free_port, gather_preflight, port_is_free,
+    primary_local_ipv4, CheckKind, CheckStatus, IpClass, PreflightInputs, PreflightReport,
 };
 
 fn ip(a: u8, b: u8, c: u8, d: u8) -> Ipv4Addr {
@@ -157,6 +157,14 @@ fn port_is_free_detects_bound_port() {
     assert!(!port_is_free(0));
     drop(listener);
     assert!(port_is_free(bound));
+}
+
+#[test]
+fn first_free_port_all_busy_none_first_busy_next() {
+    assert_eq!(first_free_port(2222..2322, |_| false), None);
+    assert_eq!(first_free_port(2222..2322, |p| p != 2222), Some(2223));
+    assert_eq!(first_free_port(2222..2322, |_| true), Some(2222));
+    assert_eq!(first_free_port(2222..2322, |p| p == 2322), None);
 }
 
 #[test]

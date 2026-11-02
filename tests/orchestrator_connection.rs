@@ -383,7 +383,7 @@ fn connection_gate_error_redacts_secret_canary() {
     assert!(!format!("{gate:?}").contains(&base.secret().expose_hex()));
 }
 #[test]
-#[ignore]
+#[ignore = "live ssh-keyscan: requires ssh-keyscan on PATH (dead-endpoint probe must fail closed)"]
 fn live_ssh_password_auth_is_blocked_and_keyscan_fails_closed() {
     let gate = ConnectionGate::new(endpoint(), username(), fingerprint(), T0);
     let result = gate.authenticate_password();

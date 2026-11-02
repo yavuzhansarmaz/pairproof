@@ -126,13 +126,16 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
     }
     /// Reads one snapshot; wrong-session keeps the last good snapshot.
     pub fn poll_snapshot(&mut self) -> Result<Option<CandidateSnapshot>, CandidateRuntimeError> { self.poll_snapshot_at(now_ms()) }
-    /// Polls with an explicit clock: throttled heartbeat, then one snapshot read.
+    /// Polls with an explicit clock: one snapshot read, then a throttled
+    /// heartbeat. The attempt time is recorded even when the heartbeat
+    /// fails, so a dead transport is not retried on every poll tick.
     /// A transport failure marks the connection lost and keeps the last snapshot.
     pub fn poll_snapshot_at(&mut self, now_ms: u64) -> Result<Option<CandidateSnapshot>, CandidateRuntimeError> {
         if self.phase == CandidateRuntimePhase::Ended { return Err(CandidateRuntimeError::Ended); }
         if self.phase != CandidateRuntimePhase::Connected { return Err(CandidateRuntimeError::NotConnected); }
-        if now_ms.saturating_sub(self.last_hb_ms) > HEARTBEAT_THROTTLE_MS && self.transport.write_heartbeat(&self.session_id, now_ms).is_ok() { self.last_hb_ms = now_ms; }
-        match self.transport.read_snapshot() {
+        let snapshot = self.transport.read_snapshot();
+        if now_ms.saturating_sub(self.last_hb_ms) > HEARTBEAT_THROTTLE_MS { self.last_hb_ms = now_ms; let _ = self.transport.write_heartbeat(&self.session_id, now_ms); }
+        match snapshot {
             Err(CandidateRuntimeError::Transport) => { self.lost = true; Err(CandidateRuntimeError::Transport) }
             Err(err) => Err(err),
             Ok(None) => Ok(None),
@@ -269,15 +272,6 @@ impl ConnectionVerifier for SshAuthVerifier {
 }
 /// Local workspace synced to the container `/workspace` root.
 #[rustfmt::skip] pub fn default_workspace() -> PathBuf { std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()).join("pairproof-workspace") }
-/// Explicit test-only binding override; production discovery never uses it.
-#[rustfmt::skip]
-pub fn production_session_id(connection: &ConnectionString) -> String {
-    if let Ok(value) = std::env::var("PAIRPROOF_SESSION_ID") {
-        let value = value.trim().to_string();
-        if crate::sandbox::validate::validate_session_id(&value).is_ok() { return value; }
-    }
-    format!("cand-{}", connection.username().as_str().trim_start_matches("pp-"))
-}
 #[rustfmt::skip] fn pop_last(text: &str) -> String { let mut owned = text.to_string(); owned.pop(); owned }
 #[rustfmt::skip]
 fn apply(status: &mut Option<String>, result: Result<Intent, CandidateRuntimeError>) -> bool {
@@ -307,7 +301,7 @@ fn handle_live_key(state: &mut CandidateRunState, runtime: &mut CandidateRuntime
                 'c' => { apply(status, runtime.send_intent(IntentKind::Continue)); } 'd' => state.focus = CandidateFocus::Redirect,
                 't' => { apply(status, runtime.send_intent(IntentKind::RequestTests)); } 's' => { apply(status, runtime.send_intent(IntentKind::Skip)); }
                 'f' => { if apply(status, runtime.send_intent(IntentKind::Finish)) { if let Err(err) = runtime.flush() { *status = Some(err.to_string()); } } }
-                'r' => { apply(status, runtime.send_intent(IntentKind::RequestRequestion)); } 'q' => { state.app.quit(); }, _ => {}
+                'r' => { apply(status, runtime.send_intent(IntentKind::RequestReQuestion)); } 'q' => { state.app.quit(); }, _ => {}
             }, _ => {}
         },
         CandidateFocus::Other => match key.code {

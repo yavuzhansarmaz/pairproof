@@ -3,7 +3,7 @@
 use serde::Deserialize;
 
 use crate::core::Language;
-use crate::llm::common::{strip_code_fences, LlmError, LlmOutcome};
+use crate::llm::common::{decode, LlmError, LlmOutcome};
 use crate::llm::{Message, MetaClient};
 
 /// The only topic slugs selection may use; unknown slugs are dropped.
@@ -133,8 +133,7 @@ fn map_language(raw: Option<&str>) -> (Option<Language>, Option<String>) {
 
 /// Parses a model reply into a normalized extraction result.
 pub fn parse_extraction(content: &str) -> Result<ExtractionResult, LlmError> {
-    let wire: ExtractionWire = serde_json::from_str(strip_code_fences(content))
-        .map_err(|e| LlmError::Parse(e.to_string()))?;
+    let wire: ExtractionWire = decode(content)?;
     let level = wire.level.trim().to_string();
     if level.is_empty() {
         return Err(LlmError::Parse("level must not be empty".to_string()));

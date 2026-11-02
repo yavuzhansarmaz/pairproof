@@ -4,7 +4,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::core::Session;
+use crate::core::{CoreError, Session};
 use crate::llm::chat::{run_chat, ChatState};
 use crate::llm::{Message, MetaClient};
 use crate::orchestration::pipeline::{PipelineError, PipelineFuture, QuestionPipeline};
@@ -101,9 +101,17 @@ impl QuestionPipeline {
             .cloned()
             .unwrap_or_default();
         let state = ChatState::from_session(orch.session(), &statement, &code);
-        let reply = transport
+        let index = orch.current_index();
+        let result = transport
             .chat(orch.session_mut(), &state, history, user_message, now_ms)
-            .await?;
+            .await;
+        if orch.is_terminal() {
+            return Err(CoreError::Terminal.into());
+        }
+        if orch.current_index() != index {
+            return Err(CoreError::InvalidState("session changed during chat".to_string()).into());
+        }
+        let reply = result?;
         history.push(Message::new("user", user_message));
         history.push(Message::new("assistant", &reply));
         Ok(reply)

@@ -3,13 +3,14 @@
 use std::collections::HashSet;
 use thiserror::Error;
 
+use crate::core::types::Difficulty;
 use crate::core::{Language, QuestionRef};
 use crate::ingest::{
     bound_text, prepare_documents, propose_context, propose_from_extraction, ExpertDocuments,
     IngestError, LanguageProposal, ProposedContext,
 };
 use crate::leetcode::selection::{auto_pick_easy, SelectionError};
-use crate::leetcode::{Difficulty, LeetCodeClient};
+use crate::leetcode::LeetCodeClient;
 use crate::llm::extraction::ExtractionResult;
 use crate::llm::MetaClient;
 use crate::tui::shared::sanitize_display;
@@ -282,4 +283,41 @@ impl SetupController {
     pub fn has_auto_easy(&self) -> bool {
         self.easy.len() == 5
     }
+}
+
+/// Expert Setup paste collector: first paste is the JD, second is notes.
+/// Held by the TTY loop, never by `ExpertApp`; completeness is the only
+/// path that lets the loop set `has_proposal` on the app.
+#[derive(Debug, Default)]
+pub struct ExpertSetupPastes {
+    controller: SetupController,
+    jd_received: bool,
+    notes_received: bool,
+}
+
+#[rustfmt::skip]
+impl ExpertSetupPastes {
+    pub fn new() -> Self { Self::default() }
+    pub fn jd(&self) -> &str { &self.controller.draft().jd }
+    pub fn notes(&self) -> &str { &self.controller.draft().additional }
+    pub fn is_complete(&self) -> bool { self.jd_received && self.notes_received }
+}
+
+/// Feeds one bracketed paste: first fills the JD, second fills the notes,
+/// later ones replace the notes. Blank or oversized (>50,000 chars) pastes
+/// are rejected without advancing. `Ok(true)` means the proposal is ready.
+#[rustfmt::skip]
+pub fn apply_expert_setup_paste(pastes: &mut ExpertSetupPastes, text: &str) -> Result<bool, String> {
+    if text.trim().is_empty() { return Err("Paste rejected: blank paste ignored.".to_string()); }
+    if text.chars().count() > crate::ingest::MAX_TEXT_CHARS {
+        return Err("Paste rejected: exceeds 50,000 characters.".to_string());
+    }
+    if !pastes.jd_received {
+        pastes.controller.set_jd(text);
+        pastes.jd_received = true;
+        return Ok(false);
+    }
+    pastes.controller.set_additional(text);
+    pastes.notes_received = true;
+    Ok(true)
 }

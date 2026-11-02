@@ -3,26 +3,17 @@
 //! `CommandSpec`/`run_bounded` has no environment support.
 
 use std::fmt;
-use std::fs::{self, OpenOptions};
-use std::io::Read;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::connection::Secret;
+use crate::orchestration::process_util::{read_capped, set_mode, FeederCore};
 use crate::orchestration::ssh_auth::{AskpassSession, SshAuthError};
 
 const MAX_OUTPUT: usize = 64 * 1024;
-const O_NONBLOCK: i32 = 0o4000;
-
-fn set_mode(path: &Path, mode: u32) -> Result<(), SshAuthError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
-    Ok(())
-}
 
 fn resolve_program(name: &str) -> Result<PathBuf, SshAuthError> {
     if let Some(path_var) = std::env::var_os("PATH") {
@@ -176,43 +167,13 @@ impl fmt::Debug for MutagenAuthEnv {
 
 /// Looping feeder: serves every new FIFO reader until stopped or deadline.
 pub struct PasswordFeeder {
-    stop: Arc<AtomicBool>,
-    join: Option<JoinHandle<()>>,
-}
-
-fn feeder_loop(fifo: &Path, hex: &str, stop: &AtomicBool, ttl: Duration) {
-    use std::io::Write;
-    let deadline = Instant::now() + ttl;
-    while !stop.load(Ordering::SeqCst) && Instant::now() < deadline {
-        match OpenOptions::new()
-            .write(true)
-            .custom_flags(O_NONBLOCK)
-            .open(fifo)
-        {
-            Ok(mut file) => {
-                let _ = file.write_all(hex.as_bytes());
-                let _ = file.write_all(b"\n");
-                drop(file);
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(err) if err.raw_os_error() == Some(6) => {
-                std::thread::sleep(Duration::from_millis(15));
-            }
-            Err(_) => std::thread::sleep(Duration::from_millis(25)),
-        }
-    }
+    core: FeederCore,
 }
 
 /// Starts a looping feeder for `fifo`; the secret stays in the thread only.
 pub fn start_password_feeder_at(fifo: &Path, secret: &Secret, ttl: Duration) -> PasswordFeeder {
-    let stop = Arc::new(AtomicBool::new(false));
-    let thread_stop = Arc::clone(&stop);
-    let fifo = fifo.to_path_buf();
-    let hex = secret.expose_hex();
-    let join = std::thread::spawn(move || feeder_loop(&fifo, &hex, &thread_stop, ttl));
     PasswordFeeder {
-        stop,
-        join: Some(join),
+        core: FeederCore::looping(fifo.to_path_buf(), secret.expose_hex(), ttl),
     }
 }
 
@@ -227,44 +188,19 @@ pub fn start_password_feeder(
 
 impl PasswordFeeder {
     /// Stops the feeder; does not block indefinitely on a stuck thread.
-    pub fn stop(mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        if let Some(join) = self.join.take() {
-            drop(join);
-        }
+    pub fn stop(self) {
+        self.core.stop();
     }
 
     /// Waits up to `timeout` for the feeder thread to finish.
-    pub fn join_timeout(mut self, timeout: Duration) -> Result<(), SshAuthError> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if self.join.as_ref().is_some_and(JoinHandle::is_finished) {
-                if let Some(join) = self.join.take() {
-                    let _ = join.join();
-                }
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                self.stop.store(true, Ordering::SeqCst);
-                return Err(SshAuthError::Timeout);
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+    pub fn join_timeout(self, timeout: Duration) -> Result<(), SshAuthError> {
+        self.core.join_timeout(timeout)
     }
 }
 
 impl fmt::Debug for PasswordFeeder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "PasswordFeeder([REDACTED])")
-    }
-}
-
-impl Drop for PasswordFeeder {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        if let Some(join) = self.join.take() {
-            drop(join);
-        }
     }
 }
 
@@ -282,23 +218,6 @@ impl MutagenOutcome {
     }
 }
 
-fn read_capped(mut pipe: impl Read + Send + 'static) -> JoinHandle<Vec<u8>> {
-    std::thread::spawn(move || {
-        let mut kept = Vec::new();
-        let mut buf = [0u8; 8192];
-        loop {
-            match pipe.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    let room = MAX_OUTPUT.saturating_sub(kept.len());
-                    kept.extend_from_slice(&buf[..n][..room.min(n)]);
-                }
-            }
-        }
-        kept
-    })
-}
-
 /// Runs one `mutagen <argv>` with the isolated env and a hard deadline.
 /// std::process is used because `CommandSpec` carries no env support.
 pub fn run_mutagen(
@@ -314,8 +233,8 @@ pub fn run_mutagen(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| SshAuthError::SpawnFailed(e.kind().to_string()))?;
-    let out_reader = read_capped(child.stdout.take().expect("stdout piped"));
-    let err_reader = read_capped(child.stderr.take().expect("stderr piped"));
+    let out_reader = read_capped(child.stdout.take().expect("stdout piped"), MAX_OUTPUT);
+    let err_reader = read_capped(child.stderr.take().expect("stderr piped"), MAX_OUTPUT);
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {

@@ -47,6 +47,29 @@ fn askpass_dir_has_private_permissions() {
 }
 
 #[test]
+fn askpass_dirs_have_unique_32_lowercase_hex_suffix() {
+    let a = AskpassSession::create("uniq").expect("session a");
+    let b = AskpassSession::create("uniq").expect("session b");
+    assert_ne!(a.dir_path(), b.dir_path());
+    for session in [&a, &b] {
+        let name = session
+            .dir_path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let suffix = name.rsplit('-').next().unwrap();
+        assert_eq!(suffix.len(), 32, "{name}");
+        assert!(
+            suffix
+                .bytes()
+                .all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')),
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn askpass_helper_answers_only_password_prompts() {
     let session = AskpassSession::create("prompts").expect("session");
     let denied = Command::new(session.helper_path())
@@ -202,7 +225,7 @@ fn ssh_command_times_out_bounded() {
 }
 
 #[tokio::test]
-#[ignore = "live docker+ssh: provisions a real sandbox"]
+#[ignore = "live docker+ssh: provisions a real sandbox, requires ssh-keyscan on PATH"]
 async fn live_fifo_ssh_password_auth_succeeds() {
     use pairproof::sandbox::lifecycle::{create_and_provision, destroy, destroy_by_session_id};
     use pairproof::sandbox::preflight::port_is_free;
@@ -252,7 +275,7 @@ async fn live_fifo_ssh_password_auth_succeeds() {
 }
 
 #[tokio::test]
-#[ignore = "live docker+ssh: provisions a real sandbox"]
+#[ignore = "live docker+ssh: provisions a real sandbox, requires ssh-keyscan on PATH"]
 async fn live_fifo_ssh_wrong_password_rejected() {
     use pairproof::sandbox::lifecycle::{create_and_provision, destroy, destroy_by_session_id};
     use pairproof::sandbox::preflight::port_is_free;
