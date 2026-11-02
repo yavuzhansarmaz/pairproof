@@ -319,9 +319,15 @@ fn waiting_state_renders_without_blocking() {
         .handle(AppEvent::ProposalConfirmed)
         .expect("connection wait");
     assert_eq!(expert.screen(), AppScreen::ConnectionWait);
-    assert!(screen_lines(&expert)
-        .join("\n")
-        .contains("waiting for candidate to connect."));
+    let wait_lines = screen_lines(&expert);
+    assert_eq!(wait_lines[0], "waiting for candidate to connect");
+    assert_eq!(
+        wait_lines
+            .join("\n")
+            .matches("waiting for candidate")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -441,6 +447,11 @@ fn preflight_help_offers_api_key_change_without_rerun() {
     assert!(!lines.contains("enter follows"), "{lines}");
     assert!(!lines.contains("b back to the main menu"), "{lines}");
     assert!(lines.contains("b close help"), "{lines}");
+    let d_at = lines.find("d read the disclosure").expect("d line");
+    let m_at = lines.find("m change the Meta API key").expect("m line");
+    let everywhere_at = lines.find("Everywhere:").expect("everywhere");
+    assert!(m_at < d_at && d_at < everywhere_at, "{lines}");
+    assert!(!lines.contains("b close help, d"), "{lines}");
     assert!(!lines.contains("re-run"), "{lines}");
     assert!(help_overlay_dispatches(
         KeyCode::Char('m'),

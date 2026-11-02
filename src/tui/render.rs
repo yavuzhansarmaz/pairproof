@@ -78,7 +78,8 @@ pub fn panel_area(area: Rect, lines: &[String], centered: bool) -> Rect {
 }
 
 /// Splits a line into spans, colouring standalone key tokens:
-/// `enter` and `[PASS]` pastel green, `b` and `m` pastel navy,
+/// `enter`, `[PASS]` and the disclosure `d` pastel green,
+/// `b` and `m` pastel navy,
 /// `?` pastel yellow, and `esc` pastel red. Keys inside words
 /// stay white.
 pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
@@ -99,13 +100,22 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
             && prev_ok(i)
             && (i + 3 == bytes.len() || matches!(bytes[i + 3], b' ' | b','));
         let is_back = bytes[i] == b'b' && prev_ok(i) && next_ok(i + 1);
+        let is_disclosure = text[i..].starts_with("d read the disclosure") && prev_ok(i);
         let is_meta = bytes[i] == b'm' && prev_ok(i) && next_ok(i + 1);
         let is_help = bytes[i] == b'?'
             && i > 0
             && bytes[i - 1] == b' '
             && i + 1 < bytes.len()
             && bytes[i + 1] == b' ';
-        if is_copy || is_pass || is_enter || is_esc || is_back || is_meta || is_help {
+        if is_copy
+            || is_pass
+            || is_enter
+            || is_esc
+            || is_back
+            || is_meta
+            || is_disclosure
+            || is_help
+        {
             if raw_start < i {
                 spans.push(Span::raw(text[raw_start..i].to_string()));
             }
@@ -121,6 +131,8 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
                 ("b", PAIR_COLOR, 1)
             } else if is_meta {
                 ("m", PAIR_COLOR, 1)
+            } else if is_disclosure {
+                ("d", ENTER_KEY_COLOR, 1)
             } else {
                 ("?", HELP_KEY_COLOR, 1)
             };

@@ -209,7 +209,6 @@ fn interactive_loop(
                     ) {
                         if let Some(token) = state.copy_token(app.screen()) {
                             expert_tty::copy_to_clipboard(&token);
-                            app.set_status_message("connection string copied.");
                         }
                     }
                 }

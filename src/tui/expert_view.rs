@@ -12,7 +12,7 @@ pub fn screen_title(screen: AppScreen) -> &'static str {
         AppScreen::Preflight => "Expert Setup",
         AppScreen::Setup => "Session setup",
         AppScreen::Proposal => "Proposed context",
-        AppScreen::ConnectionWait => "Waiting for candidate",
+        AppScreen::ConnectionWait => "waiting for candidate to connect",
         AppScreen::SelectMedium => "Select medium questions",
         AppScreen::SelectHard => "Select hard questions",
         AppScreen::Monitor => "Live monitor",
@@ -21,8 +21,8 @@ pub fn screen_title(screen: AppScreen) -> &'static str {
     }
 }
 
-fn footer(app: &ExpertApp) -> String {
-    match app.screen() {
+pub fn footer(app: &ExpertApp) -> Option<String> {
+    let text = match app.screen() {
         AppScreen::Exited => "esc quit".to_string(),
         AppScreen::RoleSelect => "e expert, c candidate, esc quit, ? help".to_string(),
         AppScreen::Preflight => {
@@ -42,7 +42,8 @@ fn footer(app: &ExpertApp) -> String {
             "e end the session, R reissue after disconnect, esc quit, ? help".to_string()
         }
         AppScreen::Final => "enter close, esc quit".to_string(),
-    }
+    };
+    (!text.is_empty()).then_some(text)
 }
 
 /// Builds deterministic sanitized lines for rendering one screen.
@@ -147,11 +148,11 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                     );
                 }
             }
-            S::ConnectionWait => lines.push(if app.connected {
-                "candidate connected.".into()
-            } else {
-                "waiting for candidate to connect.".into()
-            }),
+            S::ConnectionWait => {
+                if app.connected {
+                    lines.push("candidate connected.".into());
+                }
+            }
             S::SelectMedium => lines.push("press enter to load 3 medium questions.".into()),
             S::SelectHard => {
                 lines.push("press enter to load 2 hard questions and open the monitor.".into())
@@ -177,8 +178,7 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
     if let Some(message) = app.status_message() {
         lines.push(format!("status: {message}"));
     }
-    let foot = footer(app);
-    if !foot.is_empty() {
+    if let Some(foot) = footer(app) {
         lines.push(foot);
     }
     lines.iter().map(|line| sanitize_display(line)).collect()

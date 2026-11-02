@@ -54,6 +54,17 @@ impl ExpertLoopState {
     /// the masked API-key entry, then help/disclosure replacement.
     pub(crate) fn build_lines(&mut self, app: &app::ExpertApp) -> Vec<String> {
         let mut lines = app::screen_lines(app);
+        // Pull the footer off so runtime lines can be added above
+        // it; it is re-appended last, on every screen.
+        let footer = app::footer(app);
+        let held_footer = if !self.show_help && !self.show_disclosure {
+            match lines.last() {
+                Some(last) if Some(last.as_str()) == footer.as_deref() => lines.pop(),
+                _ => None,
+            }
+        } else {
+            None
+        };
         if let Some(active) = self.runtime.as_mut() {
             let now = now_ms();
             match app.screen() {
@@ -62,16 +73,21 @@ impl ExpertLoopState {
                         // The string itself is never displayed; the
                         // button copies it straight to the clipboard.
                         lines.push("connection string: [COPY] (click to copy)".to_string());
-                        lines.push(help::countdown_line(active.countdown_secs(now)));
+                        lines.push(format!(
+                            "candidate SSH login expires in {}s.",
+                            active.countdown_secs(now)
+                        ));
                     }
-                    lines.push("Waiting for candidate SSH login (no manual lock).".to_string());
                 }
                 app::AppScreen::Monitor => {
                     lines.extend(monitor::render_monitor_lines(&active.monitor_view(now)));
                     lines.extend(active.recovery_lines());
                     if active.reissue_string().is_some() {
                         lines.push("connection string: [COPY] (click to copy)".to_string());
-                        lines.push(help::countdown_line(active.countdown_secs(now)));
+                        lines.push(format!(
+                            "candidate SSH login expires in {}s.",
+                            active.countdown_secs(now)
+                        ));
                     }
                     if active.is_disconnected() {
                         lines.push("press R to reissue a fresh connection string.".to_string());
@@ -89,6 +105,9 @@ impl ExpertLoopState {
             );
             let at = lines.len().saturating_sub(1);
             lines.insert(at, masked);
+        }
+        if let Some(foot) = held_footer {
+            lines.push(foot);
         }
         if self.show_disclosure {
             lines = help::disclosure_lines();

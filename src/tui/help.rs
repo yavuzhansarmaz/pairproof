@@ -49,6 +49,7 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
         AppScreen::Final => lines.extend(["  enter close"]),
         AppScreen::Exited => lines.extend(["  goodbye."]),
     }
+    lines.push("  d read the disclosure");
     lines.extend([
         "",
         "Everywhere:",
@@ -60,7 +61,7 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
         "  pairproof uninstall             remove binary and data",
         "  pairproof uninstall --keep-data remove binary, keep data",
         "",
-        "b close help, d read the disclosure.",
+        "b close help.",
     ]);
     clean(lines)
 }

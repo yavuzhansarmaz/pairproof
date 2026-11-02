@@ -46,14 +46,15 @@ fn live_lines(
     if state.paste_notice || state.chat.paste_notice() {
         lines.push("pasting is blocked here; type instead.".to_string());
     }
+    if let Some(text) = status {
+        lines.push(sanitize_display(text));
+    }
+    // The key-hint line always stays at the very bottom.
     lines.push(if view.is_terminal() {
         "enter quit".to_string()
     } else {
         "focus: work/other/redirect/chat (tab switches)".to_string()
     });
-    if let Some(text) = status {
-        lines.push(sanitize_display(text));
-    }
     lines
 }
 pub fn handle_live_key<T: CandidateTransport>(
