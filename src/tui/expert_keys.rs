@@ -54,6 +54,9 @@ pub(crate) fn handle_key(
     runtime: &mut Option<ExpertRuntime>,
     tokio_rt: &mut Option<tokio::runtime::Runtime>,
     pastes: &mut ExpertSetupPastes,
+    proposal_rx: &mut Option<
+        std::sync::mpsc::Receiver<Result<crate::ingest::ProposedContext, String>>,
+    >,
     api_key_input: &mut String,
     code: crossterm::event::KeyCode,
 ) {
@@ -136,7 +139,7 @@ pub(crate) fn handle_key(
                 }
             }
         }
-        K::Enter => advance(app, runtime, tokio_rt, pastes),
+        K::Enter => advance(app, runtime, tokio_rt, pastes, proposal_rx),
         _ => {}
     }
 }
@@ -150,6 +153,9 @@ fn advance(
     runtime: &mut Option<ExpertRuntime>,
     tokio_rt: &mut Option<tokio::runtime::Runtime>,
     pastes: &mut ExpertSetupPastes,
+    proposal_rx: &mut Option<
+        std::sync::mpsc::Receiver<Result<crate::ingest::ProposedContext, String>>,
+    >,
 ) {
     use app::{AppEvent, AppScreen};
     match app.screen() {
@@ -181,23 +187,34 @@ fn advance(
             }
             ExpertSetupFocus::AdditionalNotes => {
                 pastes.acknowledge_disclosure();
-                let requested = block_on(tokio_rt, async {
-                    let client = expert_runtime::meta_client()?;
-                    pastes
-                        .request_proposal(&client)
-                        .await
-                        .map_err(|e| e.to_string())
-                });
-                match requested {
-                    Some(Ok(_)) => {
-                        app.set_proposal_lines(pastes.proposal_lines());
-                        app.set_has_proposal(true);
-                        app.clear_status_message();
-                        let _ = app.handle(AppEvent::ProposalReady);
-                    }
-                    Some(Err(err)) => set_error(app, "proposal failed", &err),
-                    None => set_error(app, "proposal failed", "runtime unavailable"),
+                if proposal_rx.is_some() {
+                    return;
                 }
+                // Run the Meta request on its own thread so the TTY
+                // loop keeps drawing the animated loading screen;
+                // `poll_proposal` applies the result when it lands.
+                let (tx, rx) = std::sync::mpsc::channel();
+                *proposal_rx = Some(rx);
+                let jd = pastes.jd().to_string();
+                let notes = pastes.notes().to_string();
+                std::thread::spawn(move || {
+                    let result = (|| {
+                        let runtime = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .map_err(|e| e.to_string())?;
+                        runtime.block_on(async {
+                            let client = expert_runtime::meta_client()?;
+                            let mut detached = ExpertSetupPastes::from_texts(&jd, &notes);
+                            detached.acknowledge_disclosure();
+                            detached
+                                .request_proposal(&client)
+                                .await
+                                .map_err(|e| e.to_string())
+                        })
+                    })();
+                    let _ = tx.send(result);
+                });
             }
         },
         AppScreen::Proposal => {

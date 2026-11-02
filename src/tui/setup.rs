@@ -192,6 +192,29 @@ impl SetupController {
         None
     }
 
+    /// Word-wraps one display line at 80 columns; continuation lines
+    /// are indented two spaces so long reasons stay on screen.
+    fn wrap_line(line: &str) -> Vec<String> {
+        const WIDTH: usize = 80;
+        let mut out = Vec::new();
+        let mut current = String::new();
+        for word in line.split_whitespace() {
+            if current.is_empty() {
+                current = word.to_string();
+            } else if current.chars().count() + 1 + word.chars().count() <= WIDTH {
+                current.push(' ');
+                current.push_str(word);
+            } else {
+                out.push(std::mem::take(&mut current));
+                current = format!("  {word}");
+            }
+        }
+        if !current.is_empty() || out.is_empty() {
+            out.push(current);
+        }
+        out
+    }
+
     /// Builds sanitized display lines; never includes the raw pastes.
     pub fn proposal_lines(&self) -> Vec<String> {
         let Some(proposal) = &self.proposal else {
@@ -234,6 +257,9 @@ impl SetupController {
             lines.push("Additional notes were truncated to 50,000 characters.".to_string());
         }
         lines
+            .iter()
+            .flat_map(|line| Self::wrap_line(line))
+            .collect()
     }
 
     /// Validates and stores the auto-selected easy set without preview.
@@ -332,6 +358,18 @@ impl ExpertSetupPastes {
     pub fn acknowledge_disclosure(&mut self) { self.controller.acknowledge_disclosure(); }
     /// Requests the proposal through the controller (Meta API call).
     pub async fn request_proposal(&mut self, client: &MetaClient) -> Result<ProposedContext, SetupError> { self.controller.request_proposal(client).await }
+    /// Builds a detached collector from raw texts, for requesting a
+    /// proposal off the TTY thread while the on-screen one stays put.
+    pub fn from_texts(jd: &str, notes: &str) -> Self {
+        let mut detached = Self::new();
+        detached.controller.set_jd(jd);
+        detached.controller.set_additional(notes);
+        detached.jd_received = !jd.trim().is_empty();
+        detached.notes_received = !notes.trim().is_empty();
+        detached
+    }
+    /// Stores a proposal obtained by a detached collector.
+    pub fn apply_proposal(&mut self, proposed: ProposedContext) { self.controller.apply_proposal(proposed); }
     /// Returns the stored proposal, if one has been applied.
     pub fn proposal(&self) -> Option<&ProposedContext> { self.controller.proposal() }
     /// Sanitized proposal lines for the Proposal screen; never raw pastes.

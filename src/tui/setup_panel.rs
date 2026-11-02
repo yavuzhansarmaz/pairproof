@@ -17,7 +17,6 @@ pub struct SetupPanel<'a> {
     pub job_focused: bool,
     pub job_scroll: usize,
     pub notes_scroll: usize,
-    pub status: Option<&'a str>,
     pub job_height: u16,
     pub notes_height: u16,
 }
@@ -25,23 +24,20 @@ pub struct SetupPanel<'a> {
 /// Returns the (job, notes) box rectangles for a terminal area and
 /// the given visible-line heights, matching `draw_setup_screen`.
 pub fn setup_box_areas(area: Rect, job_height: u16, notes_height: u16) -> (Rect, Rect) {
-    let chunks = setup_chunks(area, job_height, notes_height, false);
+    let chunks = setup_chunks(area, job_height, notes_height);
     (chunks[2], chunks[3])
 }
 
-fn setup_chunks(area: Rect, job_height: u16, notes_height: u16, has_status: bool) -> Vec<Rect> {
+fn setup_chunks(area: Rect, job_height: u16, notes_height: u16) -> Vec<Rect> {
     let outer = Block::default().borders(Borders::ALL);
     let inner = outer.inner(area);
-    let mut constraints = vec![
+    let constraints = vec![
         ratatui::layout::Constraint::Length(1),
         ratatui::layout::Constraint::Length(1),
         ratatui::layout::Constraint::Length(job_height + 2),
         ratatui::layout::Constraint::Length(notes_height + 2),
+        ratatui::layout::Constraint::Length(1),
     ];
-    if has_status {
-        constraints.push(ratatui::layout::Constraint::Length(1));
-    }
-    constraints.push(ratatui::layout::Constraint::Length(1));
     ratatui::layout::Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints(constraints)
@@ -133,12 +129,7 @@ pub fn draw_setup_screen(frame: &mut Frame, panel: &SetupPanel) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(FRAME_COLOR));
     frame.render_widget(outer, area);
-    let chunks = setup_chunks(
-        area,
-        panel.job_height,
-        panel.notes_height,
-        panel.status.is_some(),
-    );
+    let chunks = setup_chunks(area, panel.job_height, panel.notes_height);
     let heading = Paragraph::new("Session setup").style(
         Style::default()
             .fg(HEADING_COLOR)
@@ -181,13 +172,6 @@ pub fn draw_setup_screen(frame: &mut Frame, panel: &SetupPanel) {
             panel.notes_scroll,
         ),
     );
-    if let Some(status) = panel.status {
-        frame.render_widget(
-            Paragraph::new(Line::from(help_key_spans(&format!("status: {status}"))))
-                .style(Style::default().fg(TEXT_COLOR)),
-            chunks[4],
-        );
-    }
     let footer = if panel.job_focused {
         "up/down scroll, drag bottom border to resize, enter continue, b back, esc quit"
     } else {

@@ -125,19 +125,29 @@ fn interactive_loop(
             *preflight_done = true;
             run_preflight_check(app);
         }
+        state.poll_proposal(app);
         tick_runtime(app, &mut state.runtime, &mut state.tokio_rt);
-        let lines = state.build_lines(app);
+        let lines = if state.is_loading() {
+            state.loading_lines()
+        } else {
+            state.build_lines(app)
+        };
         let height = terminal.size().map(|s| s.height as usize).unwrap_or(24);
         let visible = viewport::visible_with_pinned(&lines, height.saturating_sub(2));
         let centered = matches!(
             app.screen(),
-            app::AppScreen::RoleSelect | app::AppScreen::Preflight
+            app::AppScreen::RoleSelect | app::AppScreen::Preflight | app::AppScreen::Proposal
         ) || state.show_help
-            || state.show_disclosure;
-        let show_setup =
-            app.screen() == app::AppScreen::Setup && !state.show_help && !state.show_disclosure;
+            || state.show_disclosure
+            || state.is_loading();
+        let show_setup = app.screen() == app::AppScreen::Setup
+            && !state.show_help
+            && !state.show_disclosure
+            && !state.is_loading();
         let _ = terminal.draw(|frame| {
-            if show_setup {
+            if state.is_loading() {
+                render::draw_loading_screen(frame, &visible);
+            } else if show_setup {
                 render::draw_setup_screen(
                     frame,
                     &render::SetupPanel {
@@ -147,7 +157,6 @@ fn interactive_loop(
                             == setup::ExpertSetupFocus::JobDescription,
                         job_scroll: state.pastes.jd_scroll(),
                         notes_scroll: state.pastes.notes_scroll(),
-                        status: app.status_message(),
                         job_height: state.setup_jd_height,
                         notes_height: state.setup_notes_height,
                     },
@@ -160,10 +169,14 @@ fn interactive_loop(
             match crossterm::event::read() {
                 Ok(crossterm::event::Event::Key(key)) => state.handle_key_event(app, key),
                 Ok(crossterm::event::Event::Paste(text)) => {
-                    handle_paste(app, &mut state.pastes, &mut state.api_key_input, &text)
+                    if !state.is_loading() {
+                        handle_paste(app, &mut state.pastes, &mut state.api_key_input, &text)
+                    }
                 }
                 Ok(crossterm::event::Event::Mouse(mouse))
-                    if app.screen() == app::AppScreen::Setup && !state.show_help =>
+                    if app.screen() == app::AppScreen::Setup
+                        && !state.show_help
+                        && !state.is_loading() =>
                 {
                     let size = terminal.size().unwrap_or_default();
                     state.handle_setup_mouse(

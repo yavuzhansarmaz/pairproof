@@ -3,7 +3,7 @@
 
 use crate::tui::expert_keys::handle_key;
 use crate::tui::expert_runtime::{ExpertRuntime, PollOutcome};
-use crate::tui::expert_tty::{block_on, now_ms};
+use crate::tui::expert_tty::{block_on, now_ms, set_error};
 use crate::tui::setup::ExpertSetupPastes;
 use crate::tui::{app, help, monitor, render, setup};
 
@@ -18,6 +18,9 @@ pub(crate) struct ExpertLoopState {
     pub(crate) setup_drag: Option<setup::ExpertSetupFocus>,
     pub(crate) show_help: bool,
     pub(crate) show_disclosure: bool,
+    pub(crate) proposal_rx:
+        Option<std::sync::mpsc::Receiver<Result<crate::ingest::ProposedContext, String>>>,
+    pub(crate) loading_tick: usize,
 }
 
 impl Default for ExpertLoopState {
@@ -32,6 +35,8 @@ impl Default for ExpertLoopState {
             setup_drag: None,
             show_help: false,
             show_disclosure: false,
+            proposal_rx: None,
+            loading_tick: 0,
         }
     }
 }
@@ -89,9 +94,47 @@ impl ExpertLoopState {
             &mut self.runtime,
             &mut self.tokio_rt,
             &mut self.pastes,
+            &mut self.proposal_rx,
             &mut self.api_key_input,
             code,
         );
+    }
+
+    /// True while a proposal request runs in the background.
+    pub(crate) fn is_loading(&self) -> bool {
+        self.proposal_rx.is_some()
+    }
+
+    /// Animated centred loading lines for one frame.
+    pub(crate) fn loading_lines(&mut self) -> Vec<String> {
+        self.loading_tick += 1;
+        render::loading_lines(self.loading_tick)
+    }
+
+    /// Applies a finished background proposal request, if one landed.
+    pub(crate) fn poll_proposal(&mut self, app: &mut app::ExpertApp) {
+        let Some(rx) = &self.proposal_rx else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(Ok(proposed)) => {
+                self.proposal_rx = None;
+                self.pastes.apply_proposal(proposed);
+                app.set_proposal_lines(self.pastes.proposal_lines());
+                app.set_has_proposal(true);
+                app.clear_status_message();
+                let _ = app.handle(app::AppEvent::ProposalReady);
+            }
+            Ok(Err(err)) => {
+                self.proposal_rx = None;
+                set_error(app, "proposal failed", &err);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.proposal_rx = None;
+                set_error(app, "proposal failed", "request stopped unexpectedly");
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
     }
 
     /// Routes one key event through API-key entry and help overlays.
@@ -101,6 +144,19 @@ impl ExpertLoopState {
         key: crossterm::event::KeyEvent,
     ) {
         if key.kind == crossterm::event::KeyEventKind::Release {
+            return;
+        }
+        if self.proposal_rx.is_some() {
+            // Loading: only quit keys are live; the rest is ignored
+            // so the request cannot be re-entered or navigated away.
+            let quit = key.code == crossterm::event::KeyCode::Esc
+                || (key.code == crossterm::event::KeyCode::Char('c')
+                    && key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL));
+            if quit {
+                let _ = app.handle(app::AppEvent::Quit);
+            }
             return;
         }
         if app.api_key_entry {

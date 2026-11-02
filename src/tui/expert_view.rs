@@ -33,7 +33,8 @@ fn footer(app: &ExpertApp) -> String {
             }
         }
         AppScreen::Setup => "enter continue, b back, esc quit, ? help".to_string(),
-        AppScreen::Proposal => "enter confirm, b back, esc quit, ? help".to_string(),
+        // Proposal carries its keys on the wait line; no footer.
+        AppScreen::Proposal => String::new(),
         AppScreen::ConnectionWait => "esc quit, ? help".to_string(),
         AppScreen::SelectMedium => "enter load medium questions, esc quit, ? help".to_string(),
         AppScreen::SelectHard => "enter load hard questions, esc quit, ? help".to_string(),
@@ -133,13 +134,17 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
             }
             S::Proposal => {
                 if app.proposal_lines.is_empty() {
-                    lines
-                        .push("review the proposal. press enter to wait for the candidate.".into());
+                    lines.push(
+                        "review the proposal. press enter to wait for the candidate, b back, esc quit, ? help"
+                            .into(),
+                    );
                 } else {
                     for line in &app.proposal_lines {
                         lines.push(format!("  {line}"));
                     }
-                    lines.push("press enter to wait for the candidate.".into());
+                    lines.push(
+                        "press enter to wait for the candidate, b back, esc quit, ? help".into(),
+                    );
                 }
             }
             S::ConnectionWait => lines.push(if app.connected {
@@ -172,6 +177,9 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
     if let Some(message) = app.status_message() {
         lines.push(format!("status: {message}"));
     }
-    lines.push(footer(app));
+    let foot = footer(app);
+    if !foot.is_empty() {
+        lines.push(foot);
+    }
     lines.iter().map(|line| sanitize_display(line)).collect()
 }

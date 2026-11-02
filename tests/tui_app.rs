@@ -258,9 +258,10 @@ fn proposal_and_final_lines_render_on_their_screens() {
     assert!(proposal.contains("Topics: array, hash-table"), "{proposal}");
     assert!(proposal.contains("Language: Python"), "{proposal}");
     assert!(
-        proposal.contains("press enter to wait for the candidate."),
+        proposal.contains("press enter to wait for the candidate, b back, esc quit, ? help"),
         "{proposal}"
     );
+    assert!(!proposal.contains("enter confirm"), "{proposal}");
 
     let mut done = ExpertApp::new();
     advance_to_monitor(&mut done);

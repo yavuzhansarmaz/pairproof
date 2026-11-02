@@ -32,7 +32,7 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
             "  m change the Meta API key (back on Expert Setup)",
             "  b back a step, keeping your pasted text",
         ]),
-        AppScreen::Proposal => lines.extend(["  enter confirm and wait for the candidate"]),
+        AppScreen::Proposal => lines.extend(["  enter wait for the candidate"]),
         AppScreen::ConnectionWait => lines.extend([
             "  waiting for the candidate to connect",
             "  share the connection string shown on screen",

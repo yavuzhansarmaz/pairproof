@@ -219,6 +219,13 @@ fn body_line(line: &str) -> Line<'static> {
     plain_line(line)
 }
 
+/// Centred loading lines with animated dots (1-3, cycling), shown
+/// while a background request runs so the screen never looks frozen.
+pub fn loading_lines(tick: usize) -> Vec<String> {
+    let dots = ".".repeat(tick % 3 + 1);
+    vec![format!("working on your request, loading{dots}")]
+}
+
 /// Draws `lines` inside a bordered panel. The frame title is
 /// always the `PairProof` brand. The first line renders as a
 /// pastel-navy heading, the rest as soft white.
@@ -239,6 +246,25 @@ pub fn draw_screen(frame: &mut Frame, lines: &[String], centered: bool) {
                 body_line(line)
             }
         })
+        .collect();
+    let widget = Paragraph::new(text)
+        .style(Style::default().fg(TEXT_COLOR))
+        .block(
+            Block::default()
+                .title(title_line())
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(FRAME_COLOR)),
+        );
+    frame.render_widget(widget, area);
+}
+
+/// Draws the centred loading panel; every line is soft white, with
+/// no navy heading line.
+pub fn draw_loading_screen(frame: &mut Frame, lines: &[String]) {
+    let area = panel_area(frame.area(), lines, true);
+    let text: Vec<Line> = lines
+        .iter()
+        .map(|line| Line::from(Span::styled(line.clone(), Style::default().fg(TEXT_COLOR))))
         .collect();
     let widget = Paragraph::new(text)
         .style(Style::default().fg(TEXT_COLOR))

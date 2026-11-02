@@ -297,6 +297,80 @@ fn main_menu_renders_as_a_centred_brand_panel() {
 }
 
 #[test]
+fn proposal_renders_as_a_centred_panel() {
+    use pairproof::tui::app::{screen_lines, AppEvent, AppScreen, ExpertApp};
+    use pairproof::tui::render::draw_screen;
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let mut app = ExpertApp::new();
+    app.handle(AppEvent::SelectExpert).expect("preflight");
+    app.set_disclosure_acknowledged(true);
+    app.set_preflight_passed(true);
+    app.set_api_key_ready(true);
+    app.handle(AppEvent::PreflightCompleted).expect("setup");
+    app.set_has_proposal(true);
+    app.handle(AppEvent::ProposalReady).expect("proposal");
+    assert_eq!(app.screen(), AppScreen::Proposal);
+    app.set_proposal_lines(vec!["Language: Python".to_string()]);
+    let lines = screen_lines(&app);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(rendered.contains("Proposed context"), "{rendered}");
+    assert_eq!(buffer[(0, 0)].symbol(), " ");
+    let left_border = (0..30)
+        .find_map(|y| (0..100).find(|&x| buffer[(x, y)].symbol() == "\u{2502}"))
+        .expect("left border");
+    assert!(
+        left_border > 10,
+        "panel should be centred, border at {left_border}"
+    );
+}
+
+#[test]
+fn loading_screen_renders_white_not_navy() {
+    use pairproof::tui::render::{draw_loading_screen, loading_lines, HEADING_COLOR, TEXT_COLOR};
+    let backend = ratatui::backend::TestBackend::new(80, 20);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = loading_lines(2);
+    terminal
+        .draw(|frame| draw_loading_screen(frame, &lines))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let white: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == TEXT_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(
+        white.contains("working on your request, loading..."),
+        "{white}"
+    );
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == HEADING_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(!navy.contains("working"), "{navy}");
+}
+
+#[test]
+fn loading_lines_cycle_one_to_three_dots() {
+    use pairproof::tui::render::loading_lines;
+    assert_eq!(loading_lines(0), vec!["working on your request, loading."]);
+    assert_eq!(loading_lines(1), vec!["working on your request, loading.."]);
+    assert_eq!(
+        loading_lines(2),
+        vec!["working on your request, loading..."]
+    );
+    assert_eq!(loading_lines(3), vec!["working on your request, loading."]);
+}
+
+#[test]
 fn candidate_connection_renders_as_a_centred_panel() {
     use pairproof::tui::candidate::CandidateApp;
     use pairproof::tui::render::draw_screen;
@@ -430,7 +504,6 @@ fn session_setup_boxes_show_five_and_two_lines() {
                     job_focused: true,
                     job_scroll: 0,
                     notes_scroll: 0,
-                    status: None,
                     job_height: 5,
                     notes_height: 2,
                 },
@@ -492,7 +565,6 @@ fn session_setup_wraps_words_and_expands_with_height() {
                     job_focused: true,
                     job_scroll: 0,
                     notes_scroll: 0,
-                    status: None,
                     job_height: 8,
                     notes_height: 2,
                 },
