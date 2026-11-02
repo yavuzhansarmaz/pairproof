@@ -14,7 +14,9 @@ use pairproof::orchestration::*;
 use pairproof::sandbox::{RunnabilityReport, TestOutcome};
 use pairproof::scoring::{ApproachGrade, ApproachQuality, ApproachSet};
 use pairproof::tui::app::{AppEvent, AppScreen, ExpertApp};
-use pairproof::tui::expert_runtime::expert_context_from_extraction;
+use pairproof::tui::expert_runtime::{
+    expert_context_from_extraction, first_free_port, format_session_id, SANDBOX_PORT_RANGE,
+};
 use pairproof::tui::expert_runtime::{
     ExpertRuntime, ExpertRuntimeDeps, ExpertSessionSpec, LocalHelloSource, PollOutcome,
 };
@@ -93,10 +95,14 @@ impl QuestionGrader for FakeGrader {
 
 #[rustfmt::skip]
 async fn make_runtime(name: &str, hang: bool) -> (PathBuf, PathBuf, ExpertRuntime) {
+    make_runtime_with_sync(name, hang, SessionSyncPhase::NotStarted).await
+}
+#[rustfmt::skip]
+async fn make_runtime_with_sync(name: &str, hang: bool, sync_phase: SessionSyncPhase) -> (PathBuf, PathBuf, ExpertRuntime) {
     let root = tmp(name); let control = root.join("control"); let artifacts = root.join("artifacts");
     let io = LocalControlIo::new(control.clone()); io.setup_dirs("pp-testuser").await.unwrap();
     let spec = ExpertSessionSpec { session_id: "s1".into(), language: Language::Python, easy: qs("e", 5, Difficulty::Easy), endpoint: Endpoint::new("203.0.113.10", 22022).unwrap(), username: EphemeralUsername::parse("pp-a1b2c3d4").unwrap(), fingerprint: Fingerprint::parse(&"a".repeat(64)).unwrap() };
-    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher: Arc::new(FakeFetcher { hang }), generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding::default()), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts.clone(), topics: Vec::new(), level: String::new(), sync_phase: "Sync: test".into() };
+    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher: Arc::new(FakeFetcher { hang }), generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding::default()), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts.clone(), topics: Vec::new(), level: String::new(), sync_phase };
     let runtime = ExpertRuntime::new(spec, deps, T0).await.unwrap();
     (root, control, runtime)
 }
@@ -157,6 +163,46 @@ async fn expert_runtime_drains_intents_and_publishes_snapshot() {
     let bytes = std::fs::read(control.join(SNAPSHOT_REL)).unwrap();
     let snapshot = parse_snapshot(&bytes, "s1").unwrap();
     assert_eq!(snapshot.current.as_ref().map(|c| c.index), Some(1));
+}
+
+#[tokio::test] #[rustfmt::skip]
+async fn expert_snapshot_carries_typed_sync_phase_labels() {
+    let cases = [
+        (SessionSyncPhase::NotStarted, "sync-not-started", "Sync: not started"),
+        (SessionSyncPhase::Active, "sync-active", "Sync: active"),
+        (SessionSyncPhase::Paused, "sync-paused", "Sync: paused"),
+        (SessionSyncPhase::Conflict, "sync-conflict", "Sync: conflict needs attention \u{2014} ask the expert"),
+    ];
+    for (phase, name, label) in cases {
+        let (_root, control, mut runtime) = make_runtime_with_sync(name, false, phase).await;
+        assert_eq!(runtime.sync_phase(), phase);
+        write_hello(&control, "s1");
+        assert_eq!(runtime.poll_candidate(T0 + 1_000).await, PollOutcome::Connected);
+        runtime.drain_intents(T0 + 2_000).await.unwrap();
+        let bytes = std::fs::read(control.join(SNAPSHOT_REL)).unwrap();
+        let snapshot = parse_snapshot(&bytes, "s1").unwrap();
+        assert_eq!(snapshot.v, 1, "SNAPSHOT_VERSION must stay 1 for {phase:?}");
+        assert_eq!(snapshot.sync_phase, label, "phase {phase:?}");
+        let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(wire["sync_phase"], label, "wire label for {phase:?}");
+        assert_eq!(wire["v"], 1);
+    }
+}
+
+#[tokio::test] #[rustfmt::skip]
+async fn expert_snapshot_uses_sync_phase_set_after_construction() {
+    let (_root, control, mut runtime) = make_runtime("sync-setter", false).await;
+    assert_eq!(runtime.sync_phase(), SessionSyncPhase::NotStarted);
+    write_hello(&control, "s1");
+    assert_eq!(runtime.poll_candidate(T0 + 1_000).await, PollOutcome::Connected);
+    runtime.set_sync_phase(SessionSyncPhase::Paused);
+    runtime.drain_intents(T0 + 2_000).await.unwrap();
+    let snapshot = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    assert_eq!(snapshot.sync_phase, "Sync: paused");
+    runtime.set_sync_phase(SessionSyncPhase::Conflict);
+    runtime.drain_intents(T0 + 3_000).await.unwrap();
+    let snapshot = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    assert_eq!(snapshot.sync_phase, "Sync: conflict needs attention \u{2014} ask the expert");
 }
 
 #[tokio::test] #[rustfmt::skip]
@@ -359,6 +405,53 @@ fn expert_setup_rejects_oversized_paste() {
     assert_eq!(apply_expert_setup_paste(&mut pastes, &boundary), Ok(false));
     assert_eq!(apply_expert_setup_paste(&mut pastes, "notes"), Ok(true));
     assert!(pastes.is_complete());
+}
+
+#[tokio::test] #[rustfmt::skip]
+async fn expert_scored_session_shows_approach_lines_and_rating() {
+    fn push_intent(control: &std::path::Path, seq: u64, kind: IntentKind) {
+        let intent = Intent::new("s1", seq, kind);
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(control.join(INTENT_REL)).unwrap();
+        file.write_all(format!("{}\n", intent.to_line().unwrap()).as_bytes()).unwrap();
+    }
+    let (_root, control, mut runtime) = make_runtime("scored", false).await;
+    // No selection yet: empty-session behaviour is unchanged.
+    assert!(runtime.monitor_view(T0 + 500).rating_lines.is_empty());
+    assert!((runtime.monitor_view(T0 + 500).rating - 6.0).abs() < 1e-9);
+    write_hello(&control, "s1");
+    assert_eq!(runtime.poll_candidate(T0 + 1_000).await, PollOutcome::Connected);
+    for _ in 0..50 {
+        runtime.drain_intents(T0 + 2_000).await.unwrap();
+        let snap = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+        if snap.options.len() == 4 { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    // Preset 1 is the fake set's Best option ("Hash map").
+    push_intent(&control, 1, IntentKind::SelectPreset { preset: 1 });
+    runtime.drain_intents(T0 + 3_000).await.unwrap();
+    let live = runtime.monitor_view(T0 + 3_000);
+    assert!(live.rating_lines.iter().any(|l| l.contains("Approach") && l.contains("Best")), "live lines: {:?}", live.rating_lines);
+    assert!((live.rating - 6.15).abs() < 1e-9, "live rating: {}", live.rating);
+    push_intent(&control, 2, IntentKind::Finish);
+    runtime.drain_intents(T0 + 4_000).await.unwrap();
+    assert_eq!(runtime.orchestrator().current_index(), Some(1));
+    let done = runtime.monitor_view(T0 + 4_000);
+    assert!(done.rating_lines.iter().any(|l| l.contains("Approach") && l.contains("Best")), "finished lines: {:?}", done.rating_lines);
+    assert!((done.rating - 6.25).abs() < 1e-9, "finished rating: {}", done.rating);
+    write_ack(&control, "s1");
+    runtime.end_session(T0 + 5_000).await.unwrap();
+    let after = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    let breakdown = after.final_breakdown.expect("final breakdown published");
+    assert!((breakdown.rating - 6.25).abs() < 1e-9, "final rating: {}", breakdown.rating);
+}
+
+#[test] #[rustfmt::skip]
+fn expert_format_session_id_and_port_scan() {
+    assert_eq!(format_session_id(123, 456), "e123x456");
+    assert_eq!(SANDBOX_PORT_RANGE, 2222..2322);
+    assert_eq!(first_free_port(SANDBOX_PORT_RANGE.clone(), |_| false), None);
+    assert_eq!(first_free_port(SANDBOX_PORT_RANGE.clone(), |p| p != 2222), Some(2223));
+    assert_eq!(first_free_port(SANDBOX_PORT_RANGE, |p| p == 2322), None);
 }
 
 #[test] #[rustfmt::skip]

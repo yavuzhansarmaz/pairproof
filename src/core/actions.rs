@@ -167,8 +167,7 @@ mod tests {
     use super::*;
     use crate::core::events::EventKind;
     use crate::core::test_support::*;
-    use crate::core::types::{CoreError, QuestionStatus};
-    use crate::leetcode::Difficulty;
+    use crate::core::types::{CoreError, Difficulty, QuestionStatus};
 
     #[test]
     fn actions_require_active_and_redirect_needs_text() {

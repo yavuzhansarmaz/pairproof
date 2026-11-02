@@ -2,19 +2,19 @@
 //! Hidden approach quality and expected tokens never leave this module
 //! except as the single locked value passed to the core at selection.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
 
-use crate::core::{CoreError, Language};
+use crate::core::{ApproachChoice, CoreError, Language};
 use crate::leetcode::{LeetCodeClient, Question};
 use crate::llm::approaches::{generate_approaches, grade_other_approach};
 use crate::llm::MetaClient;
 use crate::orchestration::error::OrchestratorError;
 use crate::orchestration::session::Orchestrator;
 use crate::sandbox::TestOutcome;
-use crate::scoring::{ApproachGrade, ApproachOptionView, ApproachSet};
+use crate::scoring::{ApproachGrade, ApproachOptionView, ApproachQuality, ApproachSet};
 use rand::SeedableRng as _;
 
 /// Errors surfaced by the question, coding, and chat pipeline.
@@ -191,6 +191,7 @@ pub struct QuestionPipeline {
     pub(crate) codes: HashMap<usize, String>,
     pub(crate) test_records: Vec<TestRunRecord>,
     pub(crate) chat_busy: AtomicBool,
+    pub(crate) selected_qualities: BTreeMap<usize, Vec<ApproachQuality>>,
 }
 
 impl Default for QuestionPipeline {
@@ -209,6 +210,7 @@ impl QuestionPipeline {
             codes: HashMap::new(),
             test_records: Vec::new(),
             chat_busy: AtomicBool::new(false),
+            selected_qualities: BTreeMap::new(),
         }
     }
 
@@ -279,6 +281,46 @@ impl QuestionPipeline {
         self.approaches.is_some() && self.approaches_index == orch.current_index()
     }
 
+    /// Hidden quality of the current preset selection, if any.
+    fn current_selection_quality(&self, orch: &Orchestrator) -> Option<(usize, ApproachQuality)> {
+        let index = orch.current_index()?;
+        if self.approaches_index != Some(index) {
+            return None;
+        }
+        let slot = orch.session().current_slot()?;
+        match slot.approach {
+            Some(ApproachChoice::Preset(preset)) => self
+                .approaches
+                .as_ref()
+                .and_then(|set| set.quality_of(preset))
+                .map(|quality| (index, quality)),
+            _ => None,
+        }
+    }
+
+    /// Records the current preset quality before its set is cleared.
+    fn record_current_selection(&mut self, selected: Option<(usize, ApproachQuality)>) {
+        if let Some((index, quality)) = selected {
+            self.selected_qualities
+                .entry(index)
+                .or_default()
+                .push(quality);
+        }
+    }
+
+    /// Approach qualities in selection order, keyed by slot index.
+    /// Selections already cleared (finished, skipped or changed) come
+    /// from the recorded history; the still-current selection is read
+    /// from its live approach set. `Other` selections carry no set
+    /// quality and are omitted.
+    pub fn approach_qualities(&self, orch: &Orchestrator) -> BTreeMap<usize, Vec<ApproachQuality>> {
+        let mut qualities = self.selected_qualities.clone();
+        if let Some((index, quality)) = self.current_selection_quality(orch) {
+            qualities.entry(index).or_default().push(quality);
+        }
+        qualities
+    }
+
     /// Returns the latest stored solution code for a question index.
     pub fn current_code(&self, index: usize) -> Option<&str> {
         self.codes.get(&index).map(String::as_str)
@@ -301,7 +343,9 @@ impl QuestionPipeline {
         orch: &mut Orchestrator,
         now_ms: u64,
     ) -> Result<(), PipelineError> {
+        let selected = self.current_selection_quality(orch);
         orch.finish_question(now_ms)?;
+        self.record_current_selection(selected);
         self.clear_approaches();
         Ok(())
     }
@@ -312,7 +356,9 @@ impl QuestionPipeline {
         orch: &mut Orchestrator,
         now_ms: u64,
     ) -> Result<(), PipelineError> {
+        let selected = self.current_selection_quality(orch);
         orch.skip_question(now_ms)?;
+        self.record_current_selection(selected);
         self.clear_approaches();
         Ok(())
     }
@@ -324,7 +370,9 @@ impl QuestionPipeline {
         orch: &mut Orchestrator,
         now_ms: u64,
     ) -> Result<(), PipelineError> {
+        let selected = self.current_selection_quality(orch);
         orch.change_approach(now_ms)?;
+        self.record_current_selection(selected);
         self.clear_approaches();
         Ok(())
     }

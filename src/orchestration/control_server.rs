@@ -189,7 +189,7 @@ impl ControlExecutor {
             IntentKind::RequestTests => pipe.request_tests(orch, t.sandbox, now_ms).await.map(|_| ()),
             IntentKind::Finish => pipe.finish_question(orch, now_ms),
             IntentKind::Skip => pipe.skip_question(orch, now_ms),
-            IntentKind::RequestRequestion => orch.request_requestion(now_ms).map_err(PipelineError::from),
+            IntentKind::RequestReQuestion => orch.request_requestion(now_ms).map_err(PipelineError::from),
             IntentKind::ChatRequest { text, .. } => {
                 let reply = pipe.submit_chat(orch, t.chat, &mut self.chat_history, text, now_ms).await?;
                 self.chat_replies.push(reply);

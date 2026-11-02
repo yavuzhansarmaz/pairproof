@@ -1,18 +1,14 @@
+mod common_mod;
+
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use common_mod::creds;
 use pairproof::connection::{Endpoint, EphemeralUsername};
 use pairproof::sandbox::process::{run_bounded, CommandOutcome, CommandSpec, DEFAULT_MAX_OUTPUT};
 use pairproof::sync::{
     check_mutagen_available, create_sync, flush_sync, sync_status, terminate_sync, SyncError,
 };
-
-fn creds() -> (Endpoint, EphemeralUsername) {
-    (
-        Endpoint::new("203.0.113.10", 2222).expect("endpoint"),
-        EphemeralUsername::parse("pp-abcd1234").expect("user"),
-    )
-}
 
 #[tokio::test]
 async fn runners_reject_invalid_session_id_before_spawn() {
@@ -111,14 +107,14 @@ fn absent_id(tag: &str) -> String {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH"]
 async fn live_mutagen_available_reports_version() {
     let version = check_mutagen_available().await.expect("mutagen present");
     assert!(!version.trim().is_empty(), "version text must not be empty");
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH"]
 async fn live_terminate_missing_session_is_ok() {
     terminate_sync(&absent_id("t"))
         .await
@@ -126,7 +122,7 @@ async fn live_terminate_missing_session_is_ok() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH"]
 async fn live_status_missing_session_is_none() {
     assert_eq!(
         sync_status(&absent_id("s")).await.expect("status runs"),
@@ -205,7 +201,7 @@ async fn roundtrip(session_id: &str, alpha: &Path, beta: &Path) -> Result<(), St
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH (real two-directory sync roundtrip)"]
 async fn live_two_directory_sync_roundtrip() {
     let pid = std::process::id();
     let session_id = format!("rt{pid}");
@@ -218,7 +214,7 @@ async fn live_two_directory_sync_roundtrip() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "live mutagen: requires mutagen on PATH"]
 async fn live_create_sync_bogus_endpoint_fails_typed() {
     let pid = std::process::id();
     let session_id = format!("bogus{pid}");

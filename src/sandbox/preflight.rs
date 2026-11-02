@@ -269,6 +269,16 @@ pub fn port_is_free(port: u16) -> bool {
     port != 0 && TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).is_ok()
 }
 
+/// Returns the first port in `range` for which `is_free` holds, or `None`
+/// when every port in the range is busy. Iteration follows the range's
+/// own bounds, so a `start..end` range never probes `end`.
+pub fn first_free_port(
+    range: impl IntoIterator<Item = u16>,
+    is_free: impl Fn(u16) -> bool,
+) -> Option<u16> {
+    range.into_iter().find(|port| is_free(*port))
+}
+
 /// Finds the primary outbound IPv4 via a UDP connect, which sends no packets.
 pub fn primary_local_ipv4() -> Option<Ipv4Addr> {
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
@@ -322,4 +332,26 @@ pub async fn gather_preflight(port: u16) -> PreflightReport {
         local_ips,
         mutagen_version,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_free_port_all_busy_is_none() {
+        assert_eq!(first_free_port(2222..2322, |_| false), None);
+    }
+
+    #[test]
+    fn first_free_port_skips_busy_first() {
+        assert_eq!(first_free_port(2222..2322, |p| p != 2222), Some(2223));
+    }
+
+    #[test]
+    fn first_free_port_first_free_wins_and_end_is_exclusive() {
+        assert_eq!(first_free_port(2222..2322, |_| true), Some(2222));
+        assert_eq!(first_free_port(2222..2322, |p| p == 2321), Some(2321));
+        assert_eq!(first_free_port(2222..2322, |p| p == 2322), None);
+    }
 }

@@ -17,4 +17,14 @@ fn binary_help_succeeds() {
         .output()
         .expect("binary runs");
     assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout is utf8");
+    assert!(stdout.contains("--role"), "help lists --role: {stdout}");
+    assert!(
+        stdout.contains("expert"),
+        "help names expert role: {stdout}"
+    );
+    assert!(
+        stdout.contains("candidate"),
+        "help names candidate role: {stdout}"
+    );
 }

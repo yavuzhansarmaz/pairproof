@@ -27,7 +27,7 @@ impl Orchestrator {
     }
 
     /// Returns the owned core session mutably.
-    pub fn session_mut(&mut self) -> &mut Session {
+    pub(crate) fn session_mut(&mut self) -> &mut Session {
         &mut self.session
     }
 
@@ -88,8 +88,7 @@ impl Orchestrator {
         Ok(())
     }
 
-    /// Attaches a candidate to the session.
-    pub fn attach_candidate(&mut self, now_ms: u64) -> Result {
+    fn attach_inner(&mut self, now_ms: u64) -> Result {
         if self.session.is_connected() {
             if self.session.status().is_terminal() {
                 self.session.candidate_connected(now_ms)?;
@@ -99,6 +98,11 @@ impl Orchestrator {
         }
         self.session.candidate_connected(now_ms)?;
         Ok(())
+    }
+
+    /// Attaches a candidate to the session.
+    pub fn attach_candidate(&mut self, now_ms: u64) -> Result {
+        self.attach_inner(now_ms)
     }
 
     /// Disconnects the currently attached candidate.
@@ -109,15 +113,7 @@ impl Orchestrator {
 
     /// Reconnects a previously disconnected candidate.
     pub fn reconnect_candidate(&mut self, now_ms: u64) -> Result {
-        if self.session.is_connected() {
-            if self.session.status().is_terminal() {
-                self.session.candidate_connected(now_ms)?;
-                return Ok(());
-            }
-            return Err(OrchestratorError::AlreadyAttached);
-        }
-        self.session.candidate_connected(now_ms)?;
-        Ok(())
+        self.attach_inner(now_ms)
     }
 
     /// Starts the interview on the first question.

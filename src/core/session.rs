@@ -6,10 +6,9 @@ use crate::core::types::CoreError::*;
 use crate::core::types::QuestionStatus::*;
 use crate::core::types::SessionStatus::*;
 use crate::core::types::{
-    ensure, expect_count, validate_question, CoreError, Language, QuestionRef, QuestionSlot,
-    QuestionSource, SessionStatus,
+    ensure, expect_count, validate_question, CoreError, Difficulty, Language, QuestionRef,
+    QuestionSlot, QuestionSource, SessionStatus,
 };
-use crate::leetcode::Difficulty;
 
 pub(crate) type R<T = ()> = Result<T, CoreError>;
 
