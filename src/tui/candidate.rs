@@ -42,7 +42,7 @@ pub enum CandidateConnectError {
     #[error("Connection was rejected; check the string and try again.")]
     Rejected,
     /// No verifier is wired up yet in this slice.
-    #[error("Connection verification is not available yet (Phase 10).")]
+    #[error("Connection verification is not available yet.")]
     Unavailable,
 }
 
@@ -332,30 +332,30 @@ impl CandidateApp {
                 if let Some(error) = self.last_error {
                     lines.push(format!("Error: {}", candidate_connect_message(&error)));
                 }
-                lines.push("Enter connect, Esc quit".to_string());
+                lines.push("Enter connect, esc quit".to_string());
                 lines
             }
             CandidateScreen::Rules => {
                 let mut lines = vec!["Candidate rules".to_string()];
                 lines.extend(self.rules_lines());
-                lines.push("Enter accept rules, q quit".to_string());
+                lines.push("Enter accept rules, esc quit".to_string());
                 lines
             }
             CandidateScreen::Waiting => {
                 let mut lines = vec!["Candidate waiting".to_string()];
                 lines.extend(self.waiting_lines());
-                lines.push("q quit".to_string());
+                lines.push("esc quit".to_string());
                 lines
             }
             CandidateScreen::Solving => vec![
                 "Candidate session".to_string(),
                 "Session in progress.".to_string(),
-                "q quit".to_string(),
+                "esc quit".to_string(),
             ],
             CandidateScreen::Final => vec![
                 "Candidate session".to_string(),
                 "Session ended.".to_string(),
-                "q quit".to_string(),
+                "esc quit".to_string(),
             ],
             CandidateScreen::Exited => {
                 vec!["Exited".to_string(), "Goodbye.".to_string()]

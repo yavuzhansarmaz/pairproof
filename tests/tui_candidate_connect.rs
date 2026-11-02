@@ -188,7 +188,8 @@ fn candidate_not_connected_until_verified() {
     app.push_text(&value.encoded);
     let err = app.submit_connection(1_000).expect_err("unavailable");
     assert_eq!(err, CandidateConnectError::Unavailable);
-    assert!(err.to_string().contains("Phase 10"));
+    assert!(err.to_string().contains("not available yet"));
+    assert!(!err.to_string().contains("Phase"));
     assert!(!app.is_connected());
     assert_eq!(app.screen(), CandidateScreen::Connect);
 

@@ -166,6 +166,31 @@ fn request_requestion_serializes_with_legacy_wire_name() {
 
 #[test]
 #[rustfmt::skip]
+fn change_approach_intent_roundtrips() {
+    let intent = Intent::new("s1", 1, IntentKind::ChangeApproach);
+    assert_eq!(intent.kind.name(), "ChangeApproach");
+    assert!(intent.validate("s1").is_ok());
+    let line = intent.to_line().unwrap();
+    assert!(line.contains(r#""kind":"ChangeApproach""#), "{line}");
+    assert_eq!(parse_intent_line(&line, "s1"), Ok(intent));
+}
+
+#[tokio::test]
+#[rustfmt::skip]
+async fn change_approach_intent_clears_the_selection() {
+    let (root, io, mut ex) = setup("change-approach").await;
+    let mut orch = started(); let mut pipe = loaded_pipe(&orch).await; let fakes = Fakes::new();
+    append(&root, &line(&Intent::new("s1", 1, IntentKind::SelectPreset { preset: 0 })));
+    append(&root, &line(&Intent::new("s1", 2, IntentKind::ChangeApproach)));
+    let reports = ex.drain(&io, &mut orch, &mut pipe, &fakes.transports(), 10).await.unwrap();
+    assert_eq!(reports.iter().map(|r| r.outcome).collect::<Vec<_>>(), vec![ApplyOutcome::Applied, ApplyOutcome::Applied], "{reports:?}");
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::ApproachChanged { .. })), 1);
+    assert!(orch.session().current_slot().is_some_and(|s| s.approach.is_none()));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+#[rustfmt::skip]
 fn parse_accepts_both_request_requestion_spellings() {
     for kind in ["RequestRequestion", "RequestReQuestion"] {
         let raw = format!(r#"{{"v":1,"id":"{}","session_id":"s1","seq":1,"kind":"{kind}","payload":{{}}}}"#, "a".repeat(32));

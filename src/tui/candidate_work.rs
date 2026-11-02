@@ -26,7 +26,7 @@ impl WorkPhase {
         match self {
             WorkPhase::Idle => "Phase: waiting for an approach choice",
             WorkPhase::CodingReady => "Phase: code ready",
-            WorkPhase::RunnerUnavailable => "Phase: coding step not available yet (Phase 10)",
+            WorkPhase::RunnerUnavailable => "Phase: coding step not available yet",
             WorkPhase::RunnerFailed => {
                 "Phase: The coding step failed; ask the expert if it persists."
             }
@@ -265,7 +265,7 @@ pub fn work_lines(session: &Session, work: &CandidateWork) -> Vec<String> {
         view.latest_test.as_deref().unwrap_or("no test run yet")
     ));
     if view.tests_unavailable {
-        lines.push("Tests are not available yet (Phase 10).".to_string());
+        lines.push("Tests are not available yet.".to_string());
     }
     if view.tests_failed {
         lines.push("Tests could not be run; ask the expert if it persists.".to_string());

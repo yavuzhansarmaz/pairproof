@@ -186,7 +186,7 @@ fn final_view_uses_real_breakdown_without_fabricated_report() {
         view.per_question[0]
     );
     assert!(
-        view.artefact_note.contains("Phase 10"),
+        !view.artefact_note.contains("Phase"),
         "{}",
         view.artefact_note
     );

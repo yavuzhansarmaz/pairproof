@@ -3,7 +3,7 @@ use pairproof::ingest::{LanguageProposal, ProposedContext};
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::extraction::ExtractionResult;
 use pairproof::llm::MetaClient;
-use pairproof::tui::setup::{SetupController, SetupError};
+use pairproof::tui::setup::{ExpertSetupFocus, ExpertSetupPastes, SetupController, SetupError};
 
 fn easy(slug: &str) -> QuestionRef {
     QuestionRef {
@@ -203,6 +203,36 @@ fn proposal_lines_are_sanitized_and_hide_raw_jd() {
     assert!(!lines.iter().any(|l| l.contains("SECRETJD")));
     assert!(lines.iter().any(|l| l.contains("array")));
     assert!(lines.iter().any(|l| l.contains("Python")));
+}
+
+#[test]
+fn focused_pastes_make_notes_optional_and_keep_texts_on_back() {
+    let mut pastes = ExpertSetupPastes::new();
+    assert_eq!(pastes.focus(), ExpertSetupFocus::JobDescription);
+    assert!(!pastes.confirm_job_description());
+    pastes
+        .apply_focused_paste("Senior Rust role, async systems.")
+        .expect("jd paste");
+    assert!(pastes.is_ready());
+    assert!(!pastes.is_complete(), "notes are optional, not required");
+    assert!(pastes.confirm_job_description());
+    assert_eq!(pastes.focus(), ExpertSetupFocus::AdditionalNotes);
+    // Going back keeps both texts so a wrong paste can be corrected.
+    pastes.back_to_job_description();
+    assert_eq!(pastes.jd(), "Senior Rust role, async systems.");
+    assert_eq!(pastes.focus(), ExpertSetupFocus::JobDescription);
+    pastes
+        .apply_focused_paste("Corrected JD text.")
+        .expect("corrected jd");
+    assert_eq!(pastes.jd(), "Corrected JD text.");
+    assert!(pastes.confirm_job_description());
+    pastes.scroll_focused(3);
+    assert_eq!(pastes.notes_scroll(), 3);
+    pastes.scroll_focused(-10);
+    assert_eq!(pastes.notes_scroll(), 0);
+    // Empty notes stay empty and ready: Enter on notes skips them.
+    assert_eq!(pastes.notes(), "");
+    assert!(pastes.is_ready());
 }
 
 #[test]

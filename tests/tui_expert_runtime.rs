@@ -376,8 +376,9 @@ fn expert_setup_paste_builds_proposal() {
     let mut app = ExpertApp::new();
     assert_eq!(app.handle(AppEvent::SelectExpert), Ok(AppScreen::Preflight));
     app.set_preflight_passed(true);
-    assert_eq!(app.handle(AppEvent::PreflightCompleted), Ok(AppScreen::ApiKey));
-    assert_eq!(app.handle(AppEvent::ApiKeySaved), Ok(AppScreen::Setup));
+    app.set_api_key_ready(true);
+    assert_eq!(app.handle(AppEvent::DisclosureAcknowledged), Ok(AppScreen::Preflight));
+    assert_eq!(app.handle(AppEvent::PreflightCompleted), Ok(AppScreen::Setup));
     assert_eq!(app.handle(AppEvent::DisclosureAcknowledged), Ok(AppScreen::Setup));
     assert!(app.handle(AppEvent::ProposalReady).is_err());
     app.set_has_proposal(pastes.is_complete());
@@ -392,8 +393,9 @@ fn expert_setup_requires_both_pastes() {
     let mut app = ExpertApp::new();
     assert_eq!(app.handle(AppEvent::SelectExpert), Ok(AppScreen::Preflight));
     app.set_preflight_passed(true);
-    assert_eq!(app.handle(AppEvent::PreflightCompleted), Ok(AppScreen::ApiKey));
-    assert_eq!(app.handle(AppEvent::ApiKeySaved), Ok(AppScreen::Setup));
+    app.set_api_key_ready(true);
+    assert_eq!(app.handle(AppEvent::DisclosureAcknowledged), Ok(AppScreen::Preflight));
+    assert_eq!(app.handle(AppEvent::PreflightCompleted), Ok(AppScreen::Setup));
     assert_eq!(app.handle(AppEvent::DisclosureAcknowledged), Ok(AppScreen::Setup));
     app.set_has_proposal(pastes.is_complete());
     assert!(app.handle(AppEvent::ProposalReady).is_err());

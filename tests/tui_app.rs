@@ -5,11 +5,15 @@ use pairproof::tui::app::{screen_lines, screen_title, AppError, AppEvent, AppScr
 fn advance_to_setup(app: &mut ExpertApp) {
     assert_eq!(app.handle(AppEvent::SelectExpert), Ok(AppScreen::Preflight));
     app.set_preflight_passed(true);
+    app.set_api_key_ready(true);
+    assert_eq!(
+        app.handle(AppEvent::DisclosureAcknowledged),
+        Ok(AppScreen::Preflight)
+    );
     assert_eq!(
         app.handle(AppEvent::PreflightCompleted),
-        Ok(AppScreen::ApiKey)
+        Ok(AppScreen::Setup)
     );
-    assert_eq!(app.handle(AppEvent::ApiKeySaved), Ok(AppScreen::Setup));
 }
 
 fn advance_to_connection_wait(app: &mut ExpertApp) {
@@ -73,27 +77,40 @@ fn preflight_failure_blocks_advance() {
     );
     assert_eq!(app.screen(), AppScreen::Preflight);
     app.set_preflight_passed(true);
+    app.set_api_key_ready(true);
     assert_eq!(
         app.handle(AppEvent::PreflightCompleted),
-        Ok(AppScreen::ApiKey)
+        Err(AppError::DisclosureRequired)
+    );
+    app.handle(AppEvent::DisclosureAcknowledged)
+        .expect("disclosure");
+    assert_eq!(
+        app.handle(AppEvent::PreflightCompleted),
+        Ok(AppScreen::Setup)
     );
 }
 
 #[test]
 fn disclosure_required_before_proposal() {
     let mut app = ExpertApp::new();
-    advance_to_setup(&mut app);
-    app.set_has_proposal(true);
+    app.handle(AppEvent::SelectExpert).expect("to preflight");
+    app.set_preflight_passed(true);
+    app.set_api_key_ready(true);
     assert_eq!(
-        app.handle(AppEvent::ProposalReady),
+        app.handle(AppEvent::PreflightCompleted),
         Err(AppError::DisclosureRequired)
     );
-    assert_eq!(app.screen(), AppScreen::Setup);
+    assert_eq!(app.screen(), AppScreen::Preflight);
     assert_eq!(
         app.handle(AppEvent::DisclosureAcknowledged),
-        Ok(AppScreen::Setup)
+        Ok(AppScreen::Preflight)
     );
     assert!(app.disclosure_acknowledged);
+    assert_eq!(
+        app.handle(AppEvent::PreflightCompleted),
+        Ok(AppScreen::Setup)
+    );
+    app.set_has_proposal(true);
     assert_eq!(app.handle(AppEvent::ProposalReady), Ok(AppScreen::Proposal));
 }
 
@@ -133,10 +150,10 @@ fn back_navigation_returns_to_previous_screen() {
     let mut app = ExpertApp::new();
     advance_to_setup(&mut app);
     assert!(app.can_go_back());
-    assert_eq!(app.back(), Ok(AppScreen::ApiKey));
-    assert_eq!(app.screen(), AppScreen::ApiKey);
-    assert_eq!(app.handle(AppEvent::Back), Ok(AppScreen::Preflight));
+    assert_eq!(app.back(), Ok(AppScreen::Preflight));
     assert_eq!(app.screen(), AppScreen::Preflight);
+    assert_eq!(app.handle(AppEvent::Back), Ok(AppScreen::RoleSelect));
+    assert_eq!(app.screen(), AppScreen::RoleSelect);
 }
 
 #[test]
@@ -172,7 +189,7 @@ fn illegal_transition_is_typed_error_not_panic() {
         }
     );
     assert_eq!(app.screen(), AppScreen::RoleSelect);
-    assert!(app.handle(AppEvent::ApiKeySaved).is_err());
+    assert!(app.handle(AppEvent::MediumSelected).is_err());
     assert!(app.handle(AppEvent::ConnectionLocked).is_err());
     assert_eq!(app.screen(), AppScreen::RoleSelect);
 }
@@ -197,13 +214,43 @@ fn retry_preserves_screen() {
     let mut app = ExpertApp::new();
     app.handle(AppEvent::SelectExpert).expect("to preflight");
     app.set_preflight_passed(true);
+    app.set_api_key_ready(true);
     assert_eq!(app.handle(AppEvent::Retry), Ok(AppScreen::Preflight));
     assert_eq!(app.screen(), AppScreen::Preflight);
     assert!(app.preflight_passed);
+    app.handle(AppEvent::DisclosureAcknowledged)
+        .expect("disclosure");
     assert_eq!(
         app.handle(AppEvent::PreflightCompleted),
-        Ok(AppScreen::ApiKey)
+        Ok(AppScreen::Setup)
     );
+}
+
+#[test]
+fn back_is_rejected_past_the_runtime_commit_point() {
+    let mut app = ExpertApp::new();
+    advance_to_monitor(&mut app);
+    assert!(!app.can_go_back());
+    assert!(app.handle(AppEvent::Back).is_err());
+    assert_eq!(app.screen(), AppScreen::Monitor);
+    let lines = screen_lines(&app).join("\n");
+    assert!(!lines.contains("b back"), "{lines}");
+    assert!(lines.contains("Press e to end the session."), "{lines}");
+    assert!(!lines.contains("Press Enter to end"), "{lines}");
+    app.handle(AppEvent::EndSession).expect("to final");
+    assert!(!app.can_go_back());
+    assert!(app.handle(AppEvent::Back).is_err());
+    assert_eq!(app.screen(), AppScreen::Final);
+}
+
+#[test]
+fn status_message_can_be_cleared() {
+    let mut app = ExpertApp::new();
+    app.set_status_message("Fresh string ready: pp1:stale");
+    assert!(screen_lines(&app).join("\n").contains("stale"));
+    app.clear_status_message();
+    assert_eq!(app.status_message(), None);
+    assert!(!screen_lines(&app).join("\n").contains("stale"));
 }
 
 #[test]
@@ -250,7 +297,6 @@ fn screen_lines_are_sanitized_with_footers() {
     for screen in [
         AppScreen::RoleSelect,
         AppScreen::Preflight,
-        AppScreen::ApiKey,
         AppScreen::Setup,
         AppScreen::Proposal,
         AppScreen::ConnectionWait,
@@ -263,20 +309,70 @@ fn screen_lines_are_sanitized_with_footers() {
         assert!(!screen_title(screen).is_empty());
     }
     let mut app = ExpertApp::new();
+    assert_eq!(screen_title(AppScreen::RoleSelect), "PairProof");
     let role_lines = screen_lines(&app).join("\n");
-    assert!(role_lines.contains("Select role"));
-    assert!(role_lines.contains("q quit"));
+    assert!(role_lines.contains("Main Menu"), "{role_lines}");
+    assert!(!role_lines.contains("Select role"), "{role_lines}");
+    assert!(role_lines.contains("e  Expert"), "{role_lines}");
+    assert!(role_lines.contains("c  Candidate"), "{role_lines}");
+    assert!(role_lines.contains("esc quit"));
+    assert!(!role_lines.contains("q quit"));
+    assert!(!role_lines.contains("Enter advance"), "{role_lines}");
     assert!(!role_lines.contains("b back"));
 
     app.handle(AppEvent::SelectExpert).expect("to preflight");
     app.set_status_message("\u{1b}[31mhello\u{7} world");
     let lines = screen_lines(&app);
     let joined = lines.join("\n");
-    assert!(joined.contains("Preflight checks"));
-    assert!(joined.contains("q quit, b back"));
+    assert!(joined.contains("Expert Setup"), "{joined}");
+    assert!(joined.contains("Meta disclosure"), "{joined}");
+    assert!(joined.contains("Meta API key:"), "{joined}");
+    assert!(
+        joined.contains("Press Enter to acknowledge the disclosure."),
+        "{joined}"
+    );
+    assert_eq!(
+        lines.last().map(String::as_str),
+        Some("b back, r re-run, esc quit, ? help")
+    );
+    assert!(!joined.contains("Esc qui\n"), "{joined}");
+    assert!(!joined.contains("API key is never shown"), "{joined}");
     assert!(joined.contains("hello world"));
     assert!(!joined.contains('\u{1b}'));
     assert!(!joined.contains('\u{7}'));
+}
+
+#[test]
+fn expert_setup_steps_ack_then_api_key_then_continue() {
+    let mut app = ExpertApp::new();
+    app.handle(AppEvent::SelectExpert).expect("to preflight");
+    app.set_preflight_passed(true);
+    let before = screen_lines(&app).join("\n");
+    assert!(before.contains("will be sent"), "{before}");
+    assert!(before.contains("Press Enter to acknowledge"), "{before}");
+    assert_eq!(
+        app.handle(AppEvent::PreflightCompleted),
+        Err(AppError::DisclosureRequired)
+    );
+    app.handle(AppEvent::DisclosureAcknowledged)
+        .expect("acknowledge");
+    let after = screen_lines(&app).join("\n");
+    assert!(!after.contains("will be sent"), "{after}");
+    assert!(after.contains("Disclosure: acknowledged."), "{after}");
+    assert!(
+        after.contains("Press Enter to add your Meta API key."),
+        "{after}"
+    );
+    assert_eq!(
+        app.handle(AppEvent::PreflightCompleted),
+        Err(AppError::ApiKeyMissing)
+    );
+    assert_eq!(app.screen(), AppScreen::Preflight);
+    app.set_api_key_ready(true);
+    assert_eq!(
+        app.handle(AppEvent::PreflightCompleted),
+        Ok(AppScreen::Setup)
+    );
 }
 
 #[test]

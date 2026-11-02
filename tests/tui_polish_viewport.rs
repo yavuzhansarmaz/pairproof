@@ -10,6 +10,9 @@ use pairproof::tui::candidate_final::{
 };
 use pairproof::tui::candidate_runtime::CandidateView;
 use pairproof::tui::monitor::FinalView;
+use pairproof::tui::render::{
+    centered_rect, panel_area, ESC_KEY_COLOR, HELP_KEY_COLOR, PAIR_COLOR, PROOF_COLOR,
+};
 use pairproof::tui::viewport::{
     is_pinned_summary, split_pinned, truncation_marker, visible_lines, visible_with_pinned,
 };
@@ -206,6 +209,231 @@ fn viewport_markers_and_pinned_split_are_exact() {
             "Live rating: 8.00".to_string(),
         ]
     );
+}
+
+#[test]
+fn centered_rect_is_centred_and_never_exceeds_the_area() {
+    let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let rect = centered_rect(area, 76, 12);
+    assert_eq!((rect.width, rect.height), (76, 12));
+    assert_eq!(rect.x, (120 - 76) / 2);
+    assert_eq!(rect.y, (40 - 12) / 2);
+    let small = ratatui::layout::Rect::new(0, 0, 30, 8);
+    let shrunk = centered_rect(small, 76, 12);
+    assert_eq!((shrunk.width, shrunk.height), (30, 8));
+    assert_eq!((shrunk.x, shrunk.y), (0, 0));
+}
+
+#[test]
+fn panel_area_centres_only_when_asked() {
+    let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+    let lines = vec!["Main Menu".to_string(), "Choose a role.".to_string()];
+    assert_eq!(panel_area(area, &lines, false), area);
+    let panel = panel_area(area, &lines, true);
+    assert!(panel.width < area.width && panel.height < area.height);
+    assert!(panel.x > 0 && panel.y > 0, "{panel:?}");
+}
+
+#[test]
+fn main_menu_renders_as_a_centred_brand_panel() {
+    use pairproof::tui::app::{screen_lines, ExpertApp};
+    use pairproof::tui::render::draw_screen;
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let app = ExpertApp::new();
+    let lines = screen_lines(&app);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(rendered.contains("PairProof"), "{rendered}");
+    assert!(rendered.contains("Main Menu"), "{rendered}");
+    // Purple is reserved for "Proof" and the expert key `e`;
+    // "Pair", the "Main Menu" heading, and the candidate key `c`
+    // are navy.
+    let purple: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PROOF_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(purple, "Proofee", "{purple}");
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PAIR_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(navy.contains("Pair"), "{navy}");
+    assert!(navy.contains("Main Menu"), "{navy}");
+    assert!(navy.contains('c'), "{navy}");
+    let yellow: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == HELP_KEY_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(yellow, "?", "{yellow}");
+    let red: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == ESC_KEY_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(red, "esc", "{red}");
+    assert!(rendered.contains("Expert"), "{rendered}");
+    assert!(rendered.contains("Candidate"), "{rendered}");
+    // The panel must not fill the terminal: corners stay blank.
+    assert_eq!(buffer[(0, 0)].symbol(), " ");
+    assert_eq!(buffer[(99, 29)].symbol(), " ");
+    let left_border = (0..30)
+        .find_map(|y| (0..100).find(|&x| buffer[(x, y)].symbol() == "\u{2502}"))
+        .expect("left border");
+    assert!(
+        left_border > 10,
+        "panel should be centred, border at {left_border}"
+    );
+}
+
+#[test]
+fn expert_setup_renders_as_a_centred_panel() {
+    use pairproof::tui::app::{screen_lines, AppEvent, ExpertApp};
+    use pairproof::tui::render::draw_screen;
+    let backend = ratatui::backend::TestBackend::new(100, 34);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let mut app = ExpertApp::new();
+    app.handle(AppEvent::SelectExpert).expect("preflight");
+    app.set_preflight_lines(vec!["[PASS] Docker".to_string()]);
+    app.set_api_key_status("Meta API key: configured (environment)");
+    let lines = screen_lines(&app);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(rendered.contains("PairProof"), "{rendered}");
+    assert!(rendered.contains("Expert Setup"), "{rendered}");
+    assert!(rendered.contains("Meta disclosure"), "{rendered}");
+    assert!(rendered.contains("[PASS] Docker"), "{rendered}");
+    assert_eq!(buffer[(0, 0)].symbol(), " ");
+    assert_eq!(buffer[(99, 33)].symbol(), " ");
+}
+
+#[test]
+fn help_colours_tool_commands_and_role_keys() {
+    use pairproof::tui::app::AppScreen;
+    use pairproof::tui::help::expert_help_lines;
+    use pairproof::tui::render::{draw_screen, PAIR_COLOR, PROOF_COLOR};
+    let backend = ratatui::backend::TestBackend::new(100, 34);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = expert_help_lines(AppScreen::RoleSelect);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let purple: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PROOF_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(purple.contains("pairproof update"), "{purple}");
+    assert!(
+        purple.contains("pairproof uninstall --keep-data"),
+        "{purple}"
+    );
+    assert!(purple.contains('e'), "{purple}");
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PAIR_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(navy.contains('c'), "{navy}");
+}
+
+#[test]
+fn session_setup_boxes_show_five_and_two_lines() {
+    use pairproof::tui::render::{draw_setup_screen, SetupPanel};
+    let backend = ratatui::backend::TestBackend::new(80, 24);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let jd = (1..=9)
+        .map(|i| format!("JD line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let notes = (1..=5)
+        .map(|i| format!("Note line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    terminal
+        .draw(|frame| {
+            draw_setup_screen(
+                frame,
+                &SetupPanel {
+                    job_description: &jd,
+                    additional_notes: &notes,
+                    job_focused: true,
+                    job_scroll: 0,
+                    notes_scroll: 0,
+                    status: None,
+                    job_height: 5,
+                    notes_height: 2,
+                },
+            )
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(
+        rendered.contains("Job description (required)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("Additional notes (optional)"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("JD line 5"), "{rendered}");
+    assert!(!rendered.contains("JD line 6"), "{rendered}");
+    assert!(rendered.contains("Note line 2"), "{rendered}");
+    assert!(!rendered.contains("Note line 3"), "{rendered}");
+    // Full-size screen: the outer frame fills the terminal.
+    assert_eq!(buffer[(0, 0)].symbol(), "\u{250c}");
+}
+
+#[test]
+fn session_setup_wraps_words_and_expands_with_height() {
+    use pairproof::tui::render::{draw_setup_screen, setup_box_areas, SetupPanel};
+    let backend = ratatui::backend::TestBackend::new(40, 24);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let jd = "alpha beta gamma delta epsilon zeta eta theta";
+    terminal
+        .draw(|frame| {
+            draw_setup_screen(
+                frame,
+                &SetupPanel {
+                    job_description: jd,
+                    additional_notes: "note one\r\nnote two",
+                    job_focused: true,
+                    job_scroll: 0,
+                    notes_scroll: 0,
+                    status: None,
+                    job_height: 8,
+                    notes_height: 2,
+                },
+            )
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    // Word wrap: lines break between words, CRLF renders clean.
+    assert!(rendered.contains("alpha beta"), "{rendered}");
+    assert!(rendered.contains("note one"), "{rendered}");
+    assert!(rendered.contains("note two"), "{rendered}");
+    let (jd_box, notes_box) = setup_box_areas(ratatui::layout::Rect::new(0, 0, 40, 24), 8, 2);
+    assert_eq!(jd_box.height, 10);
+    assert_eq!(notes_box.height, 4);
+    assert_eq!(notes_box.y, jd_box.y + jd_box.height);
 }
 
 #[test]

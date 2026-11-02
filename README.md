@@ -10,7 +10,7 @@ PairProof runs live LeetCode-style questions as a two-sided interview that measu
 
 One binary, two roles. The expert runs the interview from one machine; the candidate joins from another.
 
-- The expert pastes a job description and additional notes. Both are required for extraction: the system extracts topics, level, and a proposed language (Python, JavaScript, or SQL only) only when both are present.
+- The expert pastes a job description; additional notes are optional. The system extracts topics, level, and a proposed language (Python, JavaScript, or SQL only) from the job description and any notes provided.
 - The system auto-selects 5 easy warm-up questions. When the candidate is working, the system auto-selects 3 medium and 2 hard questions (random selection with topic fallback; the expert does not hand-pick question titles in the TUI).
 - Per question, the candidate picks 1 of 4 AI-generated approaches (or `Other`), then continues, redirects, changes approach, requests tests, finishes, or skips. A separate unscored AI coach pane offers hints.
 - The expert watches a live rating starting at 6.0. The candidate never sees the live score, approach quality, or expected token counts during the session — only the final breakdown at the end.
@@ -20,10 +20,10 @@ Startup note: on every interactive (TTY) launch without a subcommand, PairProof 
 
 ## 3. Expert workflow
 
-1. Start PairProof as expert (see Section 9). If you pass `--role expert`, preflight runs immediately; otherwise it runs when you enter the Preflight screen.
+1. Start PairProof as expert (see Section 9). If you pass `--role expert`, preflight runs immediately; otherwise it runs when you enter the Expert Setup screen.
 2. Pass the preflight checklist (Docker, daemon, sandbox image, port, external IP / CGNAT, Mutagen probe). A `Fail` blocks the session; a `Warn` (for example, a missing sandbox image that will be built on first use) does not.
-3. Make sure a Meta Model API key is available before the session (see Section 9). All Meta charges run on the expert's key. Note: the TUI ApiKey screen does not capture a new key — the key must already exist in the environment or in the stored key file.
-4. Paste the job description first, then paste additional notes. Both are required for topic/level/language extraction; without both, extraction yields no topics and defaults to Python. Blank pastes and pastes over 50,000 characters are rejected.
+3. Make sure a Meta Model API key is available before the session (see Section 9). All Meta charges run on the expert's key. On the Expert Setup screen you first acknowledge the Meta disclosure with Enter, then — if no key is configured yet — press Enter again to type and save a Meta API key (input is masked). A key from the environment or the stored key file is used as-is, and a previously given disclosure acknowledgement is remembered.
+4. Paste the job description first and confirm with Enter, then paste additional notes or press Enter to skip them. Only the job description is required for topic/level/language extraction. Blank pastes and pastes over 50,000 characters are rejected.
 5. Confirm the extracted setup. The system creates a disposable Docker sandbox and a session.
 6. Share the connection string with the candidate. The secret in the string rotates every 60 seconds until the first valid connection locks it.
 7. Monitor the live rating, per-question progress, and paste alerts. The expert sees the live rating and breakdown, but not candidate chat content.
@@ -139,7 +139,7 @@ pairproof
 pairproof --role expert
 ```
 
-With no `--role`, choose Expert on the start screen. Preflight runs automatically for `--role expert` or when you enter the Preflight screen. Follow the Expert workflow in Section 3: paste job description, then notes, confirm setup, and share the current connection string (it rotates every 60 seconds until first connection).
+With no `--role`, choose Expert on the start screen. Preflight runs automatically for `--role expert` or when you enter the Expert Setup screen. Follow the Expert workflow in Section 3: paste job description, then notes, confirm setup, and share the current connection string (it rotates every 60 seconds until first connection).
 
 ### Candidate connection
 

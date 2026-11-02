@@ -136,9 +136,6 @@ fn handle_work_key(state: &mut CandidateRunState, key: KeyEvent, control: bool) 
             'r' => state.with_session(|work, session| {
                 let _ = work.request_requestion(session, now_ms());
             }),
-            'q' => {
-                state.app.quit();
-            }
             _ => {}
         },
         _ => {}
@@ -157,7 +154,11 @@ fn handle_other_key(state: &mut CandidateRunState, key: KeyEvent, control: bool)
                     now_ms(),
                 );
             });
-            state.focus = CandidateFocus::Work;
+            // select_other clears the text only on success; keep the
+            // pane focused when the attempt left the text in place.
+            if state.work.other_text().is_empty() {
+                state.focus = CandidateFocus::Work;
+            }
         }
         K::Backspace => {
             let text = pop_last(state.work.other_text());
@@ -177,7 +178,9 @@ fn handle_redirect_key(state: &mut CandidateRunState, key: KeyEvent, control: bo
             state.with_session(|work, session| {
                 let _ = work.redirect(session, &mut UnavailableCodingRunner, now_ms());
             });
-            state.focus = CandidateFocus::Work;
+            if state.work.redirect_text().is_empty() {
+                state.focus = CandidateFocus::Work;
+            }
         }
         K::Backspace => {
             let text = pop_last(state.work.redirect_text());
@@ -214,10 +217,15 @@ pub fn handle_candidate_key(state: &mut CandidateRunState, key: KeyEvent) {
     }
     if key.code == K::Char('?') && !control && !candidate_is_typing(state.app.screen(), state.focus)
     {
-        state.show_help = !state.show_help;
+        if !state.show_help {
+            state.show_help = true;
+        }
         return;
     }
     if state.show_help {
+        if key.code == K::Char('b') && !control {
+            state.show_help = false;
+        }
         return;
     }
     match state.app.screen() {
@@ -229,30 +237,17 @@ pub fn handle_candidate_key(state: &mut CandidateRunState, key: KeyEvent) {
             K::Char(c) if !control => state.app.push_char(c),
             _ => {}
         },
-        CandidateScreen::Rules => match key.code {
-            K::Enter => {
+        CandidateScreen::Rules => {
+            if key.code == K::Enter {
                 let _ = state.app.accept_rules();
             }
-            K::Char('q') if !control => {
+        }
+        CandidateScreen::Waiting => {}
+        CandidateScreen::Final => {
+            if key.code == K::Enter {
                 state.app.quit();
             }
-            _ => {}
-        },
-        CandidateScreen::Waiting => match key.code {
-            K::Char('q') if !control => {
-                state.app.quit();
-            }
-            _ => {}
-        },
-        CandidateScreen::Final => match key.code {
-            K::Enter => {
-                state.app.quit();
-            }
-            K::Char('q') if !control => {
-                state.app.quit();
-            }
-            _ => {}
-        },
+        }
         CandidateScreen::Solving => match state.focus {
             CandidateFocus::Work => handle_work_key(state, key, control),
             CandidateFocus::Other => handle_other_key(state, key, control),

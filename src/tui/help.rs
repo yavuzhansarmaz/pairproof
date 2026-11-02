@@ -12,30 +12,77 @@ fn clean(lines: Vec<&str>) -> Vec<String> {
 
 /// Returns expert help lines listing only keys wired for `screen`.
 pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
-    let mut lines = vec!["Help", "q quit, Esc quit, b back, r retry"];
+    let mut lines = vec![
+        "Help",
+        "PairProof runs AI-native interviews: the AI writes",
+        "the code, the candidate directs it, and you watch",
+        "judgment, not typing speed.",
+        "",
+        "On this screen:",
+    ];
     match screen {
-        AppScreen::RoleSelect => lines.extend(["e expert, c candidate"]),
-        AppScreen::Preflight => lines.extend(["Enter continue when checks pass"]),
-        AppScreen::ApiKey => lines.extend(["Enter continue when the key is saved"]),
+        AppScreen::RoleSelect => lines.extend([
+            "  e expert — set up and run a live interview",
+            "  c candidate — join with a connection string",
+        ]),
+        AppScreen::Preflight => lines.extend([
+            "  Enter follows the step shown on screen:",
+            "  acknowledge, add the API key, then continue",
+            "  r re-run the environment checks",
+            "  b back to the main menu",
+        ]),
         AppScreen::Setup => lines.extend([
-            "Paste the job description, then additional notes",
-            "Enter continue",
+            "  Paste into the focused box, Enter moves on",
+            "  Up/Down scroll, drag a box border to resize",
+            "  b back a step, keeping your pasted text",
         ]),
-        AppScreen::Proposal => lines.extend(["Enter confirm and wait for the candidate"]),
-        AppScreen::ConnectionWait => {
-            lines.extend(["Waiting for the candidate to connect", "Enter check again"])
-        }
-        AppScreen::SelectMedium => lines.extend(["Enter fetch and select medium questions"]),
-        AppScreen::SelectHard => lines.extend(["Enter fetch and complete the selection"]),
+        AppScreen::Proposal => lines.extend(["  Enter confirm and wait for the candidate"]),
+        AppScreen::ConnectionWait => lines.extend([
+            "  Waiting for the candidate to connect",
+            "  Share the connection string shown on screen",
+        ]),
+        AppScreen::SelectMedium => lines.extend(["  Enter load the medium questions"]),
+        AppScreen::SelectHard => lines.extend(["  Enter load the hard questions"]),
         AppScreen::Monitor => lines.extend([
-            "R reissue a fresh connection string after a disconnect",
-            "e end the session",
+            "  R reissue a fresh connection string after a disconnect",
+            "  e end the session and build the final report",
         ]),
-        AppScreen::Final => lines.extend(["Enter or q close"]),
-        AppScreen::Exited => lines.extend(["Goodbye."]),
+        AppScreen::Final => lines.extend(["  Enter close"]),
+        AppScreen::Exited => lines.extend(["  Goodbye."]),
     }
-    lines.push("Press ? to close help.");
+    lines.extend([
+        "",
+        "Everywhere:",
+        "  esc quit    ? this help",
+        "",
+        "Tool commands, from a separate terminal:",
+        "  pairproof update                update PairProof",
+        "  pairproof update --check        check only, no download",
+        "  pairproof uninstall             remove binary and data",
+        "  pairproof uninstall --keep-data remove binary, keep data",
+        "",
+        "b close help, d read the disclosure.",
+    ]);
     clean(lines)
+}
+
+/// Returns the full Meta disclosure text for the help reader.
+pub fn disclosure_lines() -> Vec<String> {
+    clean(vec![
+        "Meta disclosure",
+        "Your job description and additional notes (each",
+        "up to 50,000 characters) will be sent to the Meta",
+        "API to propose interview topics, level, and",
+        "language for the session.",
+        "",
+        "Nothing is sent before you acknowledge this on",
+        "the Expert Setup screen. The acknowledgement is",
+        "remembered on this machine, so you will not be",
+        "asked again. The raw pastes are deleted when",
+        "the session ends.",
+        "",
+        "esc quit, b back to help.",
+    ])
 }
 
 /// Returns candidate help lines for `screen` with the work pane focused.
@@ -51,10 +98,10 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
             "Paste the connection string from the expert.",
             "Enter connect",
             "Backspace delete a character",
-            "Esc quit",
+            "esc quit",
         ]),
-        (CandidateScreen::Rules, _) => lines.extend(["Enter accept the rules", "q quit"]),
-        (CandidateScreen::Waiting, _) => lines.extend(["Waiting for the expert.", "q quit"]),
+        (CandidateScreen::Rules, _) => lines.extend(["Enter accept the rules", "esc quit"]),
+        (CandidateScreen::Waiting, _) => lines.extend(["Waiting for the expert.", "esc quit"]),
         (CandidateScreen::Solving, CandidateFocus::Work) => lines.extend([
             "1-4 choose an approach",
             "5 or o describe your own approach",
@@ -62,7 +109,7 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
             "t run tests, f finish the question, s skip the question",
             "r request a new question",
             "Tab switch pane",
-            "q quit",
+            "esc quit",
         ]),
         (CandidateScreen::Solving, CandidateFocus::Other) => lines.extend([
             "Type your own approach.",
@@ -82,11 +129,11 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
             "Backspace delete a character",
             "Tab next pane",
         ]),
-        (CandidateScreen::Final, _) => lines.extend(["Enter or q close"]),
+        (CandidateScreen::Final, _) => lines.extend(["Enter close", "esc quit"]),
         (CandidateScreen::Exited, _) => lines.extend(["Goodbye."]),
     }
     if !candidate_is_typing(screen, focus) {
-        lines.push("Press ? to close help.");
+        lines.push("Press b to close help.");
     }
     clean(lines)
 }
@@ -166,14 +213,66 @@ pub enum ExpertKeyAction {
     ToggleHelp,
     Ignore,
     Dispatch,
+    Quit,
+    ShowDisclosure,
+    ReturnToHelp,
+}
+
+/// Routes a full key event: Ctrl-C quits, other Ctrl/Alt-modified keys
+/// never trigger plain-letter actions (Ctrl-E must not end a session).
+pub fn expert_event_action(key: crossterm::event::KeyEvent, show_help: bool) -> ExpertKeyAction {
+    use crossterm::event::KeyModifiers;
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        if key.code == crossterm::event::KeyCode::Char('c') {
+            return ExpertKeyAction::Quit;
+        }
+        return ExpertKeyAction::Ignore;
+    }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        return ExpertKeyAction::Ignore;
+    }
+    expert_key_action(key.code, show_help)
+}
+
+/// Routes a key while the disclosure reader is open: esc quits,
+/// `b` returns to help, everything else is swallowed.
+pub fn expert_disclosure_action(key: crossterm::event::KeyEvent) -> ExpertKeyAction {
+    use crossterm::event::KeyModifiers;
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        if key.code == crossterm::event::KeyCode::Char('c') {
+            return ExpertKeyAction::Quit;
+        }
+        return ExpertKeyAction::Ignore;
+    }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        return ExpertKeyAction::Ignore;
+    }
+    match key.code {
+        crossterm::event::KeyCode::Esc => ExpertKeyAction::Quit,
+        crossterm::event::KeyCode::Char('b') => ExpertKeyAction::ReturnToHelp,
+        _ => ExpertKeyAction::Ignore,
+    }
+}
+
+/// Returns true when a key shown on the help overlay still works
+/// while help is open: role selection on the main menu is safe to
+/// dispatch without closing help first.
+pub fn help_overlay_dispatches(code: crossterm::event::KeyCode, screen: AppScreen) -> bool {
+    screen == AppScreen::RoleSelect
+        && matches!(
+            code,
+            crossterm::event::KeyCode::Char('e') | crossterm::event::KeyCode::Char('c')
+        )
 }
 
 /// Routes a key: `?` toggles help; help open swallows non-quit keys.
 pub fn expert_key_action(code: crossterm::event::KeyCode, show_help: bool) -> ExpertKeyAction {
     use crossterm::event::KeyCode as K;
     match code {
-        K::Char('?') => ExpertKeyAction::ToggleHelp,
-        _ if show_help && !matches!(code, K::Char('q') | K::Esc) => ExpertKeyAction::Ignore,
+        K::Char('?') if !show_help => ExpertKeyAction::ToggleHelp,
+        K::Char('b') if show_help => ExpertKeyAction::ToggleHelp,
+        K::Char('d') if show_help => ExpertKeyAction::ShowDisclosure,
+        _ if show_help && code != K::Esc => ExpertKeyAction::Ignore,
         _ => ExpertKeyAction::Dispatch,
     }
 }

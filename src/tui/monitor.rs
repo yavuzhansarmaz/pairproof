@@ -225,8 +225,6 @@ pub fn final_view(
         paste_flag_count: b.paste_flag_count,
         total_time_ms: b.total_time_ms,
         not_scored: b.not_scored,
-        artefact_note:
-            "Final breakdown computed; Markdown report generation is Phase 10 (not claimed here)."
-                .into(),
+        artefact_note: "Final breakdown computed.".into(),
     })
 }

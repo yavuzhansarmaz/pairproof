@@ -149,12 +149,12 @@ fn candidate_final_view_does_not_fabricate_report_or_artifacts() {
         panic!("expected breakdown, got {result:?}");
     };
     assert!(
-        view.artefact_note.contains("Phase 10"),
+        !view.artefact_note.contains("Phase"),
         "{}",
         view.artefact_note
     );
     let joined = candidate_final_lines(&result).join("\n");
-    assert!(joined.contains("Phase 10"), "{joined}");
+    assert!(!joined.contains("Phase"), "{joined}");
     assert!(!joined.contains("report.md"), "{joined}");
     assert!(
         !joined.to_lowercase().contains("report generated"),

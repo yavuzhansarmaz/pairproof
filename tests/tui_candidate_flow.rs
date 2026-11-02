@@ -165,7 +165,7 @@ fn ctrl_c_quits_from_connect() {
 }
 
 #[test]
-fn rules_q_quits() {
+fn rules_esc_quits_q_does_not() {
     let app = CandidateApp::with_verifier(OkVerifier);
     let mut state =
         CandidateRunState::with_parts(app, CandidateWork::new(), ChatController::default());
@@ -173,6 +173,8 @@ fn rules_q_quits() {
     handle_candidate_key(&mut state, key(KeyCode::Enter));
     assert_eq!(state.app.screen(), CandidateScreen::Rules);
     handle_candidate_key(&mut state, key(KeyCode::Char('q')));
+    assert_eq!(state.app.screen(), CandidateScreen::Rules);
+    handle_candidate_key(&mut state, key(KeyCode::Esc));
     assert_eq!(state.app.screen(), CandidateScreen::Exited);
 }
 

@@ -204,8 +204,9 @@ fn disconnected_flag_clears_on_reconnect() {
     let mut app = ExpertApp::new();
     assert_eq!(app.handle(AppEvent::SelectExpert), Ok(AppScreen::Preflight));
     app.set_preflight_passed(true);
-    assert_eq!(app.handle(AppEvent::PreflightCompleted), Ok(AppScreen::ApiKey));
-    assert_eq!(app.handle(AppEvent::ApiKeySaved), Ok(AppScreen::Setup));
+    app.set_api_key_ready(true);
+    assert_eq!(app.handle(AppEvent::DisclosureAcknowledged), Ok(AppScreen::Preflight));
+    assert_eq!(app.handle(AppEvent::PreflightCompleted), Ok(AppScreen::Setup));
     assert_eq!(app.handle(AppEvent::DisclosureAcknowledged), Ok(AppScreen::Setup));
     app.set_has_proposal(true);
     assert_eq!(app.handle(AppEvent::ProposalReady), Ok(AppScreen::Proposal));
