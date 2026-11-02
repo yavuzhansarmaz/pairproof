@@ -74,7 +74,7 @@ fn mutagen_wrapper_injects_pinned_host_key_options() {
 }
 
 #[tokio::test]
-#[ignore = "live docker+mutagen: provisions a real sandbox"]
+#[ignore = "live docker+mutagen: provisions a real sandbox, requires ssh-keyscan on PATH"]
 async fn live_mutagen_ssh_two_way_sync_with_password_auth() {
     use pairproof::sandbox::lifecycle::{create_and_provision, destroy, destroy_by_session_id};
     use pairproof::sandbox::preflight::port_is_free;
@@ -233,7 +233,7 @@ async fn live_mutagen_ssh_two_way_sync_with_password_auth() {
 }
 
 #[tokio::test]
-#[ignore = "live docker+mutagen: provisions a real sandbox"]
+#[ignore = "live docker+mutagen: provisions a real sandbox, requires ssh-keyscan on PATH"]
 async fn live_mutagen_wrong_password_fails_closed() {
     use pairproof::sandbox::lifecycle::{create_and_provision, destroy, destroy_by_session_id};
     use pairproof::sandbox::preflight::port_is_free;
@@ -311,7 +311,7 @@ async fn live_mutagen_wrong_password_fails_closed() {
 }
 
 #[tokio::test]
-#[ignore = "live docker+mutagen: provisions a real sandbox"]
+#[ignore = "live docker+mutagen: provisions a real sandbox, requires ssh-keyscan on PATH"]
 async fn live_mutagen_wrong_host_key_fails_closed() {
     use pairproof::sandbox::lifecycle::{create_and_provision, destroy, destroy_by_session_id};
     use pairproof::sandbox::preflight::port_is_free;

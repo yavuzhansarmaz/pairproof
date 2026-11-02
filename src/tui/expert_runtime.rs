@@ -2,21 +2,22 @@
 //! Candidate hello evidence arrives as `inbox/hello.json` (written
 //! candidate-side in 10I-2 after SSH auth); only a valid hello locks.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::connection::{ConnectionString, Endpoint, EphemeralUsername, Fingerprint};
+use crate::core::types::Difficulty;
 use crate::core::{ArtifactLayout, ContextSummary, Language, QuestionRef};
 use crate::ingest::{prepare_documents, store_raw_documents, ExpertDocuments};
 use crate::leetcode::selection::{select_questions_with_fallback, FallbackReport, PoolClient};
-use crate::leetcode::{Difficulty, LeetCodeClient};
+use crate::leetcode::LeetCodeClient;
 use crate::llm::extraction::{extract_context, ExtractionResult};
 #[rustfmt::skip]
 use crate::orchestration::control::{parse_final_ack, parse_heartbeat, FinalAckOutcome};
 #[rustfmt::skip]
-use crate::orchestration::{build_snapshot, compute_final, generate_report, grade_session, publish_snapshot, run_cancellable, ApplyOutcome, ApplyReport, ApproachGenerator, ChatTransport, CleanupCoordinator, CleanupReport, CleanupSequence, CodingTransport, ConnectionGate, ConnectionGateError, ControlError, ControlExecutor, ControlIo, ControlTransports, FetchedStatement, GatePhase, HealthGate, KillReport, LifecycleError, Orchestrator, OrchestratorError, PipelineError, QuestionGrader, QuestionPipeline, RequestSupervisor, SandboxIo, StatementFetcher};
+use crate::orchestration::{build_snapshot, compute_final, generate_report, grade_session, publish_snapshot, run_cancellable, ApplyOutcome, ApplyReport, ApproachGenerator, ChatTransport, CleanupCoordinator, CleanupReport, CleanupSequence, Clock, CodingTransport, ConnectionGate, ConnectionGateError, ControlError, ControlExecutor, ControlIo, ControlTransports, FetchedStatement, GatePhase, HealthGate, KillReport, LifecycleError, Orchestrator, OrchestratorError, PipelineError, QuestionGrader, QuestionPipeline, RequestSupervisor, SandboxIo, SessionSyncPhase, StatementFetcher};
 use crate::sandbox::SandboxHandle;
 use crate::scoring::ApproachSet;
 use crate::tui::monitor::{monitor_view, MonitorView};
@@ -49,6 +50,10 @@ pub enum PollOutcome { Waiting, Connected, WrongSession, AlreadyConnected }
 #[rustfmt::skip]
 struct HelloFile { v: u32, session_id: String }
 
+pub use crate::sandbox::preflight::first_free_port;
+pub(crate) use crate::tui::expert_session::select_sandbox_port;
+pub use crate::tui::expert_session::{format_session_id, SANDBOX_PORT_RANGE};
+
 /// Missed-liveness window before the expert marks the candidate disconnected.
 pub const HEARTBEAT_TIMEOUT_MS: u64 = 30_000;
 /// Selection retry floor: one attempt per 30s per screen while failing.
@@ -79,12 +84,12 @@ async fn resolve_expert_context(jd: &str, notes: &str) -> Result<(Option<ExpertD
 pub(crate) async fn build_expert_runtime(now: u64, jd: &str, notes: &str) -> Result<ExpertRuntime, String> {
     use crate::connection::{Endpoint, EphemeralUsername, Secret}; use crate::leetcode::selection::auto_pick_easy; use crate::leetcode::LeetCodeClient;
     use crate::orchestration::{ControlIo, DockerControlIo, LeetcodeStatementFetcher, MetaApproachGenerator, MetaChatTransport, MetaCodingTransport, MetaQuestionGrader};
-    use crate::sandbox::lifecycle::{create_and_provision, destroy, rotate_secret}; use crate::sandbox::preflight::port_is_free; use crate::orchestration::Clock;
+    use crate::sandbox::lifecycle::{create_and_provision, destroy, rotate_secret}; use crate::orchestration::Clock;
     let (docs, topics, level, language) = resolve_expert_context(jd, notes).await?;
     let leetcode = LeetCodeClient::default(); let mut rng = rand::thread_rng();
     let easy = auto_pick_easy(&leetcode, &[], &mut rng).await.map_err(|e| e.to_string())?;
-    let session_id = format!("e{}x{}", std::process::id(), now);
-    let port = (2222..2322u16).find(|p| port_is_free(*p)).ok_or_else(|| "no free sandbox port".to_string())?;
+    let session_id = format_session_id(std::process::id(), now);
+    let port = select_sandbox_port().ok_or_else(|| "no free sandbox port".to_string())?;
     let endpoint = Endpoint::new("127.0.0.1", port).map_err(|e| e.to_string())?; let username = EphemeralUsername::generate(); let secret0 = Secret::generate();
     let (handle, fingerprint) = create_and_provision(&session_id, &endpoint, &username, &secret0).await.map_err(|e| e.to_string())?;
     let built: Result<ExpertRuntime, String> = async {
@@ -96,10 +101,10 @@ pub(crate) async fn build_expert_runtime(now: u64, jd: &str, notes: &str) -> Res
             coding: Arc::new(MetaCodingTransport::new(meta_client()?)), sandbox_io: Arc::new(crate::orchestration::DockerSandboxIo::new(handle.clone(), username.clone())),
             chat: Arc::new(MetaChatTransport::new(meta_client()?)), grader: Arc::new(MetaQuestionGrader::new(meta_client()?)),
             leetcode: Some(leetcode), sandbox_handle: Some(handle.clone()), artifact_root: std::path::PathBuf::from("sessions"),
-            topics, level, sync_phase: "Sync: unknown".to_string(),
+            topics, level, sync_phase: SessionSyncPhase::NotStarted,
         };
         let spec = ExpertSessionSpec { session_id: session_id.clone(), language, easy, endpoint: endpoint.clone(), username: username.clone(), fingerprint };
-        let fresh_now = crate::orchestration::SystemClock.now_ms(); let mut runtime = ExpertRuntime::new(spec, deps, fresh_now).await.map_err(|e| e.to_string())?;
+        let fresh_now = crate::orchestration::SystemClock.now_ms(); let mut runtime = ExpertRuntime::new(spec, deps, fresh_now).await.map_err(|e| e.to_string())?; runtime.set_clock(Arc::new(crate::orchestration::SystemClock));
         if let Some(docs) = &docs { store_raw_documents(runtime.layout(), docs).map_err(|e| e.to_string())?; }
         let current = runtime.current_string(fresh_now).map_err(|e| e.to_string())?;
         rotate_secret(&handle, &username, current.secret()).await.map_err(|e| e.to_string())?; runtime.pushed_window = Some(current.expires_at_ms());
@@ -118,7 +123,7 @@ pub struct ExpertRuntimeDeps {
     pub control_io: Box<dyn ControlIo>, pub hello: Box<dyn HelloSource>, pub fetcher: Arc<dyn StatementFetcher>, pub generator: Arc<dyn ApproachGenerator>,
     pub coding: Arc<dyn CodingTransport>, pub sandbox_io: Arc<dyn SandboxIo>, pub chat: Arc<dyn ChatTransport>, pub grader: Arc<dyn QuestionGrader>,
     pub leetcode: Option<LeetCodeClient>, pub sandbox_handle: Option<SandboxHandle>, pub artifact_root: PathBuf,
-    pub topics: Vec<String>, pub level: String, pub sync_phase: String,
+    pub topics: Vec<String>, pub level: String, pub sync_phase: SessionSyncPhase,
 }
 
 #[rustfmt::skip]
@@ -140,14 +145,14 @@ impl ApproachGenerator for CannedGenerator {
 #[rustfmt::skip]
 pub struct ExpertRuntime {
     orch: Orchestrator, gate: ConnectionGate, pipeline: QuestionPipeline, executor: ControlExecutor,
-    control_io: Box<dyn ControlIo>, hello: Box<dyn HelloSource>, supervisor: RequestSupervisor, health: HealthGate,
+    control_io: Box<dyn ControlIo>, hello: Box<dyn HelloSource>, supervisor: RequestSupervisor, health: HealthGate, // NOT wired: see `health_gate`.
     fetcher: Arc<dyn StatementFetcher>, generator: Arc<dyn ApproachGenerator>, coding: Arc<dyn CodingTransport>,
     sandbox_io: Arc<dyn SandboxIo>, chat: Arc<dyn ChatTransport>, grader: Arc<dyn QuestionGrader>,
     pool: Option<Arc<dyn PoolClient>>, sandbox_handle: Option<SandboxHandle>, layout: ArtifactLayout,
-    topics: Vec<String>, level: String, sync_phase: String, started: bool, ended: bool,
+    topics: Vec<String>, level: String, sync_phase: SessionSyncPhase, started: bool, ended: bool,
     pending_medium: Option<Vec<QuestionRef>>, pending_load: Option<(usize, tokio::sync::oneshot::Receiver<LoadOutcome>)>,
     loaded_index: Option<usize>, cleanup_report: Option<CleanupReport>, last_kill: Option<KillReport>,
-    final_ack_outcome: Option<FinalAckOutcome>, ack_waited: bool, hb_timeout_ms: u64, last_seen_ms: u64,
+    final_ack_outcome: Option<FinalAckOutcome>, ack_waited: bool, hb_timeout_ms: u64, last_seen_ms: u64, clock: Option<Arc<dyn Clock>>,
     last_hb_at: Option<u64>, reissued: Option<ConnectionString>, username: EphemeralUsername,
     selection_note: Option<String>, medium_failed_at: Option<u64>, hard_failed_at: Option<u64>, pushed_window: Option<u64>, secret_pusher: Option<Arc<dyn crate::orchestration::secret_push::SecretPush>>, hello_pending_consume: bool,
 }
@@ -168,20 +173,30 @@ impl ExpertRuntime {
             coding: deps.coding, sandbox_io: deps.sandbox_io, chat: deps.chat, grader: deps.grader, pool: deps.leetcode.map(|c| Arc::new(c) as Arc<dyn PoolClient>),
             sandbox_handle: deps.sandbox_handle, layout, topics: deps.topics, level: deps.level, sync_phase: deps.sync_phase,
             started: false, ended: false, pending_medium: None, pending_load: None, loaded_index: None, cleanup_report: None, last_kill: None, final_ack_outcome: None, ack_waited: false,
-            hb_timeout_ms: HEARTBEAT_TIMEOUT_MS, last_seen_ms: now_ms, last_hb_at: None, reissued: None, username: spec.username, selection_note: None, medium_failed_at: None, hard_failed_at: None, pushed_window: None, secret_pusher, hello_pending_consume: false })
+            hb_timeout_ms: HEARTBEAT_TIMEOUT_MS, last_seen_ms: now_ms, last_hb_at: None, reissued: None, username: spec.username, selection_note: None, medium_failed_at: None, hard_failed_at: None, pushed_window: None, secret_pusher, hello_pending_consume: false, clock: None })
     }
 
     pub fn orchestrator(&self) -> &Orchestrator { &self.orch } pub fn gate_phase(&self) -> GatePhase { self.gate.phase() }
+    /// Implemented gate logic, NOT wired into TTY loop; wiring pending product/design decision on interception point + countdown propagation + non-blocking tick.
     pub fn health_gate(&self) -> HealthGate { self.health } pub fn is_killed(&self) -> bool { self.supervisor.is_killed() }
     pub fn pending_count(&self) -> usize { self.supervisor.pending_count() } pub fn cleanup_report(&self) -> Option<&CleanupReport> { self.cleanup_report.as_ref() }
     pub fn final_ack_outcome(&self) -> Option<FinalAckOutcome> { self.final_ack_outcome } pub fn sandbox_handle(&self) -> Option<&SandboxHandle> { self.sandbox_handle.as_ref() }
     /// Returns the session artifact layout for the raw-data lifecycle.
     pub fn layout(&self) -> &ArtifactLayout { &self.layout }
+    /// Expert-owned sync phase published in snapshots. The Mutagen
+    /// session is candidate-started (`CandidateRuntime` transport), so
+    /// this runtime has no `SyncSessionInfo` to derive it from and never
+    /// queries a sync daemon itself; it starts at `NotStarted` (no sync
+    /// started by this runtime) until a real sync owner reports otherwise.
+    pub fn sync_phase(&self) -> SessionSyncPhase { self.sync_phase }
+    /// Records a sync phase reported by the real sync owner; the label
+    /// is published at the next snapshot build.
+    pub fn set_sync_phase(&mut self, phase: SessionSyncPhase) { self.sync_phase = phase; }
     /// Returns the gate's current string; displaying it never locks.
     pub fn current_string(&mut self, now_ms: u64) -> Result<ConnectionString, ConnectionGateError> { self.gate.current_string(now_ms) }
     /// Seconds left in the current rotation window.
     pub fn countdown_secs(&self, now_ms: u64) -> u64 { self.gate.countdown_secs(now_ms) }
-    pub fn set_heartbeat_timeout(&mut self, timeout_ms: u64) { self.hb_timeout_ms = timeout_ms; } pub fn is_disconnected(&self) -> bool { self.started && !self.ended && !self.orch.is_connected() }
+    pub fn set_heartbeat_timeout(&mut self, timeout_ms: u64) { self.hb_timeout_ms = timeout_ms; } fn fresh_now(&self, fallback: u64) -> u64 { self.clock.as_ref().map_or(fallback, |clock| clock.now_ms()) } pub fn is_disconnected(&self) -> bool { self.started && !self.ended && !self.orch.is_connected() }
     pub fn reissue_string(&self) -> Option<&ConnectionString> { self.reissued.as_ref() } pub fn username(&self) -> &EphemeralUsername { &self.username }
 
     /// Polls for candidate hello evidence. Only a first valid
@@ -227,17 +242,18 @@ impl ExpertRuntime {
         Ok(())
     }
 
-    /// Drains candidate intents once through the control executor,
-    /// then atomically publishes the candidate snapshot.
+    /// Drains candidate intents once through the control executor, then publishes the snapshot;
+    /// heartbeat is checked on a fresh clock before and after the drain, never the stale start time.
     pub async fn drain_intents(&mut self, now_ms: u64) -> Result<Vec<ApplyReport>, ExpertRuntimeError> {
         if self.ended { return Ok(Vec::new()); }
+        self.check_heartbeat(self.fresh_now(now_ms)).await;
         self.apply_pending_load().await;
         let transports = ControlTransports { coding: &*self.coding, sandbox: &*self.sandbox_io, generator: &*self.generator, chat: &*self.chat };
         let reports = self.executor.drain(&*self.control_io, &mut self.orch, &mut self.pipeline, &transports, now_ms).await?;
-        if reports.iter().any(|r| r.outcome == ApplyOutcome::Applied) { self.last_seen_ms = now_ms; }
-        let snapshot = build_snapshot(&self.orch, &self.pipeline, &self.sync_phase.clone(), self.executor.chat_replies(), None); publish_snapshot(&*self.control_io, &snapshot).await?;
+        if reports.iter().any(|r| r.outcome == ApplyOutcome::Applied) { self.last_seen_ms = self.fresh_now(now_ms); }
+        let snapshot = build_snapshot(&self.orch, &self.pipeline, self.sync_phase, self.executor.chat_replies(), None); publish_snapshot(&*self.control_io, &snapshot).await?;
         self.maybe_trigger_load();
-        self.check_heartbeat(now_ms).await;
+        self.check_heartbeat(self.fresh_now(now_ms)).await;
         Ok(reports)
     }
 
@@ -280,10 +296,10 @@ impl ExpertRuntime {
     /// Expert-visible note from the last widened selection, if any.
     pub fn selection_note(&self) -> Option<&str> { self.selection_note.as_deref() }
     /// Overrides the question pool source (test seam for selection).
-    pub fn set_pool(&mut self, pool: Arc<dyn PoolClient>) { self.pool = Some(pool); } pub fn set_secret_pusher(&mut self, pusher: Arc<dyn crate::orchestration::secret_push::SecretPush>) { self.secret_pusher = Some(pusher); }
+    pub fn set_pool(&mut self, pool: Arc<dyn PoolClient>) { self.pool = Some(pool); } pub fn set_secret_pusher(&mut self, pusher: Arc<dyn crate::orchestration::secret_push::SecretPush>) { self.secret_pusher = Some(pusher); } pub fn set_clock(&mut self, clock: Arc<dyn Clock>) { self.clock = Some(clock); }
 
     /// Live monitor data from permitted expert-side state only.
-    pub fn monitor_view(&self, now_ms: u64) -> MonitorView { monitor_view(self.orch.session(), &BTreeMap::new(), now_ms) }
+    pub fn monitor_view(&self, now_ms: u64) -> MonitorView { monitor_view(self.orch.session(), &self.pipeline.approach_qualities(&self.orch), now_ms) }
     /// Ends the session with the production 60s final-ack wait.
     pub async fn end_session(&mut self, now_ms: u64) -> Result<CleanupReport, ExpertRuntimeError> { self.end_session_with_ack_deadline(now_ms, 60_000).await }
     /// Ends the session: publish the final snapshot, wait bounded
@@ -297,8 +313,8 @@ impl ExpertRuntime {
         if let (Some(question), Some(fetched)) = (self.orch.current_question().cloned(), self.pipeline.current_statement(&self.orch)) { statements.insert(question.title_slug.clone(), fetched.statement); }
         let codes: HashMap<usize, String> = (0..self.orch.session().slots().len()).filter_map(|index| self.pipeline.current_code(index).map(|code| (index, code.to_string()))).collect();
         let grades = grade_session(&self.orch, &*self.grader, &statements, &codes).await?;
-        let breakdown = compute_final(&self.orch, &BTreeMap::new(), &grades)?;
-        let final_snapshot = build_snapshot(&self.orch, &self.pipeline, &self.sync_phase.clone(), self.executor.chat_replies(), Some(&breakdown));
+        let breakdown = compute_final(&self.orch, &self.pipeline.approach_qualities(&self.orch), &grades)?;
+        let final_snapshot = build_snapshot(&self.orch, &self.pipeline, self.sync_phase, self.executor.chat_replies(), Some(&breakdown));
         let published = publish_snapshot(&*self.control_io, &final_snapshot).await;
         let ack_outcome = if published.is_ok() { Some(self.wait_for_final_ack(ack_deadline_ms).await) } else { None };
         let report_md = generate_report(self.orch.session(), &breakdown, &grades, &[]);
@@ -358,5 +374,26 @@ impl ExpertRuntime {
         if self.pipeline.load_current_statement(&self.orch, &fetcher).await.is_err() { return; }
         let generator = CannedGenerator(Mutex::new(Some(set)));
         if self.pipeline.generate_current_approaches(&self.orch, &generator).await.is_ok() { self.loaded_index = Some(outcome.index); }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_session_id_uses_e_pid_x_now() {
+        assert_eq!(format_session_id(123, 456), "e123x456");
+        assert_eq!(format_session_id(1, 1_730_000_000_000), "e1x1730000000000");
+    }
+
+    #[test]
+    fn sandbox_port_range_preserves_historical_bounds() {
+        assert_eq!(SANDBOX_PORT_RANGE, 2222..2322);
+        assert_eq!(first_free_port(SANDBOX_PORT_RANGE.clone(), |_| false), None);
+        assert_eq!(
+            first_free_port(SANDBOX_PORT_RANGE, |p| p != 2222),
+            Some(2223)
+        );
     }
 }

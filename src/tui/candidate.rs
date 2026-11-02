@@ -77,7 +77,9 @@ where
     }
 }
 
-/// Verifier used until real transport verification arrives in Phase 10.
+/// Legacy Phase-9 seam: always `Unavailable`, never fakes verification.
+/// Live Phase-10 production replaces it via `fresh_verifier`/
+/// `SshAuthVerifier` in `candidate_runtime`; retained for tests/offline use.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnavailableVerifier;
 
@@ -99,8 +101,13 @@ pub struct CandidateApp {
 }
 
 impl CandidateApp {
-    /// Creates an app on Connect with the unavailable verifier.
+    /// Legacy alias for [`Self::new_unavailable`]; not the live verifier.
     pub fn new() -> Self {
+        Self::new_unavailable()
+    }
+
+    /// Creates an app on Connect with the legacy unavailable verifier.
+    pub fn new_unavailable() -> Self {
         Self::with_verifier(UnavailableVerifier)
     }
 
@@ -170,7 +177,7 @@ impl CandidateApp {
     }
 
     /// Returns the attached session mutably, if any.
-    pub fn session_mut(&mut self) -> Option<&mut Session> {
+    pub(crate) fn session_mut(&mut self) -> Option<&mut Session> {
         self.session.as_mut()
     }
 

@@ -14,6 +14,7 @@ use crate::core::ApproachChoice;
 use crate::orchestration::finalize::final_visible_to_candidate;
 use crate::orchestration::pipeline::QuestionPipeline;
 use crate::orchestration::session::Orchestrator;
+use crate::orchestration::sync_gate::SessionSyncPhase;
 use crate::scoring::FinalBreakdown;
 
 /// Control root outside the `/workspace` Mutagen sync root.
@@ -104,7 +105,7 @@ pub enum IntentKind {
     RequestTests,
     Finish,
     Skip,
-    RequestRequestion,
+    RequestReQuestion,
     ChatRequest { chat_id: String, text: String },
 }
 #[rustfmt::skip]
@@ -115,7 +116,7 @@ impl IntentKind {
             Self::SelectPreset { .. } => "SelectPreset", Self::SelectOther { .. } => "SelectOther",
             Self::Continue => "Continue", Self::Redirect { .. } => "Redirect",
             Self::RequestTests => "RequestTests", Self::Finish => "Finish", Self::Skip => "Skip",
-            Self::RequestRequestion => "RequestRequestion", Self::ChatRequest { .. } => "ChatRequest",
+            Self::RequestReQuestion => "RequestRequestion", Self::ChatRequest { .. } => "ChatRequest",
         }
     }
 }
@@ -149,12 +150,17 @@ impl Intent {
     }
 }
 
-/// Generates 16 random bytes as 32 lowercase hex characters.
+/// Canonical non-secret random hex: 16 `OsRng` bytes as 32 lowercase hex chars.
+/// Not a credential, so it does not belong in `connection::secret`.
 #[rustfmt::skip]
-pub fn generate_intent_id() -> String {
+pub(crate) fn random_hex_16() -> String {
     let mut bytes = [0u8; 16]; OsRng.fill_bytes(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+/// Generates 16 random bytes as 32 lowercase hex characters.
+#[rustfmt::skip]
+pub fn generate_intent_id() -> String { random_hex_16() }
 
 #[rustfmt::skip]
 fn kind_payload(kind: &IntentKind) -> (&'static str, Value) {
@@ -166,7 +172,7 @@ fn kind_payload(kind: &IntentKind) -> (&'static str, Value) {
         IntentKind::RequestTests => ("RequestTests", serde_json::json!({})),
         IntentKind::Finish => ("Finish", serde_json::json!({})),
         IntentKind::Skip => ("Skip", serde_json::json!({})),
-        IntentKind::RequestRequestion => ("RequestRequestion", serde_json::json!({})),
+        IntentKind::RequestReQuestion => ("RequestRequestion", serde_json::json!({})),
         IntentKind::ChatRequest { chat_id, text } => ("ChatRequest", serde_json::json!({"chat_id": chat_id, "text": text})),
     }
 }
@@ -206,7 +212,7 @@ fn parse_kind(name: &str, payload: &Value) -> Result<IntentKind, ControlError> {
         "RequestTests" => IntentKind::RequestTests,
         "Finish" => IntentKind::Finish,
         "Skip" => IntentKind::Skip,
-        "RequestRequestion" => IntentKind::RequestRequestion,
+        "RequestRequestion" | "RequestReQuestion" => IntentKind::RequestReQuestion,
         "ChatRequest" => IntentKind::ChatRequest { chat_id: payload_text(payload, "chat_id")?, text: payload_text(payload, "text")? },
         other => return Err(ControlError::ForbiddenKind(other.to_string())),
     };
@@ -300,7 +306,7 @@ pub struct CandidateSnapshot {
 /// Builds a snapshot only from candidate-safe projections. The final
 /// breakdown is included only in Completed/EndedByExpert sessions.
 #[rustfmt::skip]
-pub fn build_snapshot(orch: &Orchestrator, pipe: &QuestionPipeline, sync_phase: &str,
+pub fn build_snapshot(orch: &Orchestrator, pipe: &QuestionPipeline, sync_phase: SessionSyncPhase,
     chat_replies: &[String], breakdown: Option<&FinalBreakdown>) -> CandidateSnapshot {
     let slot = orch.session().current_slot();
     let current = orch.current_question().map(|q| SnapshotQuestion {
@@ -315,60 +321,15 @@ pub fn build_snapshot(orch: &Orchestrator, pipe: &QuestionPipeline, sync_phase: 
             .map(|q| SnapshotFinalQuestion { slot_index: q.slot_index, grade: q.grade, rationale: q.rationale.clone() }).collect() })
     } else { None };
     CandidateSnapshot { v: SNAPSHOT_VERSION, session_id: orch.session_id().to_string(),
-        phase: format!("{:?}", orch.status()), sync_phase: sync_phase.to_string(), current,
+        phase: format!("{:?}", orch.status()), sync_phase: sync_phase.label().to_string(), current,
         options, selected, latest_test, chat_replies: chat_replies.to_vec(), final_breakdown }
 }
 
-/// Expert-published session binding in `outbox/session.json`. The
-/// connection string carries no session id, so the candidate learns
-/// the binding only by reading this file after SSH authentication.
-#[rustfmt::skip]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionBinding { pub v: u32, pub session_id: String }
-/// Serializes the session binding for `session_id`.
-#[rustfmt::skip]
-pub fn session_binding_bytes(session_id: &str) -> Vec<u8> { serde_json::to_vec(&SessionBinding { v: SESSION_VERSION, session_id: session_id.into() }).unwrap_or_default() }
-/// Parses a session binding, rejecting a wrong version or empty id.
-#[rustfmt::skip]
-pub fn parse_session_binding(data: &[u8]) -> Result<String, ControlError> {
-    if data.len() > MAX_CONTROL_READ_BYTES { return Err(ControlError::Oversized); }
-    let binding: SessionBinding = serde_json::from_slice(data)?;
-    if binding.v != SESSION_VERSION { return Err(ControlError::WrongVersion(u64::from(binding.v))); }
-    let id = binding.session_id.trim();
-    if id.is_empty() || id.len() > 128 || id.bytes().any(|b| b.is_ascii_control()) { return Err(ControlError::WrongSession); }
-    Ok(binding.session_id)
-}
-
-/// Candidate ack in `inbox/final-ack.json`: candidate saw the terminal final rating, exactly once.
-#[rustfmt::skip]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FinalAck { pub v: u32, pub session_id: String, pub rating_seen: bool }
-/// Outcome of the expert bounded wait for the final-snapshot ack.
-#[rustfmt::skip]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FinalAckOutcome { Received, Timeout }
-/// Serializes the final ack for `session_id` (`rating_seen: true`).
-#[rustfmt::skip]
-pub fn final_ack_bytes(session_id: &str) -> Vec<u8> { serde_json::to_vec(&FinalAck { v: FINAL_ACK_VERSION, session_id: session_id.into(), rating_seen: true }).unwrap_or_default() }
-/// Parses a final ack, rejecting a wrong version, session, or unseen rating.
-#[rustfmt::skip]
-pub fn parse_final_ack(data: &[u8], expected_session: &str) -> Result<FinalAck, ControlError> { if data.len() > MAX_CONTROL_READ_BYTES { return Err(ControlError::Oversized); } let ack: FinalAck = serde_json::from_slice(data)?; if ack.v != FINAL_ACK_VERSION { Err(ControlError::WrongVersion(u64::from(ack.v))) } else if ack.session_id != expected_session { Err(ControlError::WrongSession) } else if !ack.rating_seen { Err(ControlError::Malformed("rating not seen".into())) } else { Ok(ack) } }
-/// Returns whether `data` is a valid final ack for `expected_session`.
-#[rustfmt::skip]
-pub fn is_final_ack(data: &[u8], expected_session: &str) -> bool { parse_final_ack(data, expected_session).is_ok() }
-/// Candidate liveness heartbeat: session-bound `at_ms` in candidate clock.
-#[rustfmt::skip]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Heartbeat { pub v: u32, pub session_id: String, pub at_ms: u64 }
-/// Serializes a heartbeat for `session_id` stamped at `at_ms`.
-#[rustfmt::skip]
-pub fn heartbeat_bytes(session_id: &str, at_ms: u64) -> Vec<u8> { serde_json::to_vec(&Heartbeat { v: HEARTBEAT_VERSION, session_id: session_id.into(), at_ms }).unwrap_or_default() }
-/// Parses a heartbeat, rejecting a wrong version or session binding.
-#[rustfmt::skip]
-pub fn parse_heartbeat(data: &[u8], expected_session: &str) -> Result<Heartbeat, ControlError> { if data.len() > MAX_CONTROL_READ_BYTES { return Err(ControlError::Oversized); } let hb: Heartbeat = serde_json::from_slice(data)?; if hb.v != HEARTBEAT_VERSION { Err(ControlError::WrongVersion(u64::from(hb.v))) } else if hb.session_id != expected_session { Err(ControlError::WrongSession) } else { Ok(hb) } }
-/// Parses a snapshot and rejects a wrong version or session binding.
-#[rustfmt::skip]
-pub fn parse_snapshot(data: &[u8], expected_session: &str) -> Result<CandidateSnapshot, ControlError> { if data.len() > MAX_CONTROL_READ_BYTES { return Err(ControlError::Oversized); } let snap: CandidateSnapshot = serde_json::from_slice(data)?; if snap.v != SNAPSHOT_VERSION { Err(ControlError::WrongVersion(u64::from(snap.v))) } else if snap.session_id != expected_session { Err(ControlError::WrongSession) } else { Ok(snap) } }
+pub use crate::orchestration::control_codec::{
+    final_ack_bytes, heartbeat_bytes, is_final_ack, parse_final_ack, parse_heartbeat,
+    parse_session_binding, parse_snapshot, session_binding_bytes, FinalAck, FinalAckOutcome,
+    Heartbeat, SessionBinding,
+};
 
 /// Resolves a fixed control-relative path under `root`, rejecting
 /// traversal, non-fixed names, and any symlink component.

@@ -9,7 +9,7 @@ use pairproof::leetcode::selection::{auto_pick_easy, select_questions};
 use pairproof::leetcode::{Difficulty, LeetCodeClient};
 
 #[tokio::test]
-#[ignore = "live network spike"]
+#[ignore = "live LeetCode network spike"]
 async fn live_catalog_lists_free_easy_array_questions() {
     let client = LeetCodeClient::default();
     let page = client
@@ -22,7 +22,7 @@ async fn live_catalog_lists_free_easy_array_questions() {
 }
 
 #[tokio::test]
-#[ignore = "live network spike"]
+#[ignore = "live LeetCode network spike"]
 async fn live_question_fetches_statement_and_snippets() {
     let client = LeetCodeClient::default();
     let question = client
@@ -36,7 +36,7 @@ async fn live_question_fetches_statement_and_snippets() {
 }
 
 #[tokio::test]
-#[ignore = "live network spike"]
+#[ignore = "live LeetCode network spike"]
 async fn live_premium_question_reports_premium_only() {
     let client = LeetCodeClient::default();
     let result = client.fetch_question("meeting-rooms").await;
@@ -44,7 +44,7 @@ async fn live_premium_question_reports_premium_only() {
 }
 
 #[tokio::test]
-#[ignore = "live network spike"]
+#[ignore = "live LeetCode network spike"]
 async fn live_database_question_has_mysql_snippet() {
     let client = LeetCodeClient::default();
     let page = client
@@ -63,7 +63,7 @@ async fn live_database_question_has_mysql_snippet() {
 }
 
 #[tokio::test]
-#[ignore = "live network spike"]
+#[ignore = "live LeetCode network spike"]
 async fn live_database_full_composition_selectable() {
     let client = LeetCodeClient::default();
     let mut rng = rand::thread_rng();

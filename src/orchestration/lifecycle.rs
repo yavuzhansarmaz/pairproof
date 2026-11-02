@@ -59,6 +59,13 @@ impl Default for CancelToken {
     }
 }
 
+/// Outcome of attempting to cancel in-flight work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelOutcome {
+    Cancelled,
+    Unsupported,
+}
+
 /// Report from one kill-switch execution.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct KillReport {
@@ -79,6 +86,22 @@ impl CleanupReport {
     /// Returns true when no attempted step failed.
     pub fn all_succeeded(&self) -> bool {
         self.failed.is_empty()
+    }
+
+    /// Derives the cancel outcome from the recorded step.
+    pub fn cancel_outcome(&self) -> Option<CancelOutcome> {
+        let n = "cancel_inflight";
+        let bad = self
+            .failed
+            .iter()
+            .any(|(s, m)| s == n && m.contains("unsupported"));
+        if self.succeeded.iter().any(|s| s == n) {
+            Some(CancelOutcome::Cancelled)
+        } else if bad {
+            Some(CancelOutcome::Unsupported)
+        } else {
+            None
+        }
     }
 }
 

@@ -81,7 +81,7 @@ async fn flow(
         artifact_root: artifacts.clone(),
         topics: Vec::new(),
         level: "live".into(),
-        sync_phase: "Sync: live".into(),
+        sync_phase: SessionSyncPhase::NotStarted,
     };
     let mut expert = ExpertRuntime::new(spec, deps, now_ms())
         .await
@@ -333,15 +333,6 @@ async fn flow(
 #[tokio::test]
 #[ignore = "live docker+ssh+mutagen+meta+leetcode: real sandbox/SSH/Mutagen/control and real Meta/LeetCode"]
 async fn live_two_runtime_session_with_real_meta_and_leetcode() {
-    if std::env::var("MODEL_API_KEY")
-        .map(|v| v.trim().is_empty())
-        .unwrap_or(true)
-    {
-        println!(
-            "livemeta skipped: MODEL_API_KEY is not set; run with `set -a; . ./.env; set +a` first"
-        );
-        return;
-    }
     let meta =
         MetaClient::from_env().expect("MODEL_API_KEY must be set for live Meta session test");
     let port = (22500..22700u16)

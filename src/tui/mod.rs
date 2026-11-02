@@ -10,11 +10,10 @@ pub mod candidate_runtime;
 pub mod candidate_sync;
 pub mod candidate_work;
 pub mod config;
-pub mod connection;
 pub mod expert;
 pub mod expert_runtime;
+pub mod expert_session;
 pub mod monitor;
-pub mod selection;
 pub mod setup;
 pub mod shared;
 
@@ -25,7 +24,8 @@ use clap::Parser;
 
 use crate::orchestration::{Clock, SystemClock};
 use expert_runtime::{ExpertRuntime, PollOutcome, SelectionScreen};
-use setup::SetupController;
+
+pub use setup::{apply_expert_setup_paste, ExpertSetupPastes};
 
 pub use shared::{destination_for, Role, RoleDestination};
 
@@ -77,8 +77,20 @@ impl Drop for TtyGuard {
 }
 
 /// Runs preflight once and feeds the gated outcome into the app.
-#[rustfmt::skip]
-fn run_preflight_check(app: &mut app::ExpertApp) { let passed = tokio::runtime::Builder::new_current_thread().enable_all().build().map(|runtime| runtime.block_on(crate::sandbox::preflight::gather_preflight(2222))).map(|report| expert::can_proceed(&report)).unwrap_or(false); app.set_preflight_passed(passed); }
+/// Checks the port `build_expert_runtime` will select (first free in
+/// `SANDBOX_PORT_RANGE`); when none is free, the range start is reported
+/// busy so preflight still fails on the port check.
+fn run_preflight_check(app: &mut app::ExpertApp) {
+    let port =
+        expert_runtime::select_sandbox_port().unwrap_or(expert_runtime::SANDBOX_PORT_RANGE.start);
+    let passed = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map(|runtime| runtime.block_on(crate::sandbox::preflight::gather_preflight(port)))
+        .map(|report| expert::can_proceed(&report))
+        .unwrap_or(false);
+    app.set_preflight_passed(passed);
+}
 
 /// Starts the interactive loop, falling back to a hint on init failure.
 fn run_interactive(initial: Option<Role>) -> anyhow::Result<()> {
@@ -115,43 +127,6 @@ fn now_ms() -> u64 {
 /// Runs one bounded async step on a lazily built current-thread runtime.
 #[rustfmt::skip]
 fn block_on<T>(slot: &mut Option<tokio::runtime::Runtime>, future: impl Future<Output = T>) -> Option<T> { if slot.is_none() { *slot = tokio::runtime::Builder::new_current_thread().enable_all().build().ok(); } slot.as_ref().map(|runtime| runtime.block_on(future)) }
-
-/// Expert Setup paste collector: first paste is the JD, second is notes.
-/// Held by the TTY loop, never by `ExpertApp`; completeness is the only
-/// path that lets the loop set `has_proposal` on the app.
-#[derive(Debug, Default)]
-pub struct ExpertSetupPastes {
-    controller: SetupController,
-    jd_received: bool,
-    notes_received: bool,
-}
-
-#[rustfmt::skip]
-impl ExpertSetupPastes {
-    pub fn new() -> Self { Self::default() }
-    pub fn jd(&self) -> &str { &self.controller.draft().jd }
-    pub fn notes(&self) -> &str { &self.controller.draft().additional }
-    pub fn is_complete(&self) -> bool { self.jd_received && self.notes_received }
-}
-
-/// Feeds one bracketed paste: first fills the JD, second fills the notes,
-/// later ones replace the notes. Blank or oversized (>50,000 chars) pastes
-/// are rejected without advancing. `Ok(true)` means the proposal is ready.
-#[rustfmt::skip]
-pub fn apply_expert_setup_paste(pastes: &mut ExpertSetupPastes, text: &str) -> Result<bool, String> {
-    if text.trim().is_empty() { return Err("Paste rejected: blank paste ignored.".to_string()); }
-    if text.chars().count() > crate::ingest::MAX_TEXT_CHARS {
-        return Err("Paste rejected: exceeds 50,000 characters.".to_string());
-    }
-    if !pastes.jd_received {
-        pastes.controller.set_jd(text);
-        pastes.jd_received = true;
-        return Ok(false);
-    }
-    pastes.controller.set_additional(text);
-    pastes.notes_received = true;
-    Ok(true)
-}
 
 /// TTY adapter: draws app lines plus live runtime data, polls the
 /// runtime in bounded steps, and maps keys to real operations.
@@ -230,19 +205,21 @@ fn tick_runtime(
     let Some(active) = runtime.as_mut() else {
         return;
     };
-    let now = now_ms();
     match app.screen() {
         AppScreen::ConnectionWait => {
-            let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now));
-            if let Some(PollOutcome::Connected) = block_on(tokio_rt, active.poll_candidate(now)) {
+            let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
+            if let Some(PollOutcome::Connected) =
+                block_on(tokio_rt, active.poll_candidate(now_ms()))
+            {
                 app.set_connected(true);
                 let _ = app.handle(AppEvent::ConnectionLocked);
             }
         }
         AppScreen::SelectMedium | AppScreen::SelectHard | AppScreen::Monitor => {
-            let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now));
-            let outcome = block_on(tokio_rt, active.poll_candidate(now));
-            let _ = block_on(tokio_rt, active.drain_intents(now));
+            let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
+            let outcome = block_on(tokio_rt, active.poll_candidate(now_ms()));
+            let _ = block_on(tokio_rt, active.drain_intents(now_ms()));
+            let _ = block_on(tokio_rt, active.check_heartbeat(now_ms()));
             if active.is_disconnected() {
                 let _ = app.handle(AppEvent::AccidentalDisconnect);
             }
