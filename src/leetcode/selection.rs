@@ -1,10 +1,12 @@
 //! Randomized selection of free LeetCode questions from topic pools.
 
-use super::{CatalogEntry, Difficulty, LeetCodeClient, LeetCodeError};
+use super::{CatalogEntry, CatalogPage, Difficulty, LeetCodeClient, LeetCodeError};
 use crate::core::types::QuestionRef;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::collections::BTreeSet;
+use std::future::Future;
+use std::pin::Pin;
 
 pub const MAX_PAGES: u32 = 5;
 pub const PAGE_LIMIT: u32 = 100;
@@ -15,6 +17,46 @@ pub enum SelectionError {
     Api(#[from] LeetCodeError),
     #[error("not enough questions: needed {needed}, available {available}")]
     NotEnoughQuestions { needed: usize, available: usize },
+}
+
+/// Boxed catalog-page read from any pool source.
+pub type PoolFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<CatalogPage, LeetCodeError>> + Send + 'a>>;
+
+/// Source of catalog pages for selection (live client or test fake).
+pub trait PoolClient: Send + Sync {
+    /// Lists one catalog page; mirrors `LeetCodeClient::list_questions`.
+    fn list_questions<'a>(
+        &'a self,
+        difficulty: Difficulty,
+        topics: &'a [&'a str],
+        limit: u32,
+        skip: u32,
+    ) -> PoolFuture<'a>;
+}
+
+impl PoolClient for LeetCodeClient {
+    /// Delegates to the live GraphQL catalog.
+    fn list_questions<'a>(
+        &'a self,
+        difficulty: Difficulty,
+        topics: &'a [&'a str],
+        limit: u32,
+        skip: u32,
+    ) -> PoolFuture<'a> {
+        Box::pin(async move {
+            LeetCodeClient::list_questions(self, difficulty, topics, limit, skip).await
+        })
+    }
+}
+
+/// Report of which tag set satisfied a fallback selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FallbackReport {
+    /// Tags of the winning pool (`[]` means unfiltered).
+    pub tags_used: Vec<String>,
+    /// True when the winning pool dropped at least one topic tag.
+    pub widened: bool,
 }
 
 /// Maps a catalog difficulty string to [`Difficulty`].
@@ -75,6 +117,16 @@ pub async fn expert_pool(
     topics: &[&str],
     exclude: &BTreeSet<String>,
 ) -> Result<Vec<CatalogEntry>, SelectionError> {
+    pooled_from(client, difficulty, topics, exclude).await
+}
+
+/// Fetches the deduped pool through any catalog source, in catalog order.
+async fn pooled_from(
+    client: &dyn PoolClient,
+    difficulty: Difficulty,
+    topics: &[&str],
+    exclude: &BTreeSet<String>,
+) -> Result<Vec<CatalogEntry>, SelectionError> {
     let mut seen = BTreeSet::new();
     let mut pool: Vec<CatalogEntry> = Vec::new();
     for page in 0..MAX_PAGES {
@@ -93,6 +145,46 @@ pub async fn expert_pool(
         }
     }
     Ok(pool)
+}
+
+/// Tag sets tried in order: full set, then shorter prefixes
+/// (trailing tags dropped first), then one unfiltered attempt.
+pub fn fallback_tag_sets<'a>(topics: &[&'a str]) -> Vec<Vec<&'a str>> {
+    let mut sets = Vec::with_capacity(topics.len() + 1);
+    for len in (1..=topics.len()).rev() {
+        sets.push(topics[..len].to_vec());
+    }
+    sets.push(Vec::new());
+    sets
+}
+
+/// Selects `count` questions, shrinking tags while the pool is short.
+/// Only `NotEnoughQuestions` falls through; API errors abort at once.
+pub async fn select_questions_with_fallback(
+    client: &dyn PoolClient,
+    difficulty: Difficulty,
+    topics: &[&str],
+    count: usize,
+    exclude: &BTreeSet<String>,
+    rng: &mut impl Rng,
+) -> Result<(Vec<QuestionRef>, FallbackReport), SelectionError> {
+    let mut available = 0;
+    for tags in fallback_tag_sets(topics) {
+        let pool = pooled_from(client, difficulty, &tags, exclude).await?;
+        let picked = pick_random(&pool, count, &BTreeSet::new(), rng);
+        if picked.len() >= count {
+            let report = FallbackReport {
+                tags_used: tags.iter().map(|tag| tag.to_string()).collect(),
+                widened: tags.len() < topics.len(),
+            };
+            return Ok((picked, report));
+        }
+        available = picked.len();
+    }
+    Err(SelectionError::NotEnoughQuestions {
+        needed: count,
+        available,
+    })
 }
 
 /// Selects `count` questions at random from the topic pool.
@@ -116,10 +208,14 @@ pub async fn select_questions(
 }
 
 /// Auto-picks the 5 easy questions that open a session.
+/// Falls back through shorter tag sets like expert selection.
 pub async fn auto_pick_easy(
-    client: &LeetCodeClient,
+    client: &dyn PoolClient,
     topics: &[&str],
     rng: &mut impl Rng,
 ) -> Result<Vec<QuestionRef>, SelectionError> {
-    select_questions(client, Difficulty::Easy, topics, 5, &BTreeSet::new(), rng).await
+    let (picked, _) =
+        select_questions_with_fallback(client, Difficulty::Easy, topics, 5, &BTreeSet::new(), rng)
+            .await?;
+    Ok(picked)
 }

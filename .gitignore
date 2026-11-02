@@ -3,6 +3,7 @@
 .env
 *.local.toml
 .pairproof/
+pairproof-workspace/
 sessions/
 artifacts/
 
