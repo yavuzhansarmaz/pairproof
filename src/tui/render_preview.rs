@@ -2,10 +2,16 @@
 //! wrapping/classification, scroll metrics, and the full-screen
 //! renderer used by the expert selection screens.
 
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
+
+use crate::tui::statement_text::wrap_preview_text;
+pub use crate::tui::statement_text::{
+    preview_body_rows, preview_line_kind, PreviewRow, PreviewRowKind,
+};
 
 use crate::tui::render::{
     key_span, title_line, ENTER_KEY_COLOR, ESC_KEY_COLOR, FRAME_COLOR, HEADING_COLOR, PAIR_COLOR,
@@ -20,135 +26,20 @@ pub struct QuestionPreviewData {
     pub title: String,
     pub difficulty: String,
     pub acceptance: String,
-    pub slug: String,
     pub position: usize,
     pub total: usize,
     pub picked: bool,
     pub body: Option<String>,
-}
-
-/// One display row of a question-preview body, after wrapping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreviewRowKind {
-    Heading,
-    Body,
-    Bullet,
-    Blank,
-}
-
-/// A wrapped preview row plus how it should be styled.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreviewRow {
-    pub text: String,
-    pub kind: PreviewRowKind,
-}
-
-fn is_preview_heading(trimmed: &str) -> bool {
-    let lower = trimmed.to_ascii_lowercase();
-    let section = lower.starts_with("example")
-        || lower.starts_with("constraints")
-        || lower.starts_with("note")
-        || lower.starts_with("explanation")
-        || lower.starts_with("follow up")
-        || lower.starts_with("follow-up")
-        || lower.starts_with("hint");
-    section && (trimmed.ends_with(':') || !lower.contains(' '))
-}
-
-/// Word-wraps `text` to `width` columns; continuation rows use
-/// `rest_prefix` so bullets keep a hanging indent. Words longer
-/// than the available width are hard-split.
-fn wrap_preview_text(
-    text: &str,
-    width: usize,
-    first_prefix: &str,
-    rest_prefix: &str,
-) -> Vec<String> {
-    let width = width.max(8);
-    let mut rows = Vec::new();
-    let mut prefix = first_prefix;
-    let mut current = String::new();
-    let avail = |prefix: &str| width.saturating_sub(prefix.chars().count()).max(1);
-    for word in text.split_whitespace() {
-        let word_len = word.chars().count();
-        if word_len > avail(prefix) && current.is_empty() {
-            let chars: Vec<char> = word.chars().collect();
-            let mut start = 0;
-            while start < chars.len() {
-                let take = avail(prefix).min(chars.len() - start);
-                rows.push(format!(
-                    "{prefix}{}",
-                    chars[start..start + take].iter().collect::<String>()
-                ));
-                start += take;
-                prefix = rest_prefix;
-            }
-            continue;
-        }
-        if current.is_empty() {
-            current = word.to_string();
-        } else if current.chars().count() + 1 + word_len <= avail(prefix) {
-            current.push(' ');
-            current.push_str(word);
-        } else {
-            rows.push(format!("{prefix}{current}"));
-            prefix = rest_prefix;
-            current = word.to_string();
-        }
-    }
-    if !current.is_empty() || rows.is_empty() {
-        rows.push(format!("{prefix}{current}"));
-    }
-    rows
-}
-
-/// Classifies and wraps a plain-text statement into display rows:
-/// section lines (`Example 1:`, `Constraints:`, ...) become
-/// headings, `- ` items become hanging-indent bullets, and every
-/// other line is word-wrapped so long question and example text
-/// fits the pane instead of running off screen.
-pub fn preview_body_rows(body: &str, width: usize) -> Vec<PreviewRow> {
-    let width = width.max(8);
-    let mut rows = Vec::new();
-    for raw in body.lines() {
-        let line = crate::tui::shared::sanitize_display(raw);
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            rows.push(PreviewRow {
-                text: String::new(),
-                kind: PreviewRowKind::Blank,
-            });
-        } else if is_preview_heading(trimmed) {
-            rows.push(PreviewRow {
-                text: trimmed.to_string(),
-                kind: PreviewRowKind::Heading,
-            });
-        } else if let Some(item) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("\u{2022} "))
-        {
-            for row in wrap_preview_text(item, width, "- ", "  ") {
-                rows.push(PreviewRow {
-                    text: row,
-                    kind: PreviewRowKind::Bullet,
-                });
-            }
-        } else {
-            for row in wrap_preview_text(trimmed, width, "", "") {
-                rows.push(PreviewRow {
-                    text: row,
-                    kind: PreviewRowKind::Body,
-                });
-            }
-        }
-    }
-    rows
+    /// Why the statement failed to load, when it did. The expert
+    /// sees the real reason; failures are never cached as a body.
+    pub load_error: Option<String>,
 }
 
 /// Content width for the preview: the full area inside the outer
-/// border, edge to edge with no side margins.
+/// border, minus a two-column reading padding on each side so
+/// text never hugs the frame.
 fn preview_content_width(frame_width: u16) -> usize {
-    frame_width.saturating_sub(2).max(1) as usize
+    frame_width.saturating_sub(6).max(1) as usize
 }
 
 fn preview_title_rows(title: &str, width: usize) -> usize {
@@ -191,6 +82,7 @@ pub fn draw_question_preview_screen(
     frame: &mut Frame,
     preview: &QuestionPreviewData,
     scroll: usize,
+    tick: usize,
 ) {
     let area = frame.area();
     let outer = Block::default()
@@ -200,7 +92,11 @@ pub fn draw_question_preview_screen(
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     let content_width = preview_content_width(area.width);
-    let content = inner;
+    let content = Rect {
+        x: inner.x.saturating_add(2),
+        width: inner.width.saturating_sub(4),
+        ..inner
+    };
     let title_rows = preview_title_rows(&preview.title, content_width) as u16;
     let chunks = ratatui::layout::Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
@@ -257,8 +153,6 @@ pub fn draw_question_preview_screen(
         Span::raw(format!(" {}  ", preview.difficulty)),
         meta_label("acceptance"),
         Span::raw(format!(" {}  ", preview.acceptance)),
-        meta_label("slug"),
-        Span::raw(format!(" {}  ", preview.slug)),
     ];
     if preview.picked {
         meta.push(Span::styled(
@@ -288,14 +182,38 @@ pub fn draw_question_preview_screen(
         .unwrap_or_default();
     let total_rows = rows.len();
     let effective_scroll = scroll.min(total_rows.saturating_sub(chunks[4].height as usize));
-    let body_lines: Vec<Line> = match &preview.body {
-        None => vec![Line::from(Span::styled(
-            "loading the question...",
+    let body_lines: Vec<Line> = match (&preview.load_error, &preview.body) {
+        (Some(reason), _) => {
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    "the question could not be loaded.",
+                    Style::default()
+                        .fg(ESC_KEY_COLOR)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::raw(String::new())),
+            ];
+            lines.extend(
+                preview_body_rows(reason, content_width)
+                    .iter()
+                    .map(|row| Line::from(Span::raw(row.text.clone()))),
+            );
+            lines.push(Line::from(Span::raw(String::new())));
+            lines.push(Line::from(Span::styled(
+                "step away and back, or reopen the preview, to try again.",
+                Style::default()
+                    .fg(TEXT_COLOR)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+            lines
+        }
+        (None, None) => vec![Line::from(Span::styled(
+            format!("loading the question{}", ".".repeat(tick % 3 + 1)),
             Style::default()
                 .fg(TEXT_COLOR)
                 .add_modifier(Modifier::ITALIC),
         ))],
-        Some(_) => rows
+        (None, Some(_)) => rows
             .iter()
             .skip(effective_scroll)
             .take(chunks[4].height as usize)
@@ -340,16 +258,15 @@ pub fn draw_question_preview_screen(
         ])
         .split(chunks[5]);
     let mut footer_spans = vec![
+        key_span("space", ENTER_KEY_COLOR),
+        Span::raw(" select  "),
         key_span("left/right", PAIR_COLOR),
         Span::raw(" question  "),
+        key_span("b", PAIR_COLOR),
+        Span::raw(" back to list  "),
         key_span("up/down", PAIR_COLOR),
-        Span::raw(" scroll  "),
+        Span::raw(" scroll"),
     ];
-    if content_width >= 96 {
-        footer_spans.push(key_span("pgup/pgdn", PAIR_COLOR));
-        footer_spans.push(Span::raw(" page  "));
-    }
-    footer_spans.extend([key_span("b", PAIR_COLOR), Span::raw(" back to list")]);
     if content_width >= 64 {
         footer_spans.push(Span::raw("  "));
         footer_spans.push(key_span("esc", ESC_KEY_COLOR));

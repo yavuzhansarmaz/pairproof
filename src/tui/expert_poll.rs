@@ -2,6 +2,7 @@
 //! bounded per-tick runtime step.
 
 use crate::tui::app;
+use crate::tui::expert_keys::selection_screen;
 use crate::tui::expert_loop::ExpertLoopState;
 use crate::tui::expert_runtime::{ExpertRuntime, PollOutcome};
 use crate::tui::expert_tty::{block_on, now_ms, set_error};
@@ -106,6 +107,39 @@ pub(crate) fn tick_runtime(
 }
 
 impl ExpertLoopState {
+    /// Scrolls the question preview by `delta` rows, clamped to
+    /// the range the last frame could actually display.
+    pub(crate) fn scroll_preview_by(&mut self, delta: i32) {
+        if delta >= 0 {
+            self.question_preview_scroll = self
+                .question_preview_scroll
+                .saturating_add(delta as usize)
+                .min(self.question_preview_max_scroll);
+        } else {
+            self.question_preview_scroll = self
+                .question_preview_scroll
+                .saturating_sub(delta.unsigned_abs() as usize);
+        }
+    }
+
+    /// Steps the preview to a neighbouring question: the scroll
+    /// resets to the top and the new statement fetch starts, so
+    /// the preview shows the loading line until it lands.
+    pub(crate) fn step_preview_question(&mut self, app: &app::ExpertApp, delta: i32) {
+        let Some(screen) = selection_screen(app) else {
+            return;
+        };
+        let moved = match self.runtime.as_mut() {
+            Some(active) => active.step_preview_question(screen, delta),
+            None => false,
+        };
+        if moved {
+            self.question_preview_scroll = 0;
+            self.question_preview_max_scroll = usize::MAX;
+            self.start_question_preview_fetch(screen);
+        }
+    }
+
     /// Starts the statement fetch for a freshly opened question
     /// preview, unless that statement is already cached.
     pub(crate) fn start_question_preview_fetch(
@@ -150,9 +184,10 @@ impl ExpertLoopState {
             Ok((screen, slug, result)) => {
                 self.pending.preview_rx = None;
                 if let Some(active) = self.runtime.as_mut() {
-                    let text =
-                        result.unwrap_or_else(|_| "the question could not be loaded.".to_string());
-                    active.store_preview(screen, slug, text);
+                    match result {
+                        Ok(text) => active.store_preview(screen, slug, text),
+                        Err(reason) => active.store_preview_error(screen, slug, reason),
+                    }
                 }
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {

@@ -634,3 +634,62 @@ fn candidate_final_pinned_lines_are_the_completion_summary() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn key_hints_colour_space_green_and_directions_navy() {
+    use pairproof::tui::app::AppScreen;
+    use pairproof::tui::help::expert_help_lines;
+    use pairproof::tui::render::{draw_screen, ENTER_KEY_COLOR, PAIR_COLOR};
+    let backend = ratatui::backend::TestBackend::new(100, 40);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = expert_help_lines(AppScreen::SelectMedium);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let green: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == ENTER_KEY_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(green.contains("space"), "{green}");
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PAIR_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(navy.contains("up/down"), "{navy}");
+    assert!(navy.contains("left/right"), "{navy}");
+}
+
+#[test]
+fn key_hints_colour_tab_navy_and_random_r_yellow() {
+    use pairproof::tui::app::AppScreen;
+    use pairproof::tui::help::expert_help_lines;
+    use pairproof::tui::render::{draw_screen, HELP_KEY_COLOR, PAIR_COLOR};
+    let backend = ratatui::backend::TestBackend::new(100, 40);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = expert_help_lines(AppScreen::SelectMedium);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PAIR_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(navy.contains("tab"), "{navy}");
+    let yellow: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == HELP_KEY_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    // `?` help key plus the `r` of `r pick at random`.
+    assert!(yellow.contains('?'), "{yellow}");
+    assert!(yellow.contains('r'), "{yellow}");
+}

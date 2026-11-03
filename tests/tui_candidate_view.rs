@@ -82,7 +82,14 @@ fn coach_pane_title_is_coach_not_ai_coach() {
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
         .draw(|frame| {
-            draw_candidate_screen(frame, &view.question_lines(), &view.chat_lines(), true, 60)
+            draw_candidate_screen(
+                frame,
+                &view.question_lines(),
+                &view.chat_lines(),
+                true,
+                60,
+                0,
+            )
         })
         .expect("draw");
     let rendered: String = terminal

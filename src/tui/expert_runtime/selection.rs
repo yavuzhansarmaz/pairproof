@@ -25,8 +25,8 @@ pub(crate) struct SelectionList {
     pub(crate) options: Vec<QuestionRef>,
     pub(crate) picks: Vec<QuestionRef>,
     pub(crate) cursor: usize,
-    pub(crate) preview_slug: Option<String>,
-    pub(crate) preview_text: Option<String>,
+    pub(crate) preview_cache: std::collections::HashMap<String, String>,
+    pub(crate) preview_error: Option<(String, String)>,
 }
 
 /// All expert-selection staging; kept in one struct on the runtime.

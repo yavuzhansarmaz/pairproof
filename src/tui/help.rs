@@ -28,7 +28,7 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
         AppScreen::Preflight => lines.extend(["  m change the Meta API key"]),
         AppScreen::Setup => lines.extend([
             "  paste into the focused box, enter moves on",
-            "  backspace deletes the last character",
+            "  tab switches box, backspace deletes the last character",
             "  up/down scroll, drag a box border to resize",
             "  m change the Meta API key (back on Expert Setup)",
             "  b back a step, keeping your pasted text",

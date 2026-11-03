@@ -27,6 +27,7 @@ pub(crate) struct FramePlan {
     pub(crate) centered: bool,
     pub(crate) preview: Option<render::QuestionPreviewData>,
     pub(crate) preview_scroll: usize,
+    pub(crate) preview_tick: usize,
 }
 
 /// Centring decision for one frame: intro screens sit centred, an
@@ -169,11 +170,13 @@ impl ExpertLoopState {
                     self.question_preview_page = metrics.body_rows.max(1);
                     self.question_preview_scroll =
                         self.question_preview_scroll.min(metrics.max_scroll);
+                    self.question_preview_tick = self.question_preview_tick.wrapping_add(1);
                     return FramePlan {
                         visible: Vec::new(),
                         kind: FrameKind::Preview,
                         centered: false,
                         preview_scroll: self.question_preview_scroll,
+                        preview_tick: self.question_preview_tick,
                         preview: Some(preview),
                     };
                 }
@@ -208,6 +211,7 @@ impl ExpertLoopState {
             centered,
             preview: None,
             preview_scroll: 0,
+            preview_tick: 0,
         }
     }
 

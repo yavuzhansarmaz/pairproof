@@ -23,10 +23,13 @@ pub mod expert_view;
 pub mod help;
 pub mod monitor;
 pub mod render;
+pub mod render_candidate;
 pub mod render_preview;
 pub mod setup;
 pub mod setup_panel;
+pub mod setup_pastes;
 pub mod shared;
+pub mod statement_text;
 pub mod viewport;
 
 use std::io::IsTerminal;
@@ -136,7 +139,12 @@ fn interactive_loop(
             }
             FrameKind::Preview => {
                 if let Some(preview) = &plan.preview {
-                    render::draw_question_preview_screen(frame, preview, plan.preview_scroll);
+                    render::draw_question_preview_screen(
+                        frame,
+                        preview,
+                        plan.preview_scroll,
+                        plan.preview_tick,
+                    );
                 }
             }
             FrameKind::Screen => render::draw_screen(frame, &plan.visible, plan.centered),

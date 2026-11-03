@@ -98,11 +98,42 @@ impl QuestionGrader for FakeGrader { fn grade_all<'a>(&'a self, _inputs: &'a [pa
 
 #[rustfmt::skip]
 async fn make_runtime(pool: Arc<FakePool>) -> ExpertRuntime {
-    let root = common_mod::tmp("preview-step", "step"); let control = root.join("control"); let artifacts = root.join("artifacts");
-    let io = LocalControlIo::new(control.clone()); io.setup_dirs("pp-testuser").await.unwrap();
-    let spec = ExpertSessionSpec { session_id: "s1".into(), language: Language::Python, easy: easy_five(), endpoint: endpoint(), username: username(), fingerprint: fingerprint() };
-    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher: Arc::new(FakeFetcher), generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts, topics: vec!["array".into()], level: String::new(), sync_phase: SessionSyncPhase::NotStarted };
-    let mut runtime = ExpertRuntime::new(spec, deps, T0).await.unwrap(); runtime.set_pool(pool as Arc<dyn PoolClient>); runtime
+    make_runtime_named(pool, "step").await
+}
+
+async fn make_runtime_named(pool: Arc<FakePool>, name: &str) -> ExpertRuntime {
+    let root = common_mod::tmp("preview-step", name);
+    let control = root.join("control");
+    let artifacts = root.join("artifacts");
+    let io = LocalControlIo::new(control.clone());
+    io.setup_dirs("pp-testuser").await.unwrap();
+    let spec = ExpertSessionSpec {
+        session_id: "s1".into(),
+        language: Language::Python,
+        easy: easy_five(),
+        endpoint: endpoint(),
+        username: username(),
+        fingerprint: fingerprint(),
+    };
+    let deps = ExpertRuntimeDeps {
+        control_io: Box::new(io),
+        hello: Box::new(LocalHelloSource::new(control.clone())),
+        fetcher: Arc::new(FakeFetcher),
+        generator: Arc::new(FakeGenerator),
+        coding: Arc::new(FakeCoding),
+        sandbox_io: Arc::new(FakeSandbox),
+        chat: Arc::new(FakeChat),
+        grader: Arc::new(FakeGrader),
+        leetcode: None,
+        sandbox_handle: None,
+        artifact_root: artifacts,
+        topics: vec!["array".into()],
+        level: String::new(),
+        sync_phase: SessionSyncPhase::NotStarted,
+    };
+    let mut runtime = ExpertRuntime::new(spec, deps, T0).await.unwrap();
+    runtime.set_pool(pool as Arc<dyn PoolClient>);
+    runtime
 }
 
 #[tokio::test]
@@ -135,4 +166,87 @@ async fn preview_step_moves_between_questions_and_clamps() {
     }
     assert_eq!(runtime.selection_cursor(SelectionScreen::Medium), 4);
     assert!(!runtime.step_preview_question(SelectionScreen::Medium, 1));
+}
+
+#[tokio::test]
+async fn preview_pick_toggle_and_statement_cache_survive_stepping() {
+    let pool = Arc::new(FakePool {
+        slugs: (0..5).map(|i| format!("q{i}")).collect(),
+        calls: Mutex::new(0),
+    });
+    let mut runtime = make_runtime_named(pool, "pick-cache").await;
+    runtime.fetch_medium(T0).await.expect("medium fetch");
+    // Space in the preview is the same toggle as space in the list.
+    let before = runtime
+        .question_preview(SelectionScreen::Medium)
+        .expect("preview");
+    assert!(!before.picked);
+    assert!(runtime.toggle_selection_pick(SelectionScreen::Medium));
+    let after = runtime
+        .question_preview(SelectionScreen::Medium)
+        .expect("preview");
+    assert!(after.picked);
+    assert_eq!(runtime.pick_count(SelectionScreen::Medium), 1);
+    // Statements are cached per question: stepping away and back
+    // shows the first statement again without a new fetch.
+    runtime.store_preview(
+        SelectionScreen::Medium,
+        "q0".to_string(),
+        "Statement zero.".to_string(),
+    );
+    assert!(runtime.step_preview_question(SelectionScreen::Medium, 1));
+    runtime.store_preview(
+        SelectionScreen::Medium,
+        "q1".to_string(),
+        "Statement one.".to_string(),
+    );
+    assert!(runtime.step_preview_question(SelectionScreen::Medium, -1));
+    let back = runtime
+        .question_preview(SelectionScreen::Medium)
+        .expect("preview");
+    assert_eq!(back.body.as_deref(), Some("Statement zero."));
+    assert!(runtime.preview_request(SelectionScreen::Medium).is_none());
+}
+
+#[tokio::test]
+async fn preview_load_failure_is_not_cached_and_stepping_retries() {
+    let pool = Arc::new(FakePool {
+        slugs: (0..5).map(|i| format!("q{i}")).collect(),
+        calls: Mutex::new(0),
+    });
+    let mut runtime = make_runtime_named(pool, "load-error").await;
+    runtime.fetch_medium(T0).await.expect("medium fetch");
+    // A failed load records the reason and blocks the per-tick
+    // auto-retry, but is never cached as the statement itself.
+    runtime.store_preview_error(
+        SelectionScreen::Medium,
+        "q0".to_string(),
+        "premium-only question".to_string(),
+    );
+    let failed = runtime
+        .question_preview(SelectionScreen::Medium)
+        .expect("preview");
+    assert_eq!(failed.load_error.as_deref(), Some("premium-only question"));
+    assert!(failed.body.is_none());
+    assert!(runtime.preview_request(SelectionScreen::Medium).is_none());
+    // Stepping away and back clears the failure and retries.
+    assert!(runtime.step_preview_question(SelectionScreen::Medium, 1));
+    assert!(runtime.step_preview_question(SelectionScreen::Medium, -1));
+    assert!(runtime.preview_request(SelectionScreen::Medium).is_some());
+    // A later success replaces the failure state.
+    runtime.store_preview_error(
+        SelectionScreen::Medium,
+        "q0".to_string(),
+        "timeout".to_string(),
+    );
+    runtime.store_preview(
+        SelectionScreen::Medium,
+        "q0".to_string(),
+        "Statement zero.".to_string(),
+    );
+    let loaded = runtime
+        .question_preview(SelectionScreen::Medium)
+        .expect("preview");
+    assert!(loaded.load_error.is_none());
+    assert_eq!(loaded.body.as_deref(), Some("Statement zero."));
 }

@@ -13,9 +13,10 @@ impl ExpertRuntime {
     ) -> Option<(Arc<dyn StatementFetcher>, String, crate::core::Language)> {
         let list = self.list(screen);
         let question = list.options.get(list.cursor)?;
-        if list.preview_slug.as_deref() == Some(question.title_slug.as_str())
-            && list.preview_text.is_some()
-        {
+        if list.preview_cache.contains_key(&question.title_slug) {
+            return None;
+        }
+        if matches!(&list.preview_error, Some((failed, _)) if *failed == question.title_slug) {
             return None;
         }
         Some((
@@ -31,14 +32,39 @@ impl ExpertRuntime {
     pub fn step_preview_question(&mut self, screen: SelectionScreen, delta: i32) -> bool {
         let before = self.selection_cursor(screen);
         self.move_selection_cursor(screen, delta);
-        self.selection_cursor(screen) != before
+        if self.selection_cursor(screen) != before {
+            // Landing on a question retries a failed load.
+            self.list_mut(screen).preview_error = None;
+            true
+        } else {
+            false
+        }
     }
 
-    /// Caches a fetched preview statement (plain text) for `slug`.
+    /// Records why the statement for `slug` failed to load, so the
+    /// preview can show the expert the real reason. Failures are
+    /// never written into the statement cache, and the tick does
+    /// not auto-retry: stepping onto the question (or reopening
+    /// the preview) clears the error and fetches again.
+    pub fn store_preview_error(&mut self, screen: SelectionScreen, slug: String, reason: String) {
+        let list = self.list_mut(screen);
+        list.preview_error = Some((slug, crate::tui::shared::sanitize_display(&reason)));
+    }
+
+    /// Clears a recorded load error so the next fetch may start.
+    pub fn clear_preview_error(&mut self, screen: SelectionScreen) {
+        self.list_mut(screen).preview_error = None;
+    }
+
+    /// Caches a fetched preview statement (plain text) for `slug`;
+    /// earlier questions stay cached, so stepping back to one does
+    /// not fetch it again.
     pub fn store_preview(&mut self, screen: SelectionScreen, slug: String, text: String) {
         let list = self.list_mut(screen);
-        list.preview_slug = Some(slug);
-        list.preview_text = Some(text);
+        if matches!(&list.preview_error, Some((failed, _)) if *failed == slug) {
+            list.preview_error = None;
+        }
+        list.preview_cache.insert(slug, text);
     }
 
     /// Structured preview data for the redesigned preview screen:
@@ -54,10 +80,12 @@ impl ExpertRuntime {
             Difficulty::Medium => "medium",
             Difficulty::Hard => "hard",
         };
-        let body = match (&list.preview_slug, &list.preview_text) {
-            (Some(slug), Some(text)) if *slug == question.title_slug => {
-                Some(crate::tui::shared::sanitize_display(text))
-            }
+        let body = list
+            .preview_cache
+            .get(&question.title_slug)
+            .map(|text| crate::tui::shared::sanitize_display(text));
+        let load_error = match &list.preview_error {
+            Some((slug, reason)) if *slug == question.title_slug => Some(reason.clone()),
             _ => None,
         };
         Some(crate::tui::render::QuestionPreviewData {
@@ -67,7 +95,6 @@ impl ExpertRuntime {
                 .acceptance_pct
                 .map(|pct| format!("{pct}%"))
                 .unwrap_or_else(|| "unknown".to_string()),
-            slug: crate::tui::shared::sanitize_display(&question.title_slug),
             position: list.cursor + 1,
             total: list.options.len(),
             picked: list
@@ -75,6 +102,7 @@ impl ExpertRuntime {
                 .iter()
                 .any(|pick| pick.title_slug == question.title_slug),
             body,
+            load_error,
         })
     }
 
@@ -108,7 +136,6 @@ impl ExpertRuntime {
             String::new(),
             format!("difficulty: {difficulty}"),
             format!("acceptance: {acceptance}"),
-            format!("slug: {}", question.title_slug),
             format!(
                 "question {} of {} ({picked})",
                 list.cursor + 1,
@@ -116,11 +143,9 @@ impl ExpertRuntime {
             ),
             String::new(),
         ];
-        match (&list.preview_slug, &list.preview_text) {
-            (Some(slug), Some(text)) if *slug == question.title_slug => {
-                lines.extend(text.lines().map(str::to_string));
-            }
-            _ => lines.push("loading the question...".to_string()),
+        match list.preview_cache.get(&question.title_slug) {
+            Some(text) => lines.extend(text.lines().map(str::to_string)),
+            None => lines.push("loading the question...".to_string()),
         }
         lines.push(String::new());
         lines.push("up/down scroll, b back to the list".to_string());

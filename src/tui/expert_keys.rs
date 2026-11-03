@@ -143,6 +143,7 @@ pub(crate) fn handle_key(
         {
             pastes.back_to_job_description()
         }
+        K::Tab if app.screen() == AppScreen::Setup => pastes.toggle_focus(),
         K::Backspace if app.screen() == AppScreen::Setup => pastes.backspace_focused(),
         K::Up if app.screen() == AppScreen::Setup => pastes.scroll_focused(-1),
         K::Down if app.screen() == AppScreen::Setup => pastes.scroll_focused(1),

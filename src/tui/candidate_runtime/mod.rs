@@ -28,10 +28,12 @@ const SSH_TIMEOUT: Duration = Duration::from_secs(20);
 const HEARTBEAT_THROTTLE_MS: u64 = 5_000;
 pub const CONNECTION_LOST: &str = "connection lost \u{2014} retrying";
 mod live;
+mod live_keys;
 mod panes;
 mod transport;
 mod view;
-pub use self::live::{candidate_loop, default_workspace, handle_live_key};
+pub use self::live::{candidate_loop, default_workspace};
+pub use self::live_keys::handle_live_key;
 pub use self::panes::{
     connect_submit_shows_loading, divider_hit, screen_centered, split_pct_for_column,
     DEFAULT_QUESTION_PCT,

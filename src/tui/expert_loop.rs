@@ -51,6 +51,7 @@ pub(crate) struct ExpertLoopState {
     pub(crate) question_preview_scroll: usize,
     pub(crate) question_preview_max_scroll: usize,
     pub(crate) question_preview_page: usize,
+    pub(crate) question_preview_tick: usize,
     pub(crate) pending: PendingWork,
     pub(crate) loading_tick: usize,
 }
@@ -75,6 +76,7 @@ impl Default for ExpertLoopState {
             // the wrapped content before anything is drawn.
             question_preview_max_scroll: usize::MAX,
             question_preview_page: 10,
+            question_preview_tick: 0,
             pending: PendingWork::default(),
             loading_tick: 0,
         }
@@ -203,39 +205,6 @@ impl ExpertLoopState {
             || self.pending.api_key_rx.is_some()
     }
 
-    /// Scrolls the question preview by `delta` rows, clamped to
-    /// the range the last frame could actually display.
-    pub(crate) fn scroll_preview_by(&mut self, delta: i32) {
-        if delta >= 0 {
-            self.question_preview_scroll = self
-                .question_preview_scroll
-                .saturating_add(delta as usize)
-                .min(self.question_preview_max_scroll);
-        } else {
-            self.question_preview_scroll = self
-                .question_preview_scroll
-                .saturating_sub(delta.unsigned_abs() as usize);
-        }
-    }
-
-    /// Steps the preview to a neighbouring question: the scroll
-    /// resets to the top and the new statement fetch starts, so
-    /// the preview shows the loading line until it lands.
-    pub(crate) fn step_preview_question(&mut self, app: &app::ExpertApp, delta: i32) {
-        let Some(screen) = selection_screen(app) else {
-            return;
-        };
-        let moved = match self.runtime.as_mut() {
-            Some(active) => active.step_preview_question(screen, delta),
-            None => false,
-        };
-        if moved {
-            self.question_preview_scroll = 0;
-            self.question_preview_max_scroll = usize::MAX;
-            self.start_question_preview_fetch(screen);
-        }
-    }
-
     /// Routes one key event through API-key entry and help overlays.
     pub(crate) fn handle_key_event(
         &mut self,
@@ -283,6 +252,13 @@ impl ExpertLoopState {
                 crossterm::event::KeyCode::Char('b') => {
                     self.show_question_preview = false;
                     self.question_preview_scroll = 0;
+                }
+                crossterm::event::KeyCode::Char(' ') => {
+                    if let (Some(active), Some(screen)) =
+                        (self.runtime.as_mut(), selection_screen(app))
+                    {
+                        active.toggle_selection_pick(screen);
+                    }
                 }
                 crossterm::event::KeyCode::Left => self.step_preview_question(app, -1),
                 crossterm::event::KeyCode::Right => self.step_preview_question(app, 1),
@@ -367,6 +343,10 @@ impl ExpertLoopState {
                 if active.has_options(screen) {
                     self.show_question_preview = true;
                     self.question_preview_scroll = 0;
+                    // Reopening the preview retries a failed load.
+                    if let Some(active) = self.runtime.as_mut() {
+                        active.clear_preview_error(screen);
+                    }
                     self.start_question_preview_fetch(screen);
                     return;
                 }

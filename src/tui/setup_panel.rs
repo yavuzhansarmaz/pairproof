@@ -169,9 +169,9 @@ pub fn draw_setup_screen(frame: &mut Frame, panel: &SetupPanel) {
         ),
     );
     let footer = if panel.job_focused {
-        "up/down scroll, drag bottom border to resize, enter continue, b back, esc quit"
+        "tab switch box, backspace delete, up/down scroll, enter continue, b back, esc quit"
     } else {
-        "up/down scroll, drag bottom border to resize, enter review, b back, esc quit"
+        "tab switch box, backspace delete, up/down scroll, enter review, b back, esc quit"
     };
     frame.render_widget(
         Paragraph::new(Line::from(help_key_spans(footer))).style(Style::default().fg(TEXT_COLOR)),
