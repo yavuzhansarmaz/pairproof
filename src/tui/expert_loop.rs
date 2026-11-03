@@ -53,15 +53,12 @@ impl ExpertLoopState {
     /// Builds the lines for one frame: app lines, live runtime lines,
     /// the masked API-key entry, then help/disclosure replacement.
     pub(crate) fn build_lines(&mut self, app: &app::ExpertApp) -> Vec<String> {
-        let mut lines = app::screen_lines(app);
-        // Pull the footer off so runtime lines can be added above
-        // it; it is re-appended last, on every screen.
-        let footer = app::footer(app);
+        // Content and footer arrive separately, so runtime lines are
+        // spliced into the content and the footer is re-appended last
+        // by construction, on every screen.
+        let (mut lines, footer) = app::screen_parts(app);
         let held_footer = if !self.show_help && !self.show_disclosure {
-            match lines.last() {
-                Some(last) if Some(last.as_str()) == footer.as_deref() => lines.pop(),
-                _ => None,
-            }
+            footer
         } else {
             None
         };
@@ -103,8 +100,8 @@ impl ExpertLoopState {
                 "\u{2022}".repeat(self.api_key_input.chars().count()),
                 self.api_key_input.chars().count()
             );
-            let at = lines.len().saturating_sub(1);
-            lines.insert(at, masked);
+            // Last content line; the held footer is appended after it.
+            lines.push(masked);
         }
         if let Some(foot) = held_footer {
             lines.push(foot);

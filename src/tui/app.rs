@@ -335,4 +335,4 @@ impl ExpertApp {
     }
 }
 
-pub use crate::tui::expert_view::{footer, screen_lines, screen_title};
+pub use crate::tui::expert_view::{footer, screen_lines, screen_parts, screen_title};

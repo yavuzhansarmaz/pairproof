@@ -81,7 +81,7 @@ pub fn disclosure_lines() -> Vec<String> {
         "asked again. the raw pastes are deleted when",
         "the session ends.",
         "",
-        "esc quit, b back to help.",
+        "b back to help, esc quit.",
     ])
 }
 

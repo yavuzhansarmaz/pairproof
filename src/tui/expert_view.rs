@@ -46,8 +46,11 @@ pub fn footer(app: &ExpertApp) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-/// Builds deterministic sanitized lines for rendering one screen.
-pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
+/// Builds the screen's content lines and its footer separately, so
+/// callers that splice extra lines in never have to guess which line
+/// is the footer. Re-appending the footer (when present) reproduces
+/// [`screen_lines`] exactly.
+pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
     use AppScreen as S;
     let screen = app.screen();
     let heading = if screen == S::RoleSelect {
@@ -178,8 +181,16 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
     if let Some(message) = app.status_message() {
         lines.push(format!("status: {message}"));
     }
-    if let Some(foot) = footer(app) {
+    let content = lines.iter().map(|line| sanitize_display(line)).collect();
+    let foot = footer(app).map(|line| sanitize_display(&line));
+    (content, foot)
+}
+
+/// Builds deterministic sanitized lines for rendering one screen.
+pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
+    let (mut lines, foot) = screen_parts(app);
+    if let Some(foot) = foot {
         lines.push(foot);
     }
-    lines.iter().map(|line| sanitize_display(line)).collect()
+    lines
 }

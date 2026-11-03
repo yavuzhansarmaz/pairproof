@@ -6,8 +6,9 @@ use crossterm::event::{KeyCode as K, KeyEvent, KeyModifiers};
 
 use crate::core::Session;
 use crate::llm::chat::ChatState;
-use crate::orchestration::{Clock, SystemClock};
 use crate::tui::candidate::{CandidateApp, CandidateScreen};
+use crate::tui::shared::pop_last;
+
 use crate::tui::candidate_actions::{
     UnavailableCodingRunner, UnavailableOtherGrader, UnavailableTestRunner,
 };
@@ -15,6 +16,7 @@ use crate::tui::candidate_chat::{other_insert, ChatController};
 use crate::tui::candidate_final::{candidate_final, candidate_final_lines};
 use crate::tui::candidate_work::{work_lines, CandidateWork};
 use crate::tui::help::{candidate_help_lines_for, candidate_is_typing};
+pub use crate::tui::shared::now_ms;
 
 /// Focus pane while solving; Tab cycles Work, Other, Redirect, Chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -115,18 +117,6 @@ impl Default for CandidateRunState {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Returns the current time in milliseconds for connection expiry;
-/// delegates to the shared orchestration system clock.
-pub fn now_ms() -> u64 {
-    SystemClock.now_ms()
-}
-
-fn pop_last(text: &str) -> String {
-    let mut owned = text.to_string();
-    owned.pop();
-    owned
 }
 
 fn submit_chat(state: &mut CandidateRunState) {

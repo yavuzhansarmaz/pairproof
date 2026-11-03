@@ -2,16 +2,13 @@
 
 use super::*;
 
+use crate::tui::shared::pop_last;
+
 /// Local workspace synced to the container `/workspace` root.
 pub fn default_workspace() -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| std::env::temp_dir())
         .join("pairproof-workspace")
-}
-fn pop_last(text: &str) -> String {
-    let mut owned = text.to_string();
-    owned.pop();
-    owned
 }
 fn apply(status: &mut Option<String>, result: Result<Intent, CandidateRuntimeError>) -> bool {
     match result {

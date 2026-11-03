@@ -1,5 +1,20 @@
 //! Widgets and rendering shared by expert and candidate screens.
 
+use crate::orchestration::{Clock, SystemClock};
+
+/// Current time in milliseconds; the single definition both the
+/// expert and candidate loops delegate to.
+pub fn now_ms() -> u64 {
+    SystemClock.now_ms()
+}
+
+/// Returns `text` without its last character; empty stays empty.
+pub(crate) fn pop_last(text: &str) -> String {
+    let mut owned = text.to_string();
+    owned.pop();
+    owned
+}
+
 /// Role selected at startup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
