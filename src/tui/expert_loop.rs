@@ -5,7 +5,7 @@ use crate::tui::expert_keys::selection_screen;
 use crate::tui::expert_runtime::ExpertRuntime;
 use crate::tui::expert_tty::now_ms;
 use crate::tui::setup::ExpertSetupPastes;
-use crate::tui::{app, help, monitor, render, setup};
+use crate::tui::{app, help, monitor, setup};
 
 /// One finished background pool fetch: the runtime handed back,
 /// which selection screen it belongs to, and the offered count.
@@ -13,6 +13,14 @@ pub(crate) type SelectionFetchReceiver = std::sync::mpsc::Receiver<(
     ExpertRuntime,
     crate::tui::expert_runtime::SelectionScreen,
     Result<usize, String>,
+)>;
+
+/// One finished question-preview fetch: screen, slug, plain-text
+/// statement (already converted from HTML by the worker).
+pub(crate) type QuestionPreviewReceiver = std::sync::mpsc::Receiver<(
+    crate::tui::expert_runtime::SelectionScreen,
+    String,
+    Result<String, String>,
 )>;
 
 /// Background work the TTY loop waits on: a proposal request and
@@ -24,6 +32,7 @@ pub(crate) struct PendingWork {
     pub(crate) runtime_rx: Option<std::sync::mpsc::Receiver<Result<ExpertRuntime, String>>>,
     pub(crate) selection_rx: Option<SelectionFetchReceiver>,
     pub(crate) api_key_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    pub(crate) preview_rx: Option<QuestionPreviewReceiver>,
 }
 
 /// Mutable state owned by the expert TTY loop.
@@ -39,6 +48,7 @@ pub(crate) struct ExpertLoopState {
     pub(crate) show_disclosure: bool,
     pub(crate) show_question_preview: bool,
     pub(crate) show_random_confirm: bool,
+    pub(crate) question_preview_scroll: usize,
     pub(crate) pending: PendingWork,
     pub(crate) loading_tick: usize,
 }
@@ -57,6 +67,7 @@ impl Default for ExpertLoopState {
             show_disclosure: false,
             show_question_preview: false,
             show_random_confirm: false,
+            question_preview_scroll: 0,
             pending: PendingWork::default(),
             loading_tick: 0,
         }
@@ -71,7 +82,7 @@ impl ExpertLoopState {
         // spliced into the content and the footer is re-appended last
         // by construction, on every screen.
         let (mut lines, footer) = app::screen_parts(app);
-        let held_footer = if !self.show_help && !self.show_disclosure {
+        let mut held_footer = if !self.show_help && !self.show_disclosure {
             footer
         } else {
             None
@@ -127,6 +138,15 @@ impl ExpertLoopState {
             // Last content line; the held footer is appended after it.
             lines.push(masked);
         }
+        if !self.show_help && !self.show_disclosure {
+            if let Some(screen) = selection_screen(app) {
+                let loaded = self
+                    .runtime
+                    .as_ref()
+                    .is_some_and(|active| active.has_options(screen));
+                held_footer = app::selection_footer(app, loaded);
+            }
+        }
         if let Some(foot) = held_footer {
             lines.push(foot);
         }
@@ -134,12 +154,25 @@ impl ExpertLoopState {
             lines = help::disclosure_lines();
         } else if self.show_help {
             lines = help::expert_help_lines(app.screen());
+            if let Some(screen) = selection_screen(app) {
+                let loaded = self
+                    .runtime
+                    .as_ref()
+                    .is_some_and(|active| active.has_options(screen));
+                if !loaded {
+                    lines.retain(|line| !line.contains("r pick at random"));
+                }
+            }
         }
         if self.show_question_preview {
             if let (Some(active), Some(screen)) = (self.runtime.as_ref(), selection_screen(app)) {
                 let preview = active.selection_preview_lines(screen);
                 if !preview.is_empty() {
-                    lines = preview;
+                    let start = self
+                        .question_preview_scroll
+                        .min(preview.len().saturating_sub(1));
+                    self.question_preview_scroll = start;
+                    lines = preview[start..].to_vec();
                 }
             }
         }
@@ -214,10 +247,20 @@ impl ExpertLoopState {
         }
         if self.show_question_preview {
             // Question preview: `b` returns to the list exactly
-            // where it was left; quit keys still quit; the rest is
-            // swallowed so picks and cursor cannot drift behind it.
+            // where it was left; up/down scroll the statement; quit
+            // keys still quit; the rest is swallowed so picks and
+            // cursor cannot drift behind it.
             match key.code {
-                crossterm::event::KeyCode::Char('b') => self.show_question_preview = false,
+                crossterm::event::KeyCode::Char('b') => {
+                    self.show_question_preview = false;
+                    self.question_preview_scroll = 0;
+                }
+                crossterm::event::KeyCode::Up => {
+                    self.question_preview_scroll = self.question_preview_scroll.saturating_sub(1);
+                }
+                crossterm::event::KeyCode::Down => {
+                    self.question_preview_scroll = self.question_preview_scroll.saturating_add(1);
+                }
                 crossterm::event::KeyCode::Esc => {
                     let _ = app.handle(app::AppEvent::Quit);
                 }
@@ -237,19 +280,23 @@ impl ExpertLoopState {
         }
         if self.show_random_confirm {
             // Random-pick confirmation: Enter draws the picks and
-            // returns to the list with them marked; `b` returns
+            // immediately acts as the list Enter, so Medium moves to
+            // Hard and Hard commits to the Monitor; `b` returns
             // without touching the current picks; quit keys quit.
             match key.code {
                 crossterm::event::KeyCode::Enter => {
-                    if let (Some(active), Some(screen)) =
+                    let should_advance = if let (Some(active), Some(screen)) =
                         (self.runtime.as_mut(), selection_screen(app))
                     {
-                        let picked = active.randomize_picks(screen);
-                        app.set_status_message(format!(
-                            "{picked} questions picked at random; press enter to continue."
-                        ));
-                    }
+                        active.randomize_picks(screen);
+                        true
+                    } else {
+                        false
+                    };
                     self.show_random_confirm = false;
+                    if should_advance {
+                        self.dispatch_key(app, crossterm::event::KeyCode::Enter);
+                    }
                 }
                 crossterm::event::KeyCode::Char('b') => self.show_random_confirm = false,
                 crossterm::event::KeyCode::Esc => {
@@ -282,6 +329,8 @@ impl ExpertLoopState {
             if let (Some(screen), Some(active)) = (selection_screen(app), self.runtime.as_ref()) {
                 if active.has_options(screen) {
                     self.show_question_preview = true;
+                    self.question_preview_scroll = 0;
+                    self.start_question_preview_fetch(screen);
                     return;
                 }
             }
@@ -306,90 +355,6 @@ impl ExpertLoopState {
                 let _ = app.handle(app::AppEvent::Quit);
             }
             help::ExpertKeyAction::Dispatch => self.dispatch_key(app, key.code),
-        }
-    }
-
-    /// Returns the string a `[COPY]` button click should copy on
-    /// `screen`: the current connection string while waiting, the
-    /// reissued one on the monitor.
-    pub(crate) fn copy_token(&mut self, screen: app::AppScreen) -> Option<String> {
-        let active = self.runtime.as_mut()?;
-        match screen {
-            app::AppScreen::ConnectionWait => active
-                .current_string(now_ms())
-                .ok()
-                .map(|current| current.encode()),
-            app::AppScreen::Monitor => active.reissue_string().map(|fresh| fresh.encode()),
-            _ => None,
-        }
-    }
-
-    /// Setup-screen mouse: focus, drag-resize, and scroll the two boxes.
-    pub(crate) fn handle_setup_mouse(
-        &mut self,
-        terminal_size: ratatui::layout::Rect,
-        mouse: crossterm::event::MouseEvent,
-    ) {
-        use crossterm::event::{MouseButton, MouseEventKind};
-        let (jd_box, notes_box) =
-            render::setup_box_areas(terminal_size, self.setup_jd_height, self.setup_notes_height);
-        let in_box = |rect: ratatui::layout::Rect| {
-            mouse.column >= rect.x
-                && mouse.column < rect.x + rect.width
-                && mouse.row >= rect.y
-                && mouse.row < rect.y + rect.height
-        };
-        match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                if in_box(jd_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::JobDescription);
-                    if mouse.row == jd_box.y + jd_box.height - 1 {
-                        self.setup_drag = Some(setup::ExpertSetupFocus::JobDescription);
-                    }
-                } else if in_box(notes_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::AdditionalNotes);
-                    if mouse.row == notes_box.y + notes_box.height - 1 {
-                        self.setup_drag = Some(setup::ExpertSetupFocus::AdditionalNotes);
-                    }
-                }
-            }
-            MouseEventKind::Drag(MouseButton::Left) => match self.setup_drag {
-                Some(setup::ExpertSetupFocus::JobDescription) => {
-                    self.setup_jd_height = mouse.row.saturating_sub(jd_box.y + 1).clamp(5, 20)
-                }
-                Some(setup::ExpertSetupFocus::AdditionalNotes) => {
-                    self.setup_notes_height = mouse.row.saturating_sub(notes_box.y + 1).clamp(2, 12)
-                }
-                None => {}
-            },
-            MouseEventKind::Up(MouseButton::Left) => self.setup_drag = None,
-            MouseEventKind::ScrollDown => {
-                if in_box(jd_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::JobDescription);
-                } else if in_box(notes_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::AdditionalNotes);
-                }
-                if in_box(jd_box) || in_box(notes_box) {
-                    self.pastes.scroll_focused(1);
-                }
-            }
-            MouseEventKind::ScrollUp => {
-                if in_box(jd_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::JobDescription);
-                } else if in_box(notes_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::AdditionalNotes);
-                }
-                if in_box(jd_box) || in_box(notes_box) {
-                    self.pastes.scroll_focused(-1);
-                }
-            }
-            _ => {}
         }
     }
 }

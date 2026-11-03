@@ -2,6 +2,10 @@
 
 use super::*;
 
+/// First message shown on the Coach side of the solving screen.
+pub const COACH_WELCOME: &str = "Talking with me won't affect your score. \
+    You can ask me anything about the question on the left, in any language you like.";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CandidateView {
     pub phase: String,
@@ -133,15 +137,15 @@ impl CandidateView {
         }
         lines.iter().map(|line| sanitize_display(line)).collect()
     }
-    /// Right-pane lines: coach replies only.
+    /// Right-pane lines: the Coach welcome first, then its replies.
     pub fn chat_lines(&self) -> Vec<String> {
-        if self.chat_replies.is_empty() {
-            return vec!["ask the coach about this question.".to_string()];
-        }
-        self.chat_replies
-            .iter()
-            .map(|reply| sanitize_display(&format!("coach: {reply}")))
-            .collect()
+        let mut lines = vec![format!("coach: {COACH_WELCOME}")];
+        lines.extend(
+            self.chat_replies
+                .iter()
+                .map(|reply| format!("coach: {reply}")),
+        );
+        lines.iter().map(|line| sanitize_display(line)).collect()
     }
     /// Sanitized lines; a rating renders only from a carried breakdown.
     pub fn lines(&self) -> Vec<String> {

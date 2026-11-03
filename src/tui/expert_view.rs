@@ -37,11 +37,11 @@ pub fn footer(app: &ExpertApp) -> Option<String> {
         AppScreen::Proposal => String::new(),
         AppScreen::ConnectionWait => "b back, esc quit, ? help".to_string(),
         AppScreen::SelectMedium => {
-            "up/down move, left/right page, space choose, tab preview, r random, enter continue, esc quit, ? help"
+            "up/down move, left/right page, space choose, tab preview, enter continue, esc quit, ? help"
                 .to_string()
         }
         AppScreen::SelectHard => {
-            "up/down move, left/right page, space choose, tab preview, r random, enter continue, esc quit, ? help"
+            "up/down move, left/right page, space choose, tab preview, enter continue, esc quit, ? help"
                 .to_string()
         }
         AppScreen::Monitor => {
@@ -50,6 +50,25 @@ pub fn footer(app: &ExpertApp) -> Option<String> {
         AppScreen::Final => "enter close, esc quit".to_string(),
     };
     (!text.is_empty()).then_some(text)
+}
+
+/// Runtime-aware selection footer: `r` is offered only once the
+/// question list has actually loaded, because it draws from it.
+pub fn selection_footer(app: &ExpertApp, options_loaded: bool) -> Option<String> {
+    if !matches!(
+        app.screen(),
+        AppScreen::SelectMedium | AppScreen::SelectHard
+    ) {
+        return footer(app);
+    }
+    if options_loaded {
+        Some(
+            "up/down move, left/right page, space choose, tab preview, r random, enter continue, esc quit, ? help"
+                .to_string(),
+        )
+    } else {
+        footer(app)
+    }
 }
 
 /// Builds the screen's content lines and its footer separately, so

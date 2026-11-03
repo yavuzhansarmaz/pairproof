@@ -104,3 +104,99 @@ pub(crate) fn tick_runtime(
         _ => {}
     }
 }
+
+impl ExpertLoopState {
+    /// Starts the statement fetch for a freshly opened question
+    /// preview, unless that statement is already cached.
+    pub(crate) fn start_question_preview_fetch(
+        &mut self,
+        screen: crate::tui::expert_runtime::SelectionScreen,
+    ) {
+        if self.pending.preview_rx.is_some() {
+            return;
+        }
+        let Some(active) = self.runtime.as_ref() else {
+            return;
+        };
+        let Some((fetcher, slug, language)) = active.preview_request(screen) else {
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.pending.preview_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|err| err.to_string())
+                .and_then(|rt| {
+                    rt.block_on(async {
+                        fetcher
+                            .fetch_statement(&slug, language)
+                            .await
+                            .map(|fetched| crate::tui::shared::html_to_text(&fetched.statement))
+                            .map_err(|err| err.to_string())
+                    })
+                });
+            let _ = tx.send((screen, slug, result));
+        });
+    }
+
+    /// Caches a finished preview statement on the runtime.
+    pub(crate) fn poll_question_preview(&mut self) {
+        let Some(rx) = &self.pending.preview_rx else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok((screen, slug, result)) => {
+                self.pending.preview_rx = None;
+                if let Some(active) = self.runtime.as_mut() {
+                    let text =
+                        result.unwrap_or_else(|_| "the question could not be loaded.".to_string());
+                    active.store_preview(screen, slug, text);
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.pending.preview_rx = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
+
+    /// Applies a finished background pool fetch; a fully auto-picked
+    /// small pool is announced so it is not mistaken for breakage.
+    pub(crate) fn poll_selection_fetch(&mut self, app: &mut app::ExpertApp) {
+        let Some(rx) = &self.pending.selection_rx else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok((active, screen, result)) => {
+                self.pending.selection_rx = None;
+                match result {
+                    Ok(_) => {
+                        if active.auto_selected(screen) {
+                            let label = match screen {
+                                crate::tui::expert_runtime::SelectionScreen::Medium => "medium",
+                                crate::tui::expert_runtime::SelectionScreen::Hard => "hard",
+                            };
+                            app.set_status_message(format!(
+                                "only {} {label} questions were found for this candidate, so all of them are selected automatically.",
+                                active.option_count(screen)
+                            ));
+                        } else if let Some(note) = active.selection_note() {
+                            app.set_status_message(note);
+                        } else {
+                            app.clear_status_message();
+                        }
+                    }
+                    Err(err) => set_error(app, "selection failed", &err),
+                }
+                self.runtime = Some(active);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.pending.selection_rx = None;
+                set_error(app, "selection failed", "selection worker stopped");
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
+}

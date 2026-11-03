@@ -300,20 +300,22 @@ pub fn is_copy_button_at(lines: &[String], area: Rect, column: u16, row: u16) ->
 }
 
 /// Draws the candidate solving screen as two panes: question and
-/// approaches on the left (about three fifths), the AI coach chat on
-/// the right. The focused pane's border uses the purple accent, the
-/// other the frame navy. Lines wrap inside their pane.
+/// approaches on the left, the Coach chat on the right, split at
+/// `question_pct` percent (draggable in the TTY loop, 30..=70). The
+/// focused pane's border uses the purple accent, the other the
+/// frame navy. Lines wrap inside their pane.
 pub fn draw_candidate_screen(
     frame: &mut Frame,
     left: &[String],
     right: &[String],
     chat_focused: bool,
+    question_pct: u16,
 ) {
     let chunks = ratatui::layout::Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
         .constraints([
-            ratatui::layout::Constraint::Percentage(62),
-            ratatui::layout::Constraint::Percentage(38),
+            ratatui::layout::Constraint::Percentage(question_pct),
+            ratatui::layout::Constraint::Percentage(100 - question_pct),
         ])
         .split(frame.area());
     let pane = |lines: &[String], title: Line<'static>, focused: bool| {
@@ -333,7 +335,7 @@ pub fn draw_candidate_screen(
         pane(
             right,
             Line::from(Span::styled(
-                "AI coach",
+                "Coach",
                 Style::default()
                     .fg(HEADING_COLOR)
                     .add_modifier(Modifier::BOLD),

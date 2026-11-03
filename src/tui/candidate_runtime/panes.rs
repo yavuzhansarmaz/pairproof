@@ -3,6 +3,43 @@
 
 use super::*;
 
+/// Default split and the draggable range for the two-pane solving
+/// screen: the question pane starts at 60% and either pane may
+/// shrink to 30% (so the other grows to 70%).
+pub(crate) const DEFAULT_QUESTION_PCT: u16 = 60;
+pub(crate) const MIN_PANE_PCT: u16 = 30;
+pub(crate) const MAX_QUESTION_PCT: u16 = 70;
+
+/// Column of the pane divider for a terminal `width` at `pct`.
+pub(crate) fn divider_column(width: u16, pct: u16) -> u16 {
+    ((u32::from(width) * u32::from(pct)) / 100) as u16
+}
+
+/// True when `column` grabs the divider (within one column).
+pub(crate) fn divider_hit(column: u16, width: u16, pct: u16) -> bool {
+    column.abs_diff(divider_column(width, pct)) <= 1
+}
+
+/// True when pressing Enter on Connect should first show the
+/// loading screen and only then run the connection submit.
+pub(crate) fn connect_submit_shows_loading(
+    screen: CandidateScreen,
+    input_len: usize,
+    show_help: bool,
+) -> bool {
+    screen == CandidateScreen::Connect && input_len > 0 && !show_help
+}
+
+/// Question-pane percent for a drag to `column`, clamped so both
+/// panes keep at least the minimum share.
+pub(crate) fn split_pct_for_column(column: u16, width: u16) -> u16 {
+    if width == 0 {
+        return DEFAULT_QUESTION_PCT;
+    }
+    ((u32::from(column) * 100) / u32::from(width))
+        .clamp(u32::from(MIN_PANE_PCT), u32::from(MAX_QUESTION_PCT)) as u16
+}
+
 /// Centred screens: help always, plus Connect and Rules before the
 /// live session starts; later screens use the full area.
 pub(crate) fn screen_centered(show_help: bool, live: bool, screen: CandidateScreen) -> bool {
@@ -72,6 +109,52 @@ pub(crate) fn live_panes(
         state.chat.input_text()
     )));
     (left, right)
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::*;
+
+    #[test]
+    fn split_defaults_sixty_forty_and_clamps_both_panes_to_thirty() {
+        assert_eq!(DEFAULT_QUESTION_PCT, 60);
+        assert_eq!(split_pct_for_column(60, 100), 60);
+        assert_eq!(split_pct_for_column(10, 100), 30);
+        assert_eq!(split_pct_for_column(95, 100), 70);
+        assert_eq!(split_pct_for_column(0, 0), 60);
+    }
+
+    #[test]
+    fn connect_submit_shows_loading_only_for_nonempty_connect_enter() {
+        assert!(connect_submit_shows_loading(
+            CandidateScreen::Connect,
+            12,
+            false
+        ));
+        assert!(!connect_submit_shows_loading(
+            CandidateScreen::Connect,
+            0,
+            false
+        ));
+        assert!(!connect_submit_shows_loading(
+            CandidateScreen::Connect,
+            12,
+            true
+        ));
+        assert!(!connect_submit_shows_loading(
+            CandidateScreen::Rules,
+            12,
+            false
+        ));
+    }
+
+    #[test]
+    fn divider_hit_covers_the_border_column() {
+        assert!(divider_hit(60, 100, 60));
+        assert!(divider_hit(59, 100, 60));
+        assert!(divider_hit(61, 100, 60));
+        assert!(!divider_hit(50, 100, 60));
+    }
 }
 
 #[cfg(test)]

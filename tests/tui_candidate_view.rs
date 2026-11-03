@@ -3,7 +3,9 @@
 
 use pairproof::orchestration::control::{CandidateSnapshot, SnapshotOption, SnapshotQuestion};
 use pairproof::tui::candidate_runtime::CandidateView;
+use pairproof::tui::render::draw_candidate_screen;
 use pairproof::tui::shared::html_to_text;
+use ratatui::{backend::TestBackend, Terminal};
 
 fn snapshot(statement: Option<String>) -> CandidateSnapshot {
     CandidateSnapshot {
@@ -63,8 +65,46 @@ fn missing_statement_is_waiting_and_panes_split() {
     assert!(left.contains("Plain statement."), "{left}");
     assert!(left.contains("1: Sort first - Sort then sweep"), "{left}");
     assert!(!left.contains("coach:"), "{left}");
-    let right = view.chat_lines().join("\n");
-    assert_eq!(right, "coach: Try sorting first.");
+    let right = view.chat_lines();
+    assert_eq!(
+        right[0],
+        "coach: Talking with me won't affect your score. \
+         You can ask me anything about the question on the left, in any language you like."
+    );
+    assert_eq!(right[1], "coach: Try sorting first.");
+}
+
+#[test]
+fn coach_pane_title_is_coach_not_ai_coach() {
+    let view =
+        CandidateView::from_snapshot(Some(&snapshot(Some("<p>Plain statement.</p>".to_string()))));
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            draw_candidate_screen(frame, &view.question_lines(), &view.chat_lines(), true, 60)
+        })
+        .expect("draw");
+    let rendered: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(rendered.contains("Coach"), "{rendered}");
+    assert!(!rendered.contains("AI coach"), "{rendered}");
+    assert!(!rendered.contains("AI Coach"), "{rendered}");
+}
+
+#[test]
+fn coach_welcome_is_first_even_before_any_reply() {
+    let view = CandidateView::from_snapshot(None);
+    let lines = view.chat_lines();
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].starts_with("coach: Talking with me"), "{lines:?}");
+    assert!(lines[0].contains("won't affect your score"), "{lines:?}");
+    assert!(lines[0].contains("in any language you like"), "{lines:?}");
 }
 
 #[test]

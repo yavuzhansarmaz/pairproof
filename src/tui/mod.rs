@@ -14,6 +14,7 @@ pub mod expert;
 pub mod expert_frame;
 pub mod expert_keys;
 pub mod expert_loop;
+pub mod expert_mouse;
 pub mod expert_poll;
 pub mod expert_runtime;
 pub mod expert_session;

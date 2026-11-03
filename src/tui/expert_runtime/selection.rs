@@ -14,19 +14,19 @@ fn required(screen: SelectionScreen) -> usize {
     }
 }
 
-/// How many picks this screen actually needs: the target, or the
-/// whole pool when the pool holds fewer than the target.
+/// Picks needed on a screen: the target, or the whole smaller pool.
 fn effective_required(list: &SelectionList, screen: SelectionScreen) -> usize {
     required(screen).min(list.options.len())
 }
 
-/// One choosable list: the offered pool, the expert's picks, and the
-/// cursor position (an absolute index into the pool).
+/// One choosable list: offered pool, picks, and cursor index.
 #[derive(Default)]
 pub(crate) struct SelectionList {
-    options: Vec<QuestionRef>,
-    picks: Vec<QuestionRef>,
-    cursor: usize,
+    pub(crate) options: Vec<QuestionRef>,
+    pub(crate) picks: Vec<QuestionRef>,
+    pub(crate) cursor: usize,
+    pub(crate) preview_slug: Option<String>,
+    pub(crate) preview_text: Option<String>,
 }
 
 /// All expert-selection staging; kept in one struct on the runtime.
@@ -41,14 +41,14 @@ pub(crate) struct SelectionState {
 }
 
 impl ExpertRuntime {
-    fn list(&self, screen: SelectionScreen) -> &SelectionList {
+    pub(crate) fn list(&self, screen: SelectionScreen) -> &SelectionList {
         match screen {
             SelectionScreen::Medium => &self.selection.medium,
             SelectionScreen::Hard => &self.selection.hard,
         }
     }
 
-    fn list_mut(&mut self, screen: SelectionScreen) -> &mut SelectionList {
+    pub(crate) fn list_mut(&mut self, screen: SelectionScreen) -> &mut SelectionList {
         match screen {
             SelectionScreen::Medium => &mut self.selection.medium,
             SelectionScreen::Hard => &mut self.selection.hard,
@@ -206,6 +206,11 @@ impl ExpertRuntime {
     /// the picks changed.
     pub fn toggle_selection_pick(&mut self, screen: SelectionScreen) -> bool {
         let list = self.list_mut(screen);
+        // A pool at or below the target is fully auto-selected and
+        // locked: dropping a pick would lose an irreplaceable question.
+        if list.options.len() <= required(screen) {
+            return false;
+        }
         let need = effective_required(list, screen);
         let Some(question) = list.options.get(list.cursor).cloned() else {
             return false;
@@ -270,62 +275,19 @@ impl ExpertRuntime {
         self.expert_select(medium, hard, now_ms)
     }
 
-    /// Replaces the picks on `screen` with a random draw of the
-    /// effective count from the offered pool. Returns the pick count.
+    /// Replaces the picks with a random draw; returns the pick count.
     pub fn randomize_picks(&mut self, screen: SelectionScreen) -> usize {
         use rand::seq::SliceRandom;
         let need = effective_required(self.list(screen), screen);
         let list = self.list_mut(screen);
+        // Pagination is display-only: draw from all offered questions.
         let mut shuffled = list.options.clone();
         shuffled.shuffle(&mut rand::thread_rng());
         list.picks = shuffled.into_iter().take(need).collect();
         list.picks.len()
     }
 
-    /// Centred preview lines for the question under the cursor:
-    /// everything the pool knows about it, plus how to get back.
-    pub fn selection_preview_lines(&self, screen: SelectionScreen) -> Vec<String> {
-        let list = self.list(screen);
-        let Some(question) = list.options.get(list.cursor) else {
-            return Vec::new();
-        };
-        let difficulty = match question.difficulty {
-            Difficulty::Easy => "easy",
-            Difficulty::Medium => "medium",
-            Difficulty::Hard => "hard",
-        };
-        let acceptance = question
-            .acceptance_pct
-            .map(|pct| format!("{pct}%"))
-            .unwrap_or_else(|| "unknown".to_string());
-        let picked = if list
-            .picks
-            .iter()
-            .any(|pick| pick.title_slug == question.title_slug)
-        {
-            "selected"
-        } else {
-            "not selected"
-        };
-        vec![
-            crate::tui::shared::sanitize_display(&question.title),
-            String::new(),
-            format!("difficulty: {difficulty}"),
-            format!("acceptance: {acceptance}"),
-            format!("slug: {}", question.title_slug),
-            format!(
-                "question {} of {} ({picked})",
-                list.cursor + 1,
-                list.options.len()
-            ),
-            String::new(),
-            "b back to the list".to_string(),
-        ]
-    }
-
-    /// Renders the current page of the selection list for `screen`:
-    /// page indicator, the page's questions with pick marks and the
-    /// cursor row, then the pick count. Empty before the fetch.
+    /// Renders the current page of the selection list for `screen`.
     pub fn selection_lines(&self, screen: SelectionScreen) -> Vec<String> {
         let list = self.list(screen);
         if list.options.is_empty() {

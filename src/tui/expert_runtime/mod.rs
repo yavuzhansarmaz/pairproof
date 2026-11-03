@@ -35,6 +35,7 @@ use crate::tui::monitor::{final_view, monitor_view, MonitorView};
 mod build;
 mod connection;
 mod hello;
+mod preview;
 mod recovery;
 mod selection;
 mod session;

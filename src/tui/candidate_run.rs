@@ -353,7 +353,8 @@ impl Drop for CandidateTtyGuard {
         let _ = crossterm::execute!(
             std::io::stdout(),
             crossterm::terminal::LeaveAlternateScreen,
-            crossterm::event::DisableBracketedPaste
+            crossterm::event::DisableBracketedPaste,
+            crossterm::event::DisableMouseCapture
         );
     }
 }

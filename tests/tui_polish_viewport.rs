@@ -547,9 +547,8 @@ fn session_setup_boxes_show_five_and_two_lines() {
     assert!(!rendered.contains("JD line 6"), "{rendered}");
     assert!(rendered.contains("Note line 2"), "{rendered}");
     assert!(!rendered.contains("Note line 3"), "{rendered}");
-    assert!(rendered.contains("paste the job description"), "{rendered}");
     assert!(
-        !rendered.contains("Paste the job description"),
+        rendered.contains("PairProof turns the pasted role into interview topics"),
         "{rendered}"
     );
     // No phantom blank row: with no status, the footer sits

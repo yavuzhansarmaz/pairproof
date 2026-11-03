@@ -212,22 +212,27 @@ pub(crate) fn handle_key(
         }
         K::Char(' ') if selection_screen(app).is_some() => {
             if let (Some(active), Some(screen)) = (runtime.as_mut(), selection_screen(app)) {
-                if !active.toggle_selection_pick(screen)
-                    && active.has_options(screen)
-                    && active.pick_count(screen)
+                if !active.toggle_selection_pick(screen) && active.has_options(screen) {
+                    if active.auto_selected(screen) {
+                        app.set_status_message(format!(
+                            "only {} questions were found for this candidate; all of them must stay selected.",
+                            active.option_count(screen)
+                        ));
+                    } else if active.pick_count(screen)
                         >= match screen {
                             SelectionScreen::Medium => 3,
                             SelectionScreen::Hard => 2,
                         }
-                {
-                    app.set_status_message(match screen {
-                        SelectionScreen::Medium => {
-                            "3 medium questions are already selected; deselect one first."
-                        }
-                        SelectionScreen::Hard => {
-                            "2 hard questions are already selected; deselect one first."
-                        }
-                    });
+                    {
+                        app.set_status_message(match screen {
+                            SelectionScreen::Medium => {
+                                "3 medium questions are already selected; deselect one first."
+                            }
+                            SelectionScreen::Hard => {
+                                "2 hard questions are already selected; deselect one first."
+                            }
+                        });
+                    }
                 }
             }
         }

@@ -1,5 +1,6 @@
 use pairproof::tui::app::{
-    screen_lines, screen_parts, screen_title, AppError, AppEvent, AppScreen, ExpertApp,
+    screen_lines, screen_parts, screen_title, selection_footer, AppError, AppEvent, AppScreen,
+    ExpertApp,
 };
 
 #[test]
@@ -154,6 +155,27 @@ fn select_medium_explains_loading_and_mentions_enter_once() {
         "{joined}"
     );
     assert_eq!(joined.matches("enter").count(), 1, "{joined}");
+}
+
+#[test]
+fn selection_footer_offers_random_only_after_questions_load() {
+    let mut app = ExpertApp::new();
+    app.set_disclosure_acknowledged(true);
+    app.set_has_proposal(true);
+    app.handle(AppEvent::SelectExpert).expect("to preflight");
+    app.set_preflight_passed(true);
+    app.set_api_key_ready(true);
+    app.handle(AppEvent::PreflightCompleted).expect("to setup");
+    app.handle(AppEvent::ProposalReady).expect("to proposal");
+    app.handle(AppEvent::ProposalConfirmed)
+        .expect("to connection wait");
+    app.set_connected(true);
+    app.handle(AppEvent::ConnectionLocked)
+        .expect("to select medium");
+    let before = selection_footer(&app, false).expect("footer");
+    assert!(!before.contains("r random"), "{before}");
+    let after = selection_footer(&app, true).expect("footer");
+    assert!(after.contains("r random"), "{after}");
 }
 
 #[test]

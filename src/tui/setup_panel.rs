@@ -136,11 +136,7 @@ pub fn draw_setup_screen(frame: &mut Frame, panel: &SetupPanel) {
             .add_modifier(Modifier::BOLD),
     );
     frame.render_widget(heading, chunks[0]);
-    let hint = if panel.job_focused {
-        "paste the job description, then press enter."
-    } else {
-        "additional notes are optional. enter reviews the proposal."
-    };
+    let hint = "PairProof turns the pasted role into interview topics, level, and language.";
     frame.render_widget(
         Paragraph::new(Line::from(help_key_spans(hint))).style(Style::default().fg(TEXT_COLOR)),
         chunks[1],

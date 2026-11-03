@@ -139,6 +139,38 @@ async fn randomize_picks_draws_the_effective_count() {
 }
 
 #[tokio::test]
+async fn randomize_draws_from_whole_pool_not_only_current_page() {
+    let pool = Arc::new(FakePool {
+        slugs: slugs(15),
+        hard_slugs: None,
+        calls: Mutex::new(0),
+    });
+    let mut runtime = make_runtime("random-whole-pool", pool).await;
+    assert_eq!(runtime.fetch_medium(T0).await.expect("medium fetch"), 15);
+    runtime.move_selection_page(SelectionScreen::Medium, 1);
+    assert_eq!(runtime.selection_cursor(SelectionScreen::Medium), 10);
+
+    // From page 2 (q10..q14), a page-local draw could never mark a
+    // question on page 1. A whole-pool draw does so almost at once;
+    // 40 draws make a false failure effectively impossible.
+    let mut drew_outside_current_page = false;
+    for _ in 0..40 {
+        assert_eq!(runtime.randomize_picks(SelectionScreen::Medium), 3);
+        runtime.move_selection_page(SelectionScreen::Medium, -1);
+        let first_page = runtime.selection_lines(SelectionScreen::Medium);
+        drew_outside_current_page = first_page.iter().any(|line| line.contains("[x]"));
+        runtime.move_selection_page(SelectionScreen::Medium, 1);
+        if drew_outside_current_page {
+            break;
+        }
+    }
+    assert!(
+        drew_outside_current_page,
+        "random picks stayed confined to the visible page"
+    );
+}
+
+#[tokio::test]
 async fn small_pools_auto_pick_everything_and_commit() {
     // Only 2 medium and 1 hard exist for these topics: both pools
     // arrive fully picked, and the session commits over 8 questions.
@@ -159,6 +191,10 @@ async fn small_pools_auto_pick_everything_and_commit() {
             .any(|line| line.contains("all available questions are selected automatically.")),
         "{lines:?}"
     );
+    // Auto-selected picks cannot be dropped with space: the pool
+    // holds no replacement questions.
+    assert!(!runtime.toggle_selection_pick(SelectionScreen::Medium));
+    assert_eq!(runtime.pick_count(SelectionScreen::Medium), 2);
     runtime.confirm_medium().expect("auto-picked medium");
     assert_eq!(runtime.fetch_hard(T0).await.expect("hard fetch"), 1);
     assert_eq!(runtime.pick_count(SelectionScreen::Hard), 1);
@@ -215,11 +251,32 @@ async fn expert_picks_three_medium_then_two_hard_and_commits() {
             .contains("select 3 more medium questions from the list (0 of 3 selected)"),
         "{err}"
     );
-    // The question under the cursor previews with its metadata.
+    // The question under the cursor previews with its metadata,
+    // then its fetched statement once stored.
     let preview = runtime.selection_preview_lines(SelectionScreen::Medium);
     assert!(preview[0].contains("Title q0"), "{preview:?}");
     assert!(
-        preview.iter().any(|line| line == "b back to the list"),
+        preview
+            .iter()
+            .any(|line| line.contains("loading the question...")),
+        "{preview:?}"
+    );
+    runtime.store_preview(
+        SelectionScreen::Medium,
+        "q0".to_string(),
+        "Given an array, find two numbers.".to_string(),
+    );
+    let preview = runtime.selection_preview_lines(SelectionScreen::Medium);
+    assert!(
+        preview
+            .iter()
+            .any(|line| line.contains("Given an array, find two numbers.")),
+        "{preview:?}"
+    );
+    assert!(
+        preview
+            .iter()
+            .any(|line| line.contains("b back to the list")),
         "{preview:?}"
     );
     pick_after_move(&mut runtime, SelectionScreen::Medium, 0);
