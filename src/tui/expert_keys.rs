@@ -48,6 +48,47 @@ fn open_api_key_change(app: &mut app::ExpertApp) {
     app.set_status_message("type the new Meta API key, then press enter to save it.");
 }
 
+/// Starts a background pool fetch for a selection screen: the
+/// runtime moves to a worker thread (the loading screen shows in
+/// the meantime) and comes back through `PendingWork::selection_rx`.
+fn start_selection_fetch(
+    runtime: &mut Option<ExpertRuntime>,
+    pending: &mut PendingWork,
+    screen: SelectionScreen,
+    now: u64,
+) {
+    let Some(mut active) = runtime.take() else {
+        return;
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    pending.selection_rx = Some(rx);
+    std::thread::spawn(move || {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|err| err.to_string())
+            .and_then(|rt| {
+                rt.block_on(async {
+                    match screen {
+                        SelectionScreen::Medium => active.fetch_medium(now).await,
+                        SelectionScreen::Hard => active.fetch_hard(now).await,
+                    }
+                    .map_err(|err| err.to_string())
+                })
+            });
+        let _ = tx.send((active, screen, result));
+    });
+}
+
+/// Selection list screen for the app screen, when one is showing.
+pub(crate) fn selection_screen(app: &app::ExpertApp) -> Option<SelectionScreen> {
+    match app.screen() {
+        app::AppScreen::SelectMedium => Some(SelectionScreen::Medium),
+        app::AppScreen::SelectHard => Some(SelectionScreen::Hard),
+        _ => None,
+    }
+}
+
 /// Maps one key press: app events before the runtime exists, real
 /// runtime operations afterwards (`e` ends a live session).
 pub(crate) fn handle_key(
@@ -68,17 +109,20 @@ pub(crate) fn handle_key(
                 if api_key_input.trim().is_empty() {
                     expert_tty::save_entered_api_key(app, api_key_input);
                 } else {
-                    let checked = block_on(tokio_rt, expert_tty::check_api_key(api_key_input));
-                    match checked {
-                        Some(result) => {
-                            expert_tty::save_checked_api_key(app, api_key_input, result)
-                        }
-                        None => set_error(
-                            app,
-                            "API key check failed; key not saved",
-                            "runtime unavailable",
-                        ),
-                    }
+                    // The health check is a network call of up to 15
+                    // seconds; it runs on a worker thread behind the
+                    // loading screen instead of freezing this frame.
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    pending.api_key_rx = Some(rx);
+                    let key = api_key_input.clone();
+                    std::thread::spawn(move || {
+                        let result = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .map_err(|err| err.to_string())
+                            .and_then(|rt| rt.block_on(expert_tty::check_api_key(&key)));
+                        let _ = tx.send(result);
+                    });
                 }
             }
             K::Backspace => {
@@ -143,6 +187,47 @@ pub(crate) fn handle_key(
                     Some(Ok(_fresh)) => app.set_status_message("fresh string ready."),
                     Some(Err(err)) => set_error(app, "reissue failed", &err.to_string()),
                     None => set_error(app, "reissue failed", "runtime unavailable"),
+                }
+            }
+        }
+        K::Up if selection_screen(app).is_some() => {
+            if let (Some(active), Some(screen)) = (runtime.as_mut(), selection_screen(app)) {
+                active.move_selection_cursor(screen, -1);
+            }
+        }
+        K::Down if selection_screen(app).is_some() => {
+            if let (Some(active), Some(screen)) = (runtime.as_mut(), selection_screen(app)) {
+                active.move_selection_cursor(screen, 1);
+            }
+        }
+        K::Left if selection_screen(app).is_some() => {
+            if let (Some(active), Some(screen)) = (runtime.as_mut(), selection_screen(app)) {
+                active.move_selection_page(screen, -1);
+            }
+        }
+        K::Right if selection_screen(app).is_some() => {
+            if let (Some(active), Some(screen)) = (runtime.as_mut(), selection_screen(app)) {
+                active.move_selection_page(screen, 1);
+            }
+        }
+        K::Char(' ') if selection_screen(app).is_some() => {
+            if let (Some(active), Some(screen)) = (runtime.as_mut(), selection_screen(app)) {
+                if !active.toggle_selection_pick(screen)
+                    && active.has_options(screen)
+                    && active.pick_count(screen)
+                        >= match screen {
+                            SelectionScreen::Medium => 3,
+                            SelectionScreen::Hard => 2,
+                        }
+                {
+                    app.set_status_message(match screen {
+                        SelectionScreen::Medium => {
+                            "3 medium questions are already selected; deselect one first."
+                        }
+                        SelectionScreen::Hard => {
+                            "2 hard questions are already selected; deselect one first."
+                        }
+                    });
                 }
             }
         }
@@ -260,37 +345,44 @@ fn advance(
             tick_runtime(app, runtime, tokio_rt);
         }
         AppScreen::SelectMedium => {
+            // First Enter loads the list in the background (loading
+            // screen); Enter with a list confirms the picks.
             if let Some(active) = runtime.as_mut() {
-                if !active.selection_allowed(SelectionScreen::Medium, now_ms()) {
-                    return;
-                }
-                match block_on(tokio_rt, active.fetch_medium(now_ms())) {
-                    Some(Ok(_)) => {
-                        if let Some(note) = active.selection_note() {
-                            app.set_status_message(note);
-                        }
-                        let _ = app.handle(AppEvent::MediumSelected);
+                if !active.has_options(SelectionScreen::Medium) {
+                    if !active.selection_allowed(SelectionScreen::Medium, now_ms()) {
+                        return;
                     }
-                    Some(Err(err)) => set_error(app, "selection failed", &err.to_string()),
-                    None => set_error(app, "selection failed", "runtime unavailable"),
+                    start_selection_fetch(runtime, pending, SelectionScreen::Medium, now_ms());
+                } else {
+                    match active.confirm_medium() {
+                        Ok(()) => {
+                            app.clear_status_message();
+                            let _ = app.handle(AppEvent::MediumSelected);
+                        }
+                        Err(err) => app.set_status_message(err.to_string()),
+                    }
                 }
             }
         }
         AppScreen::SelectHard => {
+            // First Enter loads the list in the background (loading
+            // screen); Enter with a list commits the picks.
             if let Some(active) = runtime.as_mut() {
-                if !active.selection_allowed(SelectionScreen::Hard, now_ms()) {
-                    return;
-                }
-                match block_on(tokio_rt, active.complete_selection(now_ms())) {
-                    Some(Ok(())) => {
-                        if let Some(note) = active.selection_note() {
-                            app.set_status_message(note);
-                        }
-                        app.set_expert_selection_done(true);
-                        let _ = app.handle(AppEvent::ExpertSelectionDone);
+                if !active.has_options(SelectionScreen::Hard) {
+                    if !active.selection_allowed(SelectionScreen::Hard, now_ms()) {
+                        return;
                     }
-                    Some(Err(err)) => set_error(app, "selection failed", &err.to_string()),
-                    None => set_error(app, "selection failed", "runtime unavailable"),
+                    start_selection_fetch(runtime, pending, SelectionScreen::Hard, now_ms());
+                } else {
+                    match block_on(tokio_rt, active.complete_selection(now_ms())) {
+                        Some(Ok(())) => {
+                            app.set_expert_selection_done(true);
+                            app.clear_status_message();
+                            let _ = app.handle(AppEvent::ExpertSelectionDone);
+                        }
+                        Some(Err(err)) => app.set_status_message(err.to_string()),
+                        None => set_error(app, "selection failed", "runtime unavailable"),
+                    }
                 }
             }
         }

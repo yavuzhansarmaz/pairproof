@@ -150,8 +150,24 @@ impl Session {
             self.bad_state("set_expert_questions"),
         )?;
         ensure(!self.expert_set, ExpertAlreadySet)?;
-        expect_count(medium.len(), 3)?;
-        expect_count(hard.len(), 2)?;
+        // Adaptive counts: the expert pool may hold fewer questions
+        // than the targets (3 medium / 2 hard) for narrow topics; any
+        // non-empty subset up to the target is a valid expert set and
+        // the session is scored over the questions it actually has.
+        ensure(
+            (1..=3).contains(&medium.len()),
+            CoreError::InvalidQuestionCount {
+                expected: 3,
+                got: medium.len(),
+            },
+        )?;
+        ensure(
+            (1..=2).contains(&hard.len()),
+            CoreError::InvalidQuestionCount {
+                expected: 2,
+                got: hard.len(),
+            },
+        )?;
         let mut seen: HashSet<String> = self
             .slots
             .iter()

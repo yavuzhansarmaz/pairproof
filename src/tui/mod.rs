@@ -14,6 +14,7 @@ pub mod expert;
 pub mod expert_frame;
 pub mod expert_keys;
 pub mod expert_loop;
+pub mod expert_poll;
 pub mod expert_runtime;
 pub mod expert_session;
 pub mod expert_tty;
@@ -106,7 +107,7 @@ fn run_candidate_interactive() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) use expert_loop::tick_runtime;
+pub(crate) use expert_poll::tick_runtime;
 
 /// TTY shell around [`ExpertLoopState`]: owns the terminal and the
 /// event poll only. Tick, frame decisions, event routing, and exit
@@ -134,11 +135,19 @@ fn interactive_loop(
             FrameKind::Screen => render::draw_screen(frame, &plan.visible, plan.centered),
         });
         if crossterm::event::poll(std::time::Duration::from_millis(250)).unwrap_or(false) {
-            if let Ok(event) = crossterm::event::read() {
+            // Drain every queued event before the next tick/draw: a
+            // tick does blocking runtime work, so one event per tick
+            // makes fast key repeats (space, arrows) feel laggy.
+            while let Ok(event) = crossterm::event::read() {
                 let size = terminal.size().unwrap_or_default();
                 let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
                 if let Some(token) = state.handle_event(app, event, area, &plan.visible) {
                     expert_tty::copy_to_clipboard(&token);
+                }
+                if app.screen() == app::AppScreen::Exited
+                    || !crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false)
+                {
+                    break;
                 }
             }
         }

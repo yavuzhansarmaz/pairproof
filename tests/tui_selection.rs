@@ -86,6 +86,20 @@ fn expert_selection_is_three_medium_then_two_hard() {
 }
 
 #[test]
+fn adaptive_subset_commits_over_present_questions() {
+    // A narrow topic pool with 2 medium and 1 hard still forms a
+    // session; it is scored over the 8 questions it actually has.
+    let mut s = new_session();
+    s.set_expert_questions(
+        qs("m", 2, Difficulty::Medium),
+        qs("h", 1, Difficulty::Hard),
+        101,
+    )
+    .expect("adaptive subset");
+    assert_eq!(s.slots().len(), 8);
+}
+
+#[test]
 fn medium_before_hard_ordering_is_enforced() {
     // Core API is atomic: hard cannot commit without 3 medium in same call.
     let mut s = new_session();
@@ -121,13 +135,13 @@ fn selection_rejects_wrong_count_and_wrong_difficulty() {
     let mut s = new_session();
     assert_eq!(
         s.set_expert_questions(
-            qs("m", 2, Difficulty::Medium),
+            qs("m", 0, Difficulty::Medium),
             qs("h", 2, Difficulty::Hard),
             1
         ),
         Err(CoreError::InvalidQuestionCount {
             expected: 3,
-            got: 2
+            got: 0
         })
     );
     assert_eq!(
@@ -153,12 +167,23 @@ fn selection_rejects_wrong_count_and_wrong_difficulty() {
     assert_eq!(
         s.set_expert_questions(
             qs("m", 3, Difficulty::Medium),
-            qs("h", 1, Difficulty::Hard),
+            qs("h", 0, Difficulty::Hard),
             2
         ),
         Err(CoreError::InvalidQuestionCount {
             expected: 2,
-            got: 1
+            got: 0
+        })
+    );
+    assert_eq!(
+        s.set_expert_questions(
+            qs("m", 3, Difficulty::Medium),
+            qs("h", 3, Difficulty::Hard),
+            2
+        ),
+        Err(CoreError::InvalidQuestionCount {
+            expected: 2,
+            got: 3
         })
     );
     let mut wrong_hard = qs("h", 2, Difficulty::Hard);
@@ -298,7 +323,7 @@ fn extra_before_expert_set_is_rejected() {
     // terms the expert set is not committed until the atomic call succeeds
     // (was: only pending medium in the deleted controller).
     let _ = s.set_expert_questions(
-        qs("m", 2, Difficulty::Medium),
+        qs("m", 0, Difficulty::Medium),
         qs("h", 2, Difficulty::Hard),
         11,
     );
@@ -342,14 +367,11 @@ fn difficulty_filter_and_pool_helpers_keep_core_authoritative() {
     assert_eq!(refs.len(), 1);
     assert_eq!(refs[0].title_slug, "free-med");
     assert_eq!(refs[0].difficulty, Difficulty::Medium);
-    // Filtering alone does not bypass session validation: wrong counts fail.
+    // Filtering alone does not bypass session validation, but an
+    // adaptive subset (2 of the 3 medium targets) now commits.
     let mut s = new_session();
     let mediums = difficulty_filter(&pool, Difficulty::Medium);
-    assert_eq!(
-        s.set_expert_questions(mediums, qs("h", 2, Difficulty::Hard), 1),
-        Err(CoreError::InvalidQuestionCount {
-            expected: 3,
-            got: 2
-        })
-    );
+    s.set_expert_questions(mediums, qs("h", 2, Difficulty::Hard), 1)
+        .expect("adaptive medium subset");
+    assert_eq!(s.slots().len(), 9);
 }

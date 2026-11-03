@@ -299,6 +299,51 @@ pub fn is_copy_button_at(lines: &[String], area: Rect, column: u16, row: u16) ->
     false
 }
 
+/// Draws the candidate solving screen as two panes: question and
+/// approaches on the left (about three fifths), the AI coach chat on
+/// the right. The focused pane's border uses the purple accent, the
+/// other the frame navy. Lines wrap inside their pane.
+pub fn draw_candidate_screen(
+    frame: &mut Frame,
+    left: &[String],
+    right: &[String],
+    chat_focused: bool,
+) {
+    let chunks = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            ratatui::layout::Constraint::Percentage(62),
+            ratatui::layout::Constraint::Percentage(38),
+        ])
+        .split(frame.area());
+    let pane = |lines: &[String], title: Line<'static>, focused: bool| {
+        let border = if focused { PROOF_COLOR } else { FRAME_COLOR };
+        Paragraph::new(lines.iter().map(|line| body_line(line)).collect::<Vec<_>>())
+            .style(Style::default().fg(TEXT_COLOR))
+            .wrap(ratatui::widgets::Wrap { trim: true })
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(border)),
+            )
+    };
+    frame.render_widget(pane(left, title_line(), !chat_focused), chunks[0]);
+    frame.render_widget(
+        pane(
+            right,
+            Line::from(Span::styled(
+                "AI coach",
+                Style::default()
+                    .fg(HEADING_COLOR)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            chat_focused,
+        ),
+        chunks[1],
+    );
+}
+
 /// Draws the centred loading panel; every line is soft white, with
 /// no navy heading line.
 pub fn draw_loading_screen(frame: &mut Frame, lines: &[String]) {

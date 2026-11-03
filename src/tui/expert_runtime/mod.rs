@@ -11,7 +11,7 @@ use crate::connection::{ConnectionString, Endpoint, EphemeralUsername, Fingerpri
 use crate::core::types::Difficulty;
 use crate::core::{ArtifactLayout, ContextSummary, Language, QuestionRef};
 use crate::ingest::{prepare_documents, store_raw_documents, ExpertDocuments};
-use crate::leetcode::selection::{select_questions_with_fallback, FallbackReport, PoolClient};
+use crate::leetcode::selection::{pool_with_fallback, FallbackReport, PoolClient};
 use crate::leetcode::LeetCodeClient;
 use crate::llm::extraction::ExtractionResult;
 use crate::orchestration::control::{
@@ -180,7 +180,7 @@ pub struct ExpertRuntime {
     sync_phase: SessionSyncPhase,
     started: bool,
     ended: bool,
-    pending_medium: Option<Vec<QuestionRef>>,
+    selection: selection::SelectionState,
     pending_load: Option<(usize, tokio::sync::oneshot::Receiver<LoadOutcome>)>,
     loaded_index: Option<usize>,
     cleanup_report: Option<CleanupReport>,
@@ -194,9 +194,6 @@ pub struct ExpertRuntime {
     last_hb_at: Option<u64>,
     reissued: Option<ConnectionString>,
     username: EphemeralUsername,
-    selection_note: Option<String>,
-    medium_failed_at: Option<u64>,
-    hard_failed_at: Option<u64>,
     pushed_window: Option<u64>,
     secret_pusher: Option<Arc<dyn crate::orchestration::secret_push::SecretPush>>,
     hello_pending_consume: bool,
@@ -265,7 +262,7 @@ impl ExpertRuntime {
             sync_phase: deps.sync_phase,
             started: false,
             ended: false,
-            pending_medium: None,
+            selection: selection::SelectionState::default(),
             pending_load: None,
             loaded_index: None,
             cleanup_report: None,
@@ -277,9 +274,6 @@ impl ExpertRuntime {
             last_hb_at: None,
             reissued: None,
             username: spec.username,
-            selection_note: None,
-            medium_failed_at: None,
-            hard_failed_at: None,
             pushed_window: None,
             secret_pusher,
             hello_pending_consume: false,

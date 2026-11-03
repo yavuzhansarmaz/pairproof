@@ -131,3 +131,54 @@ fn expert_setup_steps_ack_then_api_key_then_continue() {
         Ok(AppScreen::Setup)
     );
 }
+
+#[test]
+fn select_medium_explains_loading_and_mentions_enter_once() {
+    let mut app = ExpertApp::new();
+    app.set_disclosure_acknowledged(true);
+    app.set_has_proposal(true);
+    app.handle(AppEvent::SelectExpert).expect("to preflight");
+    app.set_preflight_passed(true);
+    app.set_api_key_ready(true);
+    app.handle(AppEvent::PreflightCompleted).expect("to setup");
+    app.handle(AppEvent::ProposalReady).expect("to proposal");
+    app.handle(AppEvent::ProposalConfirmed)
+        .expect("to connection wait");
+    app.set_connected(true);
+    app.handle(AppEvent::ConnectionLocked)
+        .expect("to select medium");
+    assert_eq!(app.screen(), AppScreen::SelectMedium);
+    let joined = screen_lines(&app).join("\n");
+    assert!(
+        joined.contains("3 medium questions matched to the proposed topics will be loaded."),
+        "{joined}"
+    );
+    assert_eq!(joined.matches("enter").count(), 1, "{joined}");
+}
+
+#[test]
+fn select_hard_explains_choice_and_mentions_enter_once() {
+    let mut app = ExpertApp::new();
+    app.set_disclosure_acknowledged(true);
+    app.set_has_proposal(true);
+    app.handle(AppEvent::SelectExpert).expect("to preflight");
+    app.set_preflight_passed(true);
+    app.set_api_key_ready(true);
+    app.handle(AppEvent::PreflightCompleted).expect("to setup");
+    app.handle(AppEvent::ProposalReady).expect("to proposal");
+    app.handle(AppEvent::ProposalConfirmed)
+        .expect("to connection wait");
+    app.set_connected(true);
+    app.handle(AppEvent::ConnectionLocked)
+        .expect("to select medium");
+    app.handle(AppEvent::MediumSelected)
+        .expect("to select hard");
+    assert_eq!(app.screen(), AppScreen::SelectHard);
+    let joined = screen_lines(&app).join("\n");
+    assert!(
+        joined.contains("choose 2 hard questions from the topic-matched list"),
+        "{joined}"
+    );
+    assert!(joined.contains("the monitor opens next."), "{joined}");
+    assert_eq!(joined.matches("enter").count(), 1, "{joined}");
+}

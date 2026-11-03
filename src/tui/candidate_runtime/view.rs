@@ -38,7 +38,11 @@ impl CandidateView {
             sync_phase: s.sync_phase.clone(),
             question_title: s.current.as_ref().map(|q| q.title.clone()),
             question_index: s.current.as_ref().map(|q| q.index),
-            statement: s.current.as_ref().and_then(|q| q.statement.clone()),
+            statement: s
+                .current
+                .as_ref()
+                .and_then(|q| q.statement.as_ref())
+                .map(|text| crate::tui::shared::html_to_text(text)),
             options: s.options.clone(),
             selected: s.selected.clone(),
             latest_test: s.latest_test,
@@ -53,18 +57,24 @@ impl CandidateView {
             "Completed" | "EndedByExpert" | "TechnicalFailure"
         )
     }
-    /// Sanitized lines; a rating renders only from a carried breakdown.
-    pub fn lines(&self) -> Vec<String> {
-        if self.phase.is_empty() {
-            return vec!["waiting for the expert.".to_string()];
-        }
+    /// True while the first statement is still on its way: no
+    /// statement yet, and nothing final or failed to show instead.
+    /// The TTY loop shows the shared loading screen in this state.
+    pub fn waiting_for_statement(&self) -> bool {
+        self.statement.is_none()
+            && !self.is_terminal()
+            && self.final_breakdown.is_none()
+            && !self.recovery.as_ref().is_some_and(|r| r.technical_failure)
+    }
+    /// Left-pane lines: question, statement, approaches, and status.
+    pub fn question_lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
         match (&self.question_index, &self.question_title) {
             (Some(i), Some(t)) => lines.push(format!("Q{}: {}", i + 1, t)),
             _ => lines.push("no active question.".to_string()),
         }
         match &self.statement {
-            Some(s) => lines.push(s.clone()),
+            Some(s) => lines.extend(s.lines().map(str::to_string)),
             None => lines.push("statement is not available yet.".to_string()),
         }
         if self.options.is_empty() {
@@ -90,9 +100,6 @@ impl CandidateView {
             lines.push(self.sync_phase.clone());
         }
         lines.push(format!("phase: {}", self.phase));
-        for reply in &self.chat_replies {
-            lines.push(format!("coach: {reply}"));
-        }
         if let Some(r) = &self.recovery {
             if r.active {
                 lines.push("technical problem - service temporarily unavailable.".to_string());
@@ -125,5 +132,26 @@ impl CandidateView {
             lines.push("session ended.".to_string());
         }
         lines.iter().map(|line| sanitize_display(line)).collect()
+    }
+    /// Right-pane lines: coach replies only.
+    pub fn chat_lines(&self) -> Vec<String> {
+        if self.chat_replies.is_empty() {
+            return vec!["ask the coach about this question.".to_string()];
+        }
+        self.chat_replies
+            .iter()
+            .map(|reply| sanitize_display(&format!("coach: {reply}")))
+            .collect()
+    }
+    /// Sanitized lines; a rating renders only from a carried breakdown.
+    pub fn lines(&self) -> Vec<String> {
+        if self.phase.is_empty() {
+            return vec!["waiting for the expert.".to_string()];
+        }
+        let mut lines = self.question_lines();
+        if !self.chat_replies.is_empty() {
+            lines.extend(self.chat_lines());
+        }
+        lines
     }
 }

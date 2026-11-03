@@ -303,7 +303,7 @@ async fn expert_runtime_selection_delegates_to_core() {
     let (_root2, _control2, mut fresh) = make_runtime("select-bad", false).await;
     assert!(fresh
         .expert_select(
-            qs("m", 2, Difficulty::Medium),
+            qs("m", 0, Difficulty::Medium),
             qs("h", 2, Difficulty::Hard),
             T0 + 1_000
         )

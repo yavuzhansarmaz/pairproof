@@ -375,12 +375,14 @@ async fn selection_backoff_suppresses_hot_loop() {
 async fn fetch_medium_caches_pending_without_refetch() {
     let pool = Arc::new(FakePool::new(&[(&["array"], &["m0", "m1", "m2", "m3"])]));
     let mut runtime = make_runtime("medium-cache", vec!["array".into()], pool.clone()).await;
-    assert_eq!(runtime.fetch_medium(T0).await.expect("medium fetch"), 3);
+    // The fetch now offers the whole pool (4) for the expert to pick
+    // 3 from, instead of auto-picking 3.
+    assert_eq!(runtime.fetch_medium(T0).await.expect("medium fetch"), 4);
     assert_eq!(pool.recorded().len(), 1);
     assert!(
         runtime.selection_note().is_none(),
         "happy path sets no note"
     );
-    assert_eq!(runtime.fetch_medium(T0 + 1_000).await.expect("cached"), 3);
+    assert_eq!(runtime.fetch_medium(T0 + 1_000).await.expect("cached"), 4);
     assert_eq!(pool.recorded().len(), 1, "cached fetch makes no pool call");
 }

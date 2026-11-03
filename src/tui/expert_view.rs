@@ -36,8 +36,14 @@ pub fn footer(app: &ExpertApp) -> Option<String> {
         // Proposal carries its keys on the wait line; no footer.
         AppScreen::Proposal => String::new(),
         AppScreen::ConnectionWait => "b back, esc quit, ? help".to_string(),
-        AppScreen::SelectMedium => "enter load medium questions, esc quit, ? help".to_string(),
-        AppScreen::SelectHard => "enter load hard questions, esc quit, ? help".to_string(),
+        AppScreen::SelectMedium => {
+            "up/down move, left/right page, space choose, tab preview, r random, enter continue, esc quit, ? help"
+                .to_string()
+        }
+        AppScreen::SelectHard => {
+            "up/down move, left/right page, space choose, tab preview, r random, enter continue, esc quit, ? help"
+                .to_string()
+        }
         AppScreen::Monitor => {
             "e end the session, R reissue after disconnect, esc quit, ? help".to_string()
         }
@@ -156,10 +162,12 @@ pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
                     lines.push("candidate connected.".into());
                 }
             }
-            S::SelectMedium => lines.push("press enter to load 3 medium questions.".into()),
-            S::SelectHard => {
-                lines.push("press enter to load 2 hard questions and open the monitor.".into())
-            }
+            S::SelectMedium => lines
+                .push("3 medium questions matched to the proposed topics will be loaded.".into()),
+            S::SelectHard => lines.push(
+                "choose 2 hard questions from the topic-matched list; the monitor opens next."
+                    .into(),
+            ),
             S::Monitor => {
                 lines.push(if app.disconnected {
                     "candidate disconnected. session is still live.".into()

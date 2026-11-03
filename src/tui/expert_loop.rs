@@ -1,11 +1,19 @@
 //! Expert TTY loop state: frame building, key/mouse routing, and
 //! the bounded per-tick runtime step.
 
-use crate::tui::expert_keys::handle_key;
-use crate::tui::expert_runtime::{ExpertRuntime, PollOutcome};
-use crate::tui::expert_tty::{block_on, now_ms, set_error};
+use crate::tui::expert_keys::selection_screen;
+use crate::tui::expert_runtime::ExpertRuntime;
+use crate::tui::expert_tty::now_ms;
 use crate::tui::setup::ExpertSetupPastes;
 use crate::tui::{app, help, monitor, render, setup};
+
+/// One finished background pool fetch: the runtime handed back,
+/// which selection screen it belongs to, and the offered count.
+pub(crate) type SelectionFetchReceiver = std::sync::mpsc::Receiver<(
+    ExpertRuntime,
+    crate::tui::expert_runtime::SelectionScreen,
+    Result<usize, String>,
+)>;
 
 /// Background work the TTY loop waits on: a proposal request and
 /// a deferred runtime build, both surfaced as the loading screen.
@@ -14,6 +22,8 @@ pub(crate) struct PendingWork {
     pub(crate) proposal_rx:
         Option<std::sync::mpsc::Receiver<Result<crate::ingest::ProposedContext, String>>>,
     pub(crate) runtime_rx: Option<std::sync::mpsc::Receiver<Result<ExpertRuntime, String>>>,
+    pub(crate) selection_rx: Option<SelectionFetchReceiver>,
+    pub(crate) api_key_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
 }
 
 /// Mutable state owned by the expert TTY loop.
@@ -27,6 +37,8 @@ pub(crate) struct ExpertLoopState {
     pub(crate) setup_drag: Option<setup::ExpertSetupFocus>,
     pub(crate) show_help: bool,
     pub(crate) show_disclosure: bool,
+    pub(crate) show_question_preview: bool,
+    pub(crate) show_random_confirm: bool,
     pub(crate) pending: PendingWork,
     pub(crate) loading_tick: usize,
 }
@@ -43,6 +55,8 @@ impl Default for ExpertLoopState {
             setup_drag: None,
             show_help: false,
             show_disclosure: false,
+            show_question_preview: false,
+            show_random_confirm: false,
             pending: PendingWork::default(),
             loading_tick: 0,
         }
@@ -75,6 +89,16 @@ impl ExpertLoopState {
                             active.countdown_secs(now)
                         ));
                     }
+                }
+                app::AppScreen::SelectMedium => {
+                    lines.extend(
+                        active.selection_lines(crate::tui::expert_runtime::SelectionScreen::Medium),
+                    );
+                }
+                app::AppScreen::SelectHard => {
+                    lines.extend(
+                        active.selection_lines(crate::tui::expert_runtime::SelectionScreen::Hard),
+                    );
                 }
                 app::AppScreen::Monitor => {
                     lines.extend(monitor::render_monitor_lines(&active.monitor_view(now)));
@@ -111,81 +135,44 @@ impl ExpertLoopState {
         } else if self.show_help {
             lines = help::expert_help_lines(app.screen());
         }
+        if self.show_question_preview {
+            if let (Some(active), Some(screen)) = (self.runtime.as_ref(), selection_screen(app)) {
+                let preview = active.selection_preview_lines(screen);
+                if !preview.is_empty() {
+                    lines = preview;
+                }
+            }
+        }
+        if self.show_random_confirm {
+            if let (Some(active), Some(screen)) = (self.runtime.as_ref(), selection_screen(app)) {
+                let (label, need) = match screen {
+                    crate::tui::expert_runtime::SelectionScreen::Medium => ("medium", 3),
+                    crate::tui::expert_runtime::SelectionScreen::Hard => ("hard", 2),
+                };
+                let need = need.min(active.option_count(screen));
+                lines = vec![
+                    "Random selection".to_string(),
+                    String::new(),
+                    format!(
+                        "{need} {label} questions will be picked at random from the {} in this list.",
+                        active.option_count(screen)
+                    ),
+                    "your current picks will be replaced.".to_string(),
+                    String::new(),
+                    "enter pick at random, b back to the list".to_string(),
+                ];
+            }
+        }
         lines
-    }
-
-    fn dispatch_key(&mut self, app: &mut app::ExpertApp, code: crossterm::event::KeyCode) {
-        handle_key(
-            app,
-            &mut self.runtime,
-            &mut self.tokio_rt,
-            &mut self.pastes,
-            &mut self.pending,
-            &mut self.api_key_input,
-            code,
-        );
     }
 
     /// True while a background request (proposal or runtime build)
     /// runs.
     pub(crate) fn is_loading(&self) -> bool {
-        self.pending.proposal_rx.is_some() || self.pending.runtime_rx.is_some()
-    }
-
-    /// Animated centred loading lines for one frame.
-    pub(crate) fn loading_lines(&mut self) -> Vec<String> {
-        self.loading_tick += 1;
-        render::loading_lines(self.loading_tick)
-    }
-
-    /// Applies a finished background proposal request, if one landed.
-    pub(crate) fn poll_proposal(&mut self, app: &mut app::ExpertApp) {
-        let Some(rx) = &self.pending.proposal_rx else {
-            return;
-        };
-        match rx.try_recv() {
-            Ok(Ok(proposed)) => {
-                self.pending.proposal_rx = None;
-                self.pastes.apply_proposal(proposed);
-                app.set_proposal_lines(self.pastes.proposal_lines());
-                app.set_has_proposal(true);
-                app.clear_status_message();
-                let _ = app.handle(app::AppEvent::ProposalReady);
-            }
-            Ok(Err(err)) => {
-                self.pending.proposal_rx = None;
-                set_error(app, "proposal failed", &err);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.pending.proposal_rx = None;
-                set_error(app, "proposal failed", "request stopped unexpectedly");
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-        }
-    }
-
-    /// Applies a finished background runtime build, if one landed:
-    /// storing it confirms the proposal and waits for the candidate.
-    pub(crate) fn poll_runtime_build(&mut self, app: &mut app::ExpertApp) {
-        let Some(rx) = &self.pending.runtime_rx else {
-            return;
-        };
-        match rx.try_recv() {
-            Ok(Ok(built)) => {
-                self.pending.runtime_rx = None;
-                self.runtime = Some(built);
-                let _ = app.handle(app::AppEvent::ProposalConfirmed);
-            }
-            Ok(Err(err)) => {
-                self.pending.runtime_rx = None;
-                set_error(app, "session setup failed", &err);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.pending.runtime_rx = None;
-                set_error(app, "session setup failed", "runtime unavailable");
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-        }
+        self.pending.proposal_rx.is_some()
+            || self.pending.runtime_rx.is_some()
+            || self.pending.selection_rx.is_some()
+            || self.pending.api_key_rx.is_some()
     }
 
     /// Routes one key event through API-key entry and help overlays.
@@ -221,6 +208,83 @@ impl ExpertLoopState {
             self.show_help = false;
             self.dispatch_key(app, key.code);
             return;
+        }
+        if self.show_question_preview && selection_screen(app).is_none() {
+            self.show_question_preview = false;
+        }
+        if self.show_question_preview {
+            // Question preview: `b` returns to the list exactly
+            // where it was left; quit keys still quit; the rest is
+            // swallowed so picks and cursor cannot drift behind it.
+            match key.code {
+                crossterm::event::KeyCode::Char('b') => self.show_question_preview = false,
+                crossterm::event::KeyCode::Esc => {
+                    let _ = app.handle(app::AppEvent::Quit);
+                }
+                crossterm::event::KeyCode::Char('c')
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
+                    let _ = app.handle(app::AppEvent::Quit);
+                }
+                _ => {}
+            }
+            return;
+        }
+        if self.show_random_confirm && selection_screen(app).is_none() {
+            self.show_random_confirm = false;
+        }
+        if self.show_random_confirm {
+            // Random-pick confirmation: Enter draws the picks and
+            // returns to the list with them marked; `b` returns
+            // without touching the current picks; quit keys quit.
+            match key.code {
+                crossterm::event::KeyCode::Enter => {
+                    if let (Some(active), Some(screen)) =
+                        (self.runtime.as_mut(), selection_screen(app))
+                    {
+                        let picked = active.randomize_picks(screen);
+                        app.set_status_message(format!(
+                            "{picked} questions picked at random; press enter to continue."
+                        ));
+                    }
+                    self.show_random_confirm = false;
+                }
+                crossterm::event::KeyCode::Char('b') => self.show_random_confirm = false,
+                crossterm::event::KeyCode::Esc => {
+                    let _ = app.handle(app::AppEvent::Quit);
+                }
+                crossterm::event::KeyCode::Char('c')
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
+                    let _ = app.handle(app::AppEvent::Quit);
+                }
+                _ => {}
+            }
+            return;
+        }
+        if key.code == crossterm::event::KeyCode::Char('r')
+            && !self.show_help
+            && !self.show_disclosure
+            && !self.show_question_preview
+        {
+            if let (Some(screen), Some(active)) = (selection_screen(app), self.runtime.as_ref()) {
+                if active.has_options(screen) {
+                    self.show_random_confirm = true;
+                    return;
+                }
+            }
+        }
+        if key.code == crossterm::event::KeyCode::Tab && !self.show_help && !self.show_disclosure {
+            if let (Some(screen), Some(active)) = (selection_screen(app), self.runtime.as_ref()) {
+                if active.has_options(screen) {
+                    self.show_question_preview = true;
+                    return;
+                }
+            }
         }
         match if self.show_disclosure {
             help::expert_disclosure_action(key)
@@ -327,51 +391,5 @@ impl ExpertLoopState {
             }
             _ => {}
         }
-    }
-}
-
-/// Bounded per-tick runtime step: poll for the candidate hello on
-/// the connection screen, drain intents once the session is live.
-pub(crate) fn tick_runtime(
-    app: &mut app::ExpertApp,
-    runtime: &mut Option<ExpertRuntime>,
-    tokio_rt: &mut Option<tokio::runtime::Runtime>,
-) {
-    use app::{AppEvent, AppScreen};
-    let Some(active) = runtime.as_mut() else {
-        return;
-    };
-    match app.screen() {
-        AppScreen::ConnectionWait => {
-            let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
-            let _ = block_on(tokio_rt, active.poll_recovery(now_ms()));
-            match block_on(tokio_rt, active.poll_candidate(now_ms())) {
-                Some(PollOutcome::Connected) => {
-                    app.set_connected(true);
-                    let _ = app.handle(AppEvent::ConnectionLocked);
-                }
-                Some(PollOutcome::VersionMismatch) => {
-                    if let Some((c, e)) = active.version_mismatch() {
-                        app.set_status_message(format!("Version mismatch: candidate {c}, you {e}. Candidate must update/restart PairProof; session not started."));
-                    }
-                }
-                _ => {}
-            }
-        }
-        AppScreen::SelectMedium | AppScreen::SelectHard | AppScreen::Monitor => {
-            let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
-            let outcome = block_on(tokio_rt, active.poll_candidate(now_ms()));
-            let _ = block_on(tokio_rt, active.poll_recovery(now_ms()));
-            let _ = block_on(tokio_rt, active.drain_intents(now_ms()));
-            let _ = block_on(tokio_rt, active.check_heartbeat(now_ms()));
-            if active.is_disconnected() {
-                let _ = app.handle(AppEvent::AccidentalDisconnect);
-            }
-            if outcome == Some(PollOutcome::Connected) && app.is_disconnected() {
-                let _ = app.handle(AppEvent::CandidateReconnected);
-                app.clear_status_message();
-            }
-        }
-        _ => {}
     }
 }

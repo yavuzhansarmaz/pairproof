@@ -2,6 +2,7 @@
 
 use super::*;
 
+use super::panes::{live_lines, live_panes, screen_centered};
 use crate::tui::shared::pop_last;
 
 /// Local workspace synced to the container `/workspace` root.
@@ -21,38 +22,6 @@ fn apply(status: &mut Option<String>, result: Result<Intent, CandidateRuntimeErr
             false
         }
     }
-}
-fn live_lines(
-    state: &CandidateRunState,
-    runtime: &CandidateRuntime<SshCandidateTransport>,
-    status: &Option<String>,
-) -> Vec<String> {
-    let view = runtime.view();
-    let mut lines = view.lines();
-    if runtime.connection_lost() {
-        lines.push(CONNECTION_LOST.to_string());
-        lines.push("press R to reconnect with a fresh string.".to_string());
-    }
-    // `view.lines()` is already sanitized by its producer; only the
-    // raw typed texts appended here are sanitized, at this boundary.
-    lines.extend([
-        sanitize_display(&format!("other: {}", state.work.other_text())),
-        sanitize_display(&format!("redirect: {}", state.work.redirect_text())),
-        sanitize_display(&format!("message: {}", state.chat.input_text())),
-    ]);
-    if state.paste_notice || state.chat.paste_notice() {
-        lines.push("pasting is blocked here; type instead.".to_string());
-    }
-    if let Some(text) = status {
-        lines.push(sanitize_display(text));
-    }
-    // The key-hint line always stays at the very bottom.
-    lines.push(if view.is_terminal() {
-        "enter quit".to_string()
-    } else {
-        "focus: work/other/redirect/chat (tab switches)".to_string()
-    });
-    lines
 }
 pub fn handle_live_key<T: CandidateTransport>(
     state: &mut CandidateRunState,
@@ -210,6 +179,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut runtime: Option<CandidateRuntime<SshCandidateTransport>> = None;
     let mut live = false;
     let mut status: Option<String> = None;
+    let mut loading_tick = 0usize;
     while state.app.screen() != CandidateScreen::Exited {
         if live {
             if let Some(active) = runtime.as_mut() {
@@ -218,39 +188,67 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                 }
             }
         }
-        let lines = if live {
-            match runtime.as_ref() {
-                Some(active) => {
-                    if state.show_help {
-                        crate::tui::help::candidate_help_lines_for(
-                            CandidateScreen::Solving,
-                            state.focus,
-                        )
-                    } else {
-                        live_lines(state, active, &status)
-                    }
+        let height = terminal.size().map(|s| s.height as usize).unwrap_or(24);
+        // While the statement is still arriving, the shared loading
+        // screen replaces the placeholder solving screen entirely.
+        let waiting = live
+            && !state.show_help
+            && runtime.as_ref().is_some_and(|active| {
+                active.view().waiting_for_statement() && !active.connection_lost()
+            });
+        let panes = if live && !state.show_help && !waiting {
+            runtime.as_ref().and_then(|active| {
+                if active.view().is_terminal() {
+                    None
+                } else {
+                    let (left, right) = live_panes(state, active, &status);
+                    let pane_height = height.saturating_sub(2);
+                    Some((
+                        crate::tui::viewport::visible_with_pinned(&left, pane_height),
+                        crate::tui::viewport::visible_with_pinned(&right, pane_height),
+                        state.focus == CandidateFocus::Chat,
+                    ))
                 }
-                None => candidate_screen_lines(state),
-            }
+            })
         } else {
-            let mut lines = candidate_screen_lines(state);
-            if let Some(text) = &status {
-                lines.push(text.clone());
-            }
-            lines
+            None
         };
-        let visible = crate::tui::viewport::visible_with_pinned(
-            &lines,
-            terminal
-                .size()
-                .map(|s| s.height as usize)
-                .unwrap_or(24)
-                .saturating_sub(2),
-        );
-        // The connection screen sits centred like the expert main
-        // menu; later screens use the full area.
-        let centered = state.show_help || (!live && state.app.screen() == CandidateScreen::Connect);
-        let _ = terminal.draw(|frame| crate::tui::render::draw_screen(frame, &visible, centered));
+        if waiting {
+            loading_tick += 1;
+            let visible = crate::tui::render::loading_lines(loading_tick);
+            let _ = terminal.draw(|frame| crate::tui::render::draw_loading_screen(frame, &visible));
+        } else if let Some((left, right, chat_focused)) = &panes {
+            let _ = terminal.draw(|frame| {
+                crate::tui::render::draw_candidate_screen(frame, left, right, *chat_focused)
+            });
+        } else {
+            let lines = if live {
+                match runtime.as_ref() {
+                    Some(active) => {
+                        if state.show_help {
+                            crate::tui::help::candidate_help_lines_for(
+                                CandidateScreen::Solving,
+                                state.focus,
+                            )
+                        } else {
+                            live_lines(state, active, &status)
+                        }
+                    }
+                    None => candidate_screen_lines(state),
+                }
+            } else {
+                let mut lines = candidate_screen_lines(state);
+                if let Some(text) = &status {
+                    lines.push(text.clone());
+                }
+                lines
+            };
+            let visible =
+                crate::tui::viewport::visible_with_pinned(&lines, height.saturating_sub(2));
+            let centered = screen_centered(state.show_help, live, state.app.screen());
+            let _ =
+                terminal.draw(|frame| crate::tui::render::draw_screen(frame, &visible, centered));
+        }
         if crossterm::event::poll(Duration::from_millis(250)).unwrap_or(false) {
             match crossterm::event::read() {
                 Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => {
