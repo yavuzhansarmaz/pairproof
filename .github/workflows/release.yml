@@ -47,6 +47,16 @@ jobs:
         run: cargo fmt --check
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
+      # Three hermetic orchestrator_sync tests shell out to the real
+      # mutagen binary (absent-session paths); install it so they pass.
+      - name: Install Mutagen
+        shell: sh
+        run: |
+          set -eu
+          curl -fsSL https://github.com/mutagen-io/mutagen/releases/download/v0.18.1/mutagen_linux_amd64_v0.18.1.tar.gz | tar -xz
+          sudo install -m 0755 mutagen /usr/local/bin/mutagen
+          sudo install -m 0644 mutagen-agents.tar.gz /usr/local/bin/mutagen-agents.tar.gz
+          mutagen version
       - name: Run tests
         run: cargo test
 

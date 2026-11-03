@@ -11,7 +11,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 ```
 
-`cargo test` runs the unit tests embedded in `src/` plus the integration suites in [tests/](../../tests/) (93 files at the time of writing, including the `tests/common_mod.rs` helper module, so 92 test suites). The default run is hermetic: it needs no network, Docker daemon, Meta API key, or LeetCode access. CI's `check` job runs exactly `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` on stable Rust, after installing Mutagen v0.18.1 (three hermetic `orchestrator_sync` tests shell out to the real `mutagen` binary for absent-session paths). The release workflow additionally runs `cargo build --release --target <target> --locked` for the four release targets.
+`cargo test` runs the unit tests embedded in `src/` plus the integration suites in [tests/](../../tests/) (93 files at the time of writing, including the `tests/common_mod.rs` helper module, so 92 test suites). The default run is hermetic: it needs no network, Docker daemon, Meta API key, or LeetCode access. CI's `check` job runs exactly `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` on stable Rust, after installing Mutagen v0.18.1 (three hermetic `orchestrator_sync` tests shell out to the real `mutagen` binary for absent-session paths). The release workflow's validate job installs that same Mutagen build before `cargo test`, then builds `cargo build --release --target <target> --locked` for the four release targets.
 
 Run a single suite by name, for example:
 
