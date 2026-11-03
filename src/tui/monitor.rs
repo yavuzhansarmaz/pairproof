@@ -233,9 +233,7 @@ pub fn final_view(
                 None => "not scored".to_string(),
             };
             let exp = pq.expected_tokens.map_or("n/a".into(), |t| t.to_string());
-            let time = pq
-                .time_ms
-                .map_or("n/a".into(), |t| format_duration_ms(t));
+            let time = pq.time_ms.map_or("n/a".into(), format_duration_ms);
             let test = pq
                 .latest_test
                 .map(|t| format!("{} passed, {} failed", t.passed, t.failed))
