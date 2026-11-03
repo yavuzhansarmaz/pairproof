@@ -370,24 +370,3 @@ impl ExpertRuntime {
         self.version_mismatch.clone()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn format_session_id_uses_e_pid_x_now() {
-        assert_eq!(format_session_id(123, 456), "e123x456");
-        assert_eq!(format_session_id(1, 1_730_000_000_000), "e1x1730000000000");
-    }
-
-    #[test]
-    fn sandbox_port_range_preserves_historical_bounds() {
-        assert_eq!(SANDBOX_PORT_RANGE, 2222..2322);
-        assert_eq!(first_free_port(SANDBOX_PORT_RANGE.clone(), |_| false), None);
-        assert_eq!(
-            first_free_port(SANDBOX_PORT_RANGE, |p| p != 2222),
-            Some(2223)
-        );
-    }
-}

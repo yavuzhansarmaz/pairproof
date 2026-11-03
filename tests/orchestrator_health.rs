@@ -5,8 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use pairproof::connection::{Endpoint, EphemeralUsername, Fingerprint};
-use pairproof::core::{EventKind, Language, QuestionRef, QuestionStatus, SessionStatus};
-use pairproof::leetcode::Difficulty;
+use pairproof::core::{EventKind, Language, QuestionStatus, SessionStatus};
 use pairproof::llm::MetaApiError;
 use pairproof::orchestration::connection::{ConnectionGate, HostKeyVerifier};
 use pairproof::orchestration::health::{
@@ -16,6 +15,9 @@ use pairproof::orchestration::health::{
 };
 use pairproof::orchestration::{Clock, ManualClock, Orchestrator, OrchestratorError};
 use pairproof::scoring::{live_rating, ApproachQuality};
+
+mod common_mod;
+use common_mod::easy_five as easy;
 
 fn next_fail(failures: &AtomicUsize) -> bool {
     let value = failures.load(Ordering::SeqCst);
@@ -97,15 +99,6 @@ impl Sleeper for RecSleeper {
     }
 }
 
-fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty,
-        acceptance_pct: None,
-    }
-}
-
 fn started() -> Orchestrator {
     let mut orch = Orchestrator::create("s1".into(), Language::Python, easy(), 0).expect("create");
     orch.mark_waiting_for_candidate(1).expect("waiting");
@@ -116,12 +109,6 @@ fn started() -> Orchestrator {
 
 fn gate(window_ms: u64) -> HealthGate {
     HealthGate::new(RetryPolicy::new(window_ms))
-}
-
-fn easy() -> Vec<QuestionRef> {
-    (0..5)
-        .map(|i| q(&format!("e{i}"), Difficulty::Easy))
-        .collect()
 }
 
 fn waiting() -> Orchestrator {

@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use pairproof::core::{
-    read_events, ApproachChoice, Difficulty, EventKind, EventLogWriter, Language, QuestionRef,
-    Session, SessionEvent,
+    read_events, ApproachChoice, Difficulty, EventKind, EventLogWriter, Language, Session,
+    SessionEvent,
 };
 use pairproof::orchestration::evidence::{
     per_question_evidence, render_evidence, score_line_evidence, summary_evidence, Provenance,
@@ -13,21 +13,13 @@ use pairproof::scoring::{
     final_rating, ApproachQuality, FinalBreakdown, GradeOutcome, QuestionGrade, ScoreComponent,
     ScoreLine,
 };
+
+mod common_mod;
+use common_mod::qs;
 fn line_for(b: &FinalBreakdown, c: ScoreComponent) -> &ScoreLine {
     b.lines.iter().find(|l| l.component == c).expect("line")
 }
 
-fn q(slug: &str, d: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.into(),
-        title: slug.into(),
-        difficulty: d,
-        acceptance_pct: None,
-    }
-}
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{p}{i}"), d)).collect()
-}
 fn base(id: &str) -> Session {
     Session::new(id.into(), Language::Python, qs("e", 5, Difficulty::Easy), 0).expect("session")
 }

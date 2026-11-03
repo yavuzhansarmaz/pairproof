@@ -1,5 +1,4 @@
-use pairproof::core::{ApproachChoice, Language, QuestionRef, Session, TestSummary};
-use pairproof::leetcode::Difficulty;
+use pairproof::core::{ApproachChoice, Language, Session, TestSummary};
 use pairproof::llm::chat::{
     assemble_chat_messages, build_live_state_block, detect_boundary_violation,
     log_boundary_violation_if_present, run_chat, ChatState, CHAT_SYSTEM_PROMPT,
@@ -7,14 +6,8 @@ use pairproof::llm::chat::{
 };
 use pairproof::llm::{LlmError, Message, MetaClient};
 
-fn q(slug: &str) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty: Difficulty::Easy,
-        acceptance_pct: None,
-    }
-}
+mod common_mod;
+use common_mod::q_easy as q;
 
 fn started() -> Session {
     let easy = (0..5).map(|i| q(&format!("e{i}"))).collect();

@@ -1,4 +1,4 @@
-use pairproof::core::{ApproachChoice, Language, QuestionRef, Session, TestSummary};
+use pairproof::core::{ApproachChoice, Language, Session, TestSummary};
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::grading::{
     build_question_grading_messages, grade_question, grade_questions, parse_question_grade,
@@ -7,14 +7,8 @@ use pairproof::llm::grading::{
 use pairproof::llm::{LlmError, MetaClient};
 use pairproof::scoring::GradeOutcome;
 
-fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty,
-        acceptance_pct: None,
-    }
-}
+mod common_mod;
+use common_mod::q;
 
 fn started_session() -> Session {
     let easy = (0..5)

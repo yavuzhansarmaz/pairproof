@@ -32,6 +32,10 @@ mod panes;
 mod transport;
 mod view;
 pub use self::live::{candidate_loop, default_workspace, handle_live_key};
+pub use self::panes::{
+    connect_submit_shows_loading, divider_hit, screen_centered, split_pct_for_column,
+    DEFAULT_QUESTION_PCT,
+};
 pub use self::transport::{SshAuthVerifier, SshCandidateTransport};
 pub use self::view::CandidateView;
 /// Builds or reconnects the runtime once a verified string lands

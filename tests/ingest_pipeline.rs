@@ -11,6 +11,9 @@ use pairproof::leetcode::Difficulty;
 use pairproof::llm::extraction::{parse_extraction, ExtractionResult};
 use pairproof::llm::{LlmError, MetaClient};
 
+mod common_mod;
+use common_mod::easy_five as easy_questions;
+
 struct TestDir(PathBuf);
 
 impl TestDir {
@@ -49,17 +52,6 @@ fn hand_built(
         unsupported_language,
         language_reason: "reason".to_string(),
     }
-}
-
-fn easy_questions() -> Vec<QuestionRef> {
-    (0..5)
-        .map(|i| QuestionRef {
-            title_slug: format!("e{i}"),
-            title: format!("e{i}"),
-            difficulty: Difficulty::Easy,
-            acceptance_pct: None,
-        })
-        .collect()
 }
 
 fn session(language: Language) -> Session {

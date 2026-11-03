@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use pairproof::connection::{ConnectionString, Endpoint, EphemeralUsername, Fingerprint, Secret};
-use pairproof::core::{Language, QuestionRef};
+use pairproof::core::Language;
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::coding::{CodingStepInput, CodingStepOutput};
 use pairproof::llm::Message;
@@ -19,12 +19,11 @@ use pairproof::tui::expert_runtime::{
     ExpertRuntime, ExpertRuntimeDeps, ExpertSessionSpec, LocalHelloSource, PollOutcome,
 };
 
+mod common_mod;
+use common_mod::qs;
 type PF<'a, T> = PipelineFuture<'a, T>;
 const T0: u64 = 1_730_000_000_000;
-#[rustfmt::skip]
-fn q(s: &str, d: Difficulty) -> QuestionRef { QuestionRef { title_slug: s.into(), title: s.into(), difficulty: d, acceptance_pct: None } }
-#[rustfmt::skip]
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> { (0..n).map(|i| q(&format!("{p}{i}"), d)).collect() }
+
 #[rustfmt::skip]
 fn started() -> Orchestrator { let mut o = Orchestrator::create("s1".into(), Language::Python, qs("e", 5, Difficulty::Easy), 0).unwrap(); o.mark_waiting_for_candidate(1).unwrap(); o.attach_candidate(2).unwrap(); o.start(3).unwrap(); o }
 #[rustfmt::skip]

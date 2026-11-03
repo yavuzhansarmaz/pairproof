@@ -1,4 +1,3 @@
-use pairproof::sync::classify_ssh_failure as classify_via_mod;
 use pairproof::sync::failure::{classify_ssh_failure, SshFailureKind};
 
 #[test]
@@ -122,10 +121,4 @@ fn ssh_expert_guidance_has_no_secret() {
     assert!(!dbg.contains("hunter2"));
     assert!(!c.expert_guidance.contains("hunter2"));
     assert!(c.expert_guidance.contains("ssh <target>"));
-}
-
-#[test]
-fn ssh_reexport_via_sync_mod() {
-    let c = classify_via_mod("Connection refused");
-    assert_eq!(c.kind, SshFailureKind::Refused);
 }

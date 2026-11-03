@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use pairproof::core::{Language, QuestionRef, Session};
+use pairproof::core::{Language, Session};
 use pairproof::leetcode::selection::select_questions;
 use pairproof::leetcode::{Difficulty, LeetCodeClient};
 use pairproof::llm::approaches::{generate_approaches, grade_other_approach};
@@ -17,19 +17,13 @@ use pairproof::scoring::ApproachQuality;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
+mod common_mod;
+use common_mod::q_easy as q;
+
 const QUESTION: &str = "Given nums and target, return indices of two numbers summing to target.";
 
 fn live_client() -> MetaClient {
     MetaClient::from_env().expect("MODEL_API_KEY must be set for live smoke tests")
-}
-
-fn q(slug: &str) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty: Difficulty::Easy,
-        acceptance_pct: None,
-    }
 }
 
 fn started() -> Session {

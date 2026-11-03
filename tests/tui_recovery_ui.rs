@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pairproof::connection::{Endpoint, EphemeralUsername, Fingerprint};
-use pairproof::core::{Language, QuestionRef};
+use pairproof::core::Language;
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::coding::{CodingStepInput, CodingStepOutput};
 use pairproof::llm::Message;
@@ -15,12 +15,11 @@ use pairproof::tui::expert_runtime::{
     ExpertRuntime, ExpertRuntimeDeps, ExpertSessionSpec, LocalHelloSource,
 };
 
+mod common_mod;
+use common_mod::qs;
 type PF<'a, T> = PipelineFuture<'a, T>;
 const T0: u64 = 1_730_000_000_000;
-#[rustfmt::skip]
-fn q(s: &str, d: Difficulty) -> QuestionRef { QuestionRef { title_slug: s.into(), title: s.into(), difficulty: d, acceptance_pct: None } }
-#[rustfmt::skip]
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> { (0..n).map(|i| q(&format!("{p}{i}"), d)).collect() }
+
 #[rustfmt::skip]
 fn tmp(name: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("pairproof-rec-ui-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
 

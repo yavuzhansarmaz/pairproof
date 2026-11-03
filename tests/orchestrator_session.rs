@@ -2,22 +2,8 @@ use pairproof::core::{CoreError, EventKind, Language, QuestionRef, SessionStatus
 use pairproof::leetcode::Difficulty;
 use pairproof::orchestration::{Clock, ManualClock, Orchestrator, OrchestratorError, SystemClock};
 
-fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty,
-        acceptance_pct: None,
-    }
-}
-
-fn qs(prefix: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{prefix}{i}"), d)).collect()
-}
-
-fn easy() -> Vec<QuestionRef> {
-    qs("e", 5, Difficulty::Easy)
-}
+mod common_mod;
+use common_mod::{easy_five as easy, q, qs};
 
 fn medium() -> Vec<QuestionRef> {
     qs("m", 3, Difficulty::Medium)

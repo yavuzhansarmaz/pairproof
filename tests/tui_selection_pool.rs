@@ -24,6 +24,9 @@ use pairproof::tui::expert_runtime::{
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
+mod common_mod;
+use common_mod::q;
+
 const T0: u64 = 1_730_000_000_000;
 
 /// Scripted pool source: tag set key -> slugs served for any difficulty.
@@ -296,8 +299,7 @@ async fn setup_auto_easy_falls_back_on_narrow_topics() {
 }
 
 type PF<'a, T> = PipelineFuture<'a, T>;
-#[rustfmt::skip]
-fn q(s: &str, d: Difficulty) -> QuestionRef { QuestionRef { title_slug: s.into(), title: s.into(), difficulty: d, acceptance_pct: None } }
+
 #[rustfmt::skip]
 fn tmp(name: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("pairproof-sel-pool-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
 

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use pairproof::connection::{Endpoint, EphemeralUsername, Fingerprint};
-use pairproof::core::{Language, QuestionRef, Session};
+use pairproof::core::{Language, Session};
 use pairproof::leetcode::selection::{PoolClient, PoolFuture};
 use pairproof::leetcode::{CatalogEntry, CatalogPage, Difficulty};
 use pairproof::llm::coding::{CodingStepInput, CodingStepOutput};
@@ -17,6 +17,8 @@ use pairproof::tui::expert_runtime::{
     ExpertRuntime, ExpertRuntimeDeps, ExpertSessionSpec, LocalHelloSource, SelectionScreen,
 };
 
+mod common_mod;
+use common_mod::q;
 const T0: u64 = 1_730_000_000_000;
 
 struct FakePool {
@@ -67,8 +69,7 @@ impl PoolClient for FakePool {
 }
 
 type PF<'a, T> = PipelineFuture<'a, T>;
-#[rustfmt::skip]
-fn q(s: &str, d: Difficulty) -> QuestionRef { QuestionRef { title_slug: s.into(), title: s.into(), difficulty: d, acceptance_pct: None } }
+
 #[rustfmt::skip]
 fn tmp(name: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("pairproof-sel-pick-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
 

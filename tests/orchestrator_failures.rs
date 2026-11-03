@@ -11,18 +11,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+mod common_mod;
+use common_mod::qs;
 const T0: u64 = 1_730_000_000_000;
-fn q(s: &str, d: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: s.into(),
-        title: s.into(),
-        difficulty: d,
-        acceptance_pct: None,
-    }
-}
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{p}{i}"), d)).collect()
-}
+
 fn started() -> Orchestrator {
     let easy = qs("e", 5, Difficulty::Easy);
     let mut o = Orchestrator::create("s1".into(), Language::Python, easy, 0).expect("create");

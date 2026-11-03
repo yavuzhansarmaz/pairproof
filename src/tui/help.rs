@@ -43,13 +43,13 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
         AppScreen::SelectMedium => lines.extend([
             "  up/down move, left/right change page",
             "  space choose a question, enter continue with 3 chosen",
-            "  tab preview the question under the cursor, b returns to the list",
+            "  tab preview the question under the cursor (left/right switch question, b returns)",
             "  r pick at random instead (enter confirms, b returns)",
         ]),
         AppScreen::SelectHard => lines.extend([
             "  up/down move, left/right change page",
             "  space choose a question, enter finish with 2 chosen",
-            "  tab preview the question under the cursor, b returns to the list",
+            "  tab preview the question under the cursor (left/right switch question, b returns)",
             "  r pick at random instead (enter confirms, b returns)",
         ]),
         AppScreen::Monitor => lines.extend([

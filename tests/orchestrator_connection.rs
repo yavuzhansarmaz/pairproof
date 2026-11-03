@@ -2,13 +2,15 @@ use pairproof::connection::{
     ConnectionError, ConnectionState, ConnectionString, Endpoint, EphemeralUsername, Fingerprint,
     Secret, ROTATION_WINDOW_MS,
 };
-use pairproof::core::{CoreError, EventKind, Language, QuestionRef, QuestionStatus, SessionStatus};
-use pairproof::leetcode::Difficulty;
+use pairproof::core::{CoreError, EventKind, Language, QuestionStatus, SessionStatus};
 use pairproof::orchestration::connection::{
     ConnectionGate, ConnectionGateError, GatePhase, HostKeyVerifier, SshKeyscanVerifier,
 };
 use pairproof::orchestration::{Orchestrator, OrchestratorError};
 use std::sync::{Arc, Mutex};
+
+mod common_mod;
+use common_mod::{easy_five as easy, endpoint, fingerprint, username};
 const T0: u64 = 1_730_000_000_000;
 #[derive(Debug)]
 struct FakeState {
@@ -37,28 +39,7 @@ impl HostKeyVerifier for FakeVerifier {
         s.result.clone()
     }
 }
-fn q(slug: &str, d: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.into(),
-        title: slug.into(),
-        difficulty: d,
-        acceptance_pct: None,
-    }
-}
-fn endpoint() -> Endpoint {
-    Endpoint::new("203.0.113.10", 22022).expect("endpoint")
-}
-fn username() -> EphemeralUsername {
-    EphemeralUsername::parse("pp-a1b2c3d4").expect("username")
-}
-fn fingerprint() -> Fingerprint {
-    Fingerprint::parse(&"a".repeat(64)).expect("fingerprint")
-}
-fn easy() -> Vec<QuestionRef> {
-    (0..5)
-        .map(|i| q(&format!("e{i}"), Difficulty::Easy))
-        .collect()
-}
+
 fn waiting() -> Orchestrator {
     let mut o = Orchestrator::create("s1".into(), Language::Python, easy(), 0).expect("create");
     o.mark_waiting_for_candidate(1).expect("waiting");

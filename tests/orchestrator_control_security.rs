@@ -1,11 +1,10 @@
 use pairproof::orchestration::*;
 use std::path::PathBuf;
 
+mod common_mod;
+
 fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("pairproof-ctrlsec-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(&d).unwrap();
-    d
+    common_mod::tmp("ctrlsec", name)
 }
 
 #[tokio::test]

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 
-use pairproof::core::{Language, QuestionRef, SessionStatus};
+use pairproof::core::{Language, SessionStatus};
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::grading::QuestionScoringInput;
 use pairproof::orchestration::finalize::{
@@ -11,17 +11,9 @@ use pairproof::orchestration::finalize::{
 use pairproof::orchestration::Orchestrator;
 use pairproof::scoring::{final_rating, ApproachQuality, GradeOutcome, QuestionGrade};
 
-fn q(slug: &str, d: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.into(),
-        title: slug.into(),
-        difficulty: d,
-        acceptance_pct: None,
-    }
-}
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{p}{i}"), d)).collect()
-}
+mod common_mod;
+use common_mod::qs;
+
 fn created(at: u64) -> Orchestrator {
     Orchestrator::create(
         "s1".into(),

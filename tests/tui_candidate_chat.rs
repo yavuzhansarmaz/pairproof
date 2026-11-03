@@ -1,8 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use pairproof::core::{ApproachChoice, Language, QuestionRef, Session};
-use pairproof::leetcode::Difficulty;
+use pairproof::core::{ApproachChoice, Language, Session};
 use pairproof::llm::chat::{ChatState, CHAT_SYSTEM_PROMPT};
 use pairproof::llm::Message;
 use pairproof::tui::candidate_chat::{
@@ -11,14 +10,8 @@ use pairproof::tui::candidate_chat::{
 };
 use pairproof::tui::candidate_work::CandidateWork;
 
-fn q(slug: &str) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty: Difficulty::Easy,
-        acceptance_pct: None,
-    }
-}
+mod common_mod;
+use common_mod::q_easy as q;
 
 fn started() -> Session {
     let easy = (0..5).map(|i| q(&format!("e{i}"))).collect();

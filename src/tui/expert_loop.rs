@@ -49,6 +49,8 @@ pub(crate) struct ExpertLoopState {
     pub(crate) show_question_preview: bool,
     pub(crate) show_random_confirm: bool,
     pub(crate) question_preview_scroll: usize,
+    pub(crate) question_preview_max_scroll: usize,
+    pub(crate) question_preview_page: usize,
     pub(crate) pending: PendingWork,
     pub(crate) loading_tick: usize,
 }
@@ -68,6 +70,11 @@ impl Default for ExpertLoopState {
             show_question_preview: false,
             show_random_confirm: false,
             question_preview_scroll: 0,
+            // Until the first preview frame measures the real range,
+            // scrolling is unbounded here; `frame_plan` clamps it to
+            // the wrapped content before anything is drawn.
+            question_preview_max_scroll: usize::MAX,
+            question_preview_page: 10,
             pending: PendingWork::default(),
             loading_tick: 0,
         }
@@ -164,18 +171,6 @@ impl ExpertLoopState {
                 }
             }
         }
-        if self.show_question_preview {
-            if let (Some(active), Some(screen)) = (self.runtime.as_ref(), selection_screen(app)) {
-                let preview = active.selection_preview_lines(screen);
-                if !preview.is_empty() {
-                    let start = self
-                        .question_preview_scroll
-                        .min(preview.len().saturating_sub(1));
-                    self.question_preview_scroll = start;
-                    lines = preview[start..].to_vec();
-                }
-            }
-        }
         if self.show_random_confirm {
             if let (Some(active), Some(screen)) = (self.runtime.as_ref(), selection_screen(app)) {
                 let (label, need) = match screen {
@@ -206,6 +201,39 @@ impl ExpertLoopState {
             || self.pending.runtime_rx.is_some()
             || self.pending.selection_rx.is_some()
             || self.pending.api_key_rx.is_some()
+    }
+
+    /// Scrolls the question preview by `delta` rows, clamped to
+    /// the range the last frame could actually display.
+    pub(crate) fn scroll_preview_by(&mut self, delta: i32) {
+        if delta >= 0 {
+            self.question_preview_scroll = self
+                .question_preview_scroll
+                .saturating_add(delta as usize)
+                .min(self.question_preview_max_scroll);
+        } else {
+            self.question_preview_scroll = self
+                .question_preview_scroll
+                .saturating_sub(delta.unsigned_abs() as usize);
+        }
+    }
+
+    /// Steps the preview to a neighbouring question: the scroll
+    /// resets to the top and the new statement fetch starts, so
+    /// the preview shows the loading line until it lands.
+    pub(crate) fn step_preview_question(&mut self, app: &app::ExpertApp, delta: i32) {
+        let Some(screen) = selection_screen(app) else {
+            return;
+        };
+        let moved = match self.runtime.as_mut() {
+            Some(active) => active.step_preview_question(screen, delta),
+            None => false,
+        };
+        if moved {
+            self.question_preview_scroll = 0;
+            self.question_preview_max_scroll = usize::MAX;
+            self.start_question_preview_fetch(screen);
+        }
     }
 
     /// Routes one key event through API-key entry and help overlays.
@@ -246,20 +274,29 @@ impl ExpertLoopState {
             self.show_question_preview = false;
         }
         if self.show_question_preview {
-            // Question preview: `b` returns to the list exactly
-            // where it was left; up/down scroll the statement; quit
-            // keys still quit; the rest is swallowed so picks and
-            // cursor cannot drift behind it.
+            // Question preview: `b` returns to the list at the
+            // question being previewed; left/right step to the
+            // neighbouring question; up/down scroll the statement;
+            // quit keys still quit; the rest is swallowed so picks
+            // cannot drift behind it.
             match key.code {
                 crossterm::event::KeyCode::Char('b') => {
                     self.show_question_preview = false;
                     self.question_preview_scroll = 0;
                 }
-                crossterm::event::KeyCode::Up => {
-                    self.question_preview_scroll = self.question_preview_scroll.saturating_sub(1);
+                crossterm::event::KeyCode::Left => self.step_preview_question(app, -1),
+                crossterm::event::KeyCode::Right => self.step_preview_question(app, 1),
+                crossterm::event::KeyCode::Up => self.scroll_preview_by(-1),
+                crossterm::event::KeyCode::Down => self.scroll_preview_by(1),
+                crossterm::event::KeyCode::PageUp => {
+                    self.scroll_preview_by(-(self.question_preview_page as i32))
                 }
-                crossterm::event::KeyCode::Down => {
-                    self.question_preview_scroll = self.question_preview_scroll.saturating_add(1);
+                crossterm::event::KeyCode::PageDown => {
+                    self.scroll_preview_by(self.question_preview_page as i32)
+                }
+                crossterm::event::KeyCode::Home => self.question_preview_scroll = 0,
+                crossterm::event::KeyCode::End => {
+                    self.question_preview_scroll = self.question_preview_max_scroll
                 }
                 crossterm::event::KeyCode::Esc => {
                     let _ = app.handle(app::AppEvent::Quit);

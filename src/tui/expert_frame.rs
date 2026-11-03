@@ -15,6 +15,7 @@ pub(crate) enum FrameKind {
     Loading,
     Setup,
     Screen,
+    Preview,
 }
 
 /// One frame's visible lines plus how the TTY shell should draw them.
@@ -24,6 +25,8 @@ pub(crate) struct FramePlan {
     pub(crate) visible: Vec<String>,
     pub(crate) kind: FrameKind,
     pub(crate) centered: bool,
+    pub(crate) preview: Option<render::QuestionPreviewData>,
+    pub(crate) preview_scroll: usize,
 }
 
 /// Centring decision for one frame: intro screens sit centred, an
@@ -101,7 +104,15 @@ impl ExpertLoopState {
         self.poll_api_key_check(app);
         self.poll_question_preview();
         self.start_current_question_preview_fetch(app);
-        tick_runtime(app, &mut self.runtime, &mut self.tokio_rt);
+        // While the modal question preview is open, the bounded
+        // runtime step is deferred until it closes: it does
+        // blocking control-channel work on every tick, and running
+        // it before each redraw is what made preview scrolling
+        // feel laggy. Candidate heartbeat/snapshot work resumes
+        // on the first tick after `b` returns to the list.
+        if !self.show_question_preview {
+            tick_runtime(app, &mut self.runtime, &mut self.tokio_rt);
+        }
     }
 
     /// Warms the statement cache for the question under the cursor
@@ -136,27 +147,51 @@ impl ExpertLoopState {
 
     /// Decides one frame without touching the terminal: which lines
     /// are visible at `terminal_height`, and which renderer draws them.
-    pub(crate) fn frame_plan(&mut self, app: &app::ExpertApp, terminal_height: usize) -> FramePlan {
+    pub(crate) fn frame_plan(
+        &mut self,
+        app: &app::ExpertApp,
+        terminal_width: usize,
+        terminal_height: usize,
+    ) -> FramePlan {
         let loading = self.is_loading();
+        // The question preview is a dedicated full-screen renderer,
+        // not a line list: it wraps text, pins its footer, and owns
+        // its scroll window. It wins over every other frame kind.
+        if self.show_question_preview && !loading {
+            if let (Some(active), Some(screen)) = (self.runtime.as_ref(), selection_screen(app)) {
+                if let Some(preview) = active.question_preview(screen) {
+                    let metrics = render::preview_metrics(
+                        &preview,
+                        terminal_width as u16,
+                        terminal_height as u16,
+                    );
+                    self.question_preview_max_scroll = metrics.max_scroll;
+                    self.question_preview_page = metrics.body_rows.max(1);
+                    self.question_preview_scroll =
+                        self.question_preview_scroll.min(metrics.max_scroll);
+                    return FramePlan {
+                        visible: Vec::new(),
+                        kind: FrameKind::Preview,
+                        centered: false,
+                        preview_scroll: self.question_preview_scroll,
+                        preview: Some(preview),
+                    };
+                }
+            }
+        }
         let lines = if loading {
             self.loading_lines()
         } else {
             self.build_lines(app)
         };
         let visible = viewport::visible_with_pinned(&lines, terminal_height.saturating_sub(2));
-        let centered = if self.show_question_preview {
-            // The question preview is a reading screen, not a popup:
-            // it uses the whole terminal from its first frame.
-            false
-        } else {
-            frame_centered(
-                app.screen(),
-                self.show_help,
-                self.show_disclosure,
-                loading,
-                self.selection_list_open(app.screen()),
-            ) || self.show_random_confirm
-        };
+        let centered = frame_centered(
+            app.screen(),
+            self.show_help,
+            self.show_disclosure,
+            loading,
+            self.selection_list_open(app.screen()),
+        ) || self.show_random_confirm;
         let show_setup = app.screen() == app::AppScreen::Setup
             && !self.show_help
             && !self.show_disclosure
@@ -171,6 +206,8 @@ impl ExpertLoopState {
                 FrameKind::Screen
             },
             centered,
+            preview: None,
+            preview_scroll: 0,
         }
     }
 
@@ -205,6 +242,15 @@ impl ExpertLoopState {
             Event::Paste(text) => {
                 if !self.is_loading() {
                     handle_paste(app, &mut self.pastes, &mut self.api_key_input, &text);
+                }
+                None
+            }
+            Event::Mouse(mouse) if self.show_question_preview && !self.is_loading() => {
+                // Mouse wheel scrolls the preview three rows a notch.
+                match mouse.kind {
+                    MouseEventKind::ScrollDown => self.scroll_preview_by(3),
+                    MouseEventKind::ScrollUp => self.scroll_preview_by(-3),
+                    _ => {}
                 }
                 None
             }
@@ -244,6 +290,3 @@ impl ExpertLoopState {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

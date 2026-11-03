@@ -3,22 +3,12 @@ use pairproof::connection::{
     Secret, SecretRotator, ROTATION_WINDOW_MS,
 };
 
+mod common_mod;
+use common_mod::{endpoint, fingerprint, username};
 const T0: u64 = 1_730_000_000_000;
-const FINGERPRINT_HEX: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
 const OTHER_FINGERPRINT_HEX: &str =
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-
-fn endpoint() -> Endpoint {
-    Endpoint::new("203.0.113.10", 22022).expect("endpoint")
-}
-
-fn username() -> EphemeralUsername {
-    EphemeralUsername::parse("pp-a1b2c3d4").expect("username")
-}
-
-fn fingerprint() -> Fingerprint {
-    Fingerprint::parse(FINGERPRINT_HEX).expect("fingerprint")
-}
 
 fn rotator() -> SecretRotator {
     SecretRotator::new(endpoint(), username(), fingerprint(), T0)

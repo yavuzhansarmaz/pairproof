@@ -23,6 +23,7 @@ pub mod expert_view;
 pub mod help;
 pub mod monitor;
 pub mod render;
+pub mod render_preview;
 pub mod setup;
 pub mod setup_panel;
 pub mod shared;
@@ -126,12 +127,17 @@ fn interactive_loop(
     let mut state = ExpertLoopState::default();
     while app.screen() != app::AppScreen::Exited {
         state.tick(app, preflight_done);
-        let height = terminal.size().map(|s| s.height as usize).unwrap_or(24);
-        let plan = state.frame_plan(app, height);
+        let size = terminal.size().unwrap_or_default();
+        let plan = state.frame_plan(app, size.width as usize, size.height as usize);
         let _ = terminal.draw(|frame| match plan.kind {
             FrameKind::Loading => render::draw_loading_screen(frame, &plan.visible),
             FrameKind::Setup => {
                 render::draw_setup_screen(frame, &state.setup_panel());
+            }
+            FrameKind::Preview => {
+                if let Some(preview) = &plan.preview {
+                    render::draw_question_preview_screen(frame, preview, plan.preview_scroll);
+                }
             }
             FrameKind::Screen => render::draw_screen(frame, &plan.visible, plan.centered),
         });

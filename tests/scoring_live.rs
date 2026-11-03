@@ -8,18 +8,8 @@ use pairproof::scoring::{
 use ApproachQuality::*;
 use ScoreComponent::*;
 
-fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty,
-        acceptance_pct: None,
-    }
-}
-
-fn qs(prefix: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{prefix}{i}"), d)).collect()
-}
+mod common_mod;
+use common_mod::{q, qs};
 
 fn q_acceptance(slug: &str, difficulty: Difficulty, acceptance_pct: Option<u32>) -> QuestionRef {
     let mut question = q(slug, difficulty);

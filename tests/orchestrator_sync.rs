@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use pairproof::connection::{Endpoint, EphemeralUsername, Secret};
+use pairproof::connection::{EphemeralUsername, Secret};
 use pairproof::orchestration::sync_gate::{
     ensure_session_sync, flush_session_sync, session_sync_phase, sync_phase_for,
     terminate_session_sync, SessionSyncPhase, CANDIDATE_SYNC_MESSAGE,
@@ -10,9 +10,8 @@ use pairproof::sandbox::process::{run_bounded, CommandSpec, DEFAULT_MAX_OUTPUT};
 use pairproof::sync::command::sync_create;
 use pairproof::sync::{SyncError, SyncSessionInfo};
 
-fn endpoint() -> Endpoint {
-    Endpoint::new("203.0.113.10", 2222).expect("endpoint")
-}
+mod common_mod;
+use common_mod::endpoint;
 
 fn user() -> EphemeralUsername {
     EphemeralUsername::parse("pp-abcd1234").expect("user")

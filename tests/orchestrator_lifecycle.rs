@@ -4,11 +4,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use pairproof::core::{Language, QuestionRef};
-use pairproof::leetcode::Difficulty;
 use pairproof::orchestration::lifecycle::{
     run_cancellable, CancelToken, CleanupSequence, CleanupStep, LifecycleError, RequestSupervisor,
 };
 use pairproof::orchestration::Orchestrator;
+
+mod common_mod;
+use common_mod::q_easy as q;
 
 struct DropFlag(Arc<AtomicBool>);
 impl Drop for DropFlag {
@@ -23,15 +25,6 @@ fn pending(dropped: Arc<AtomicBool>, delivered: Arc<AtomicBool>) -> impl Future<
         let _guard = guard;
         std::future::pending::<()>().await;
         delivered.store(true, Ordering::SeqCst);
-    }
-}
-
-fn q(slug: &str) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty: Difficulty::Easy,
-        acceptance_pct: None,
     }
 }
 

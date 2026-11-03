@@ -10,18 +10,27 @@ use pairproof::connection::{
     Secret, SecretRotator, ROTATION_WINDOW_MS,
 };
 use pairproof::core::{Language, QuestionRef};
-use pairproof::leetcode::Difficulty;
 use pairproof::orchestration::connection::{
     ConnectionGate, ConnectionGateError, GatePhase, HostKeyVerifier,
 };
 use pairproof::orchestration::Orchestrator;
 use pairproof::tui::shared::sanitize_display;
 
+mod common_mod;
+use common_mod::q_easy as q;
+
 const T0: u64 = 1_730_000_000_000;
 const FINGERPRINT_HEX: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER_FINGERPRINT_HEX: &str =
     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
+#[derive(Debug)]
+struct OkVerifier;
+impl HostKeyVerifier for OkVerifier {
+    fn verify_host_key(&self, _e: &Endpoint, _f: &Fingerprint) -> Result<(), ConnectionGateError> {
+        Ok(())
+    }
+}
 fn endpoint() -> Endpoint {
     Endpoint::new("203.0.113.10", 22022).expect("endpoint")
 }
@@ -31,27 +40,13 @@ fn username() -> EphemeralUsername {
 fn fingerprint() -> Fingerprint {
     Fingerprint::parse(FINGERPRINT_HEX).expect("fingerprint")
 }
-#[derive(Debug)]
-struct OkVerifier;
-impl HostKeyVerifier for OkVerifier {
-    fn verify_host_key(&self, _e: &Endpoint, _f: &Fingerprint) -> Result<(), ConnectionGateError> {
-        Ok(())
-    }
-}
 fn gate() -> ConnectionGate {
     ConnectionGate::with_verifier(endpoint(), username(), fingerprint(), OkVerifier, T0)
 }
 fn rotator() -> SecretRotator {
     SecretRotator::new(endpoint(), username(), fingerprint(), T0)
 }
-fn q(slug: &str) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.into(),
-        title: slug.into(),
-        difficulty: Difficulty::Easy,
-        acceptance_pct: None,
-    }
-}
+
 fn waiting() -> Orchestrator {
     let easy: Vec<QuestionRef> = (0..5).map(|i| q(&format!("e{i}"))).collect();
     let mut o = Orchestrator::create("s1".into(), Language::Python, easy, 0).expect("create");

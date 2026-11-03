@@ -22,6 +22,11 @@ pub const TEXT_COLOR: Color = Color::Rgb(237, 242, 255);
 pub const HEADING_COLOR: Color = Color::Rgb(120, 165, 230);
 pub use crate::tui::setup_panel::{draw_setup_screen, setup_box_areas, SetupPanel};
 
+pub use crate::tui::render_preview::{
+    draw_question_preview_screen, preview_body_rows, preview_metrics, PreviewMetrics, PreviewRow,
+    PreviewRowKind, QuestionPreviewData,
+};
+
 /// Pastel yellow used for the `?` help key on every screen.
 pub const HELP_KEY_COLOR: Color = Color::Rgb(250, 221, 141);
 /// Pastel red used for the `esc` quit key on every screen.
@@ -164,7 +169,7 @@ fn plain_line(line: &str) -> Line<'static> {
     Line::from(help_key_spans(line))
 }
 
-fn key_span(key: &str, color: Color) -> Span<'static> {
+pub(crate) fn key_span(key: &str, color: Color) -> Span<'static> {
     Span::styled(
         key.to_string(),
         Style::default().fg(color).add_modifier(Modifier::BOLD),

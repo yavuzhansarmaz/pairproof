@@ -1,38 +1,13 @@
-use pairproof::connection::{
-    ConnectionError, ConnectionState, Endpoint, EphemeralUsername, Fingerprint, SecretRotator,
-    ROTATION_WINDOW_MS,
-};
-use pairproof::core::{EventKind, Language, QuestionRef, Session};
-use pairproof::leetcode::Difficulty;
+use pairproof::connection::{ConnectionError, ConnectionState, SecretRotator, ROTATION_WINDOW_MS};
+use pairproof::core::{EventKind, Language, Session};
+
+mod common_mod;
+use common_mod::{easy_five as easy_questions, endpoint, fingerprint, username};
 
 const T0: u64 = 1_730_000_000_000;
-const FINGERPRINT_HEX: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-
-fn endpoint() -> Endpoint {
-    Endpoint::new("203.0.113.10", 22022).expect("endpoint")
-}
-
-fn username() -> EphemeralUsername {
-    EphemeralUsername::parse("pp-a1b2c3d4").expect("username")
-}
-
-fn fingerprint() -> Fingerprint {
-    Fingerprint::parse(FINGERPRINT_HEX).expect("fingerprint")
-}
 
 fn rotator() -> SecretRotator {
     SecretRotator::new(endpoint(), username(), fingerprint(), T0)
-}
-
-fn easy_questions() -> Vec<QuestionRef> {
-    (0..5)
-        .map(|i| QuestionRef {
-            title_slug: format!("e{i}"),
-            title: format!("e{i}"),
-            difficulty: Difficulty::Easy,
-            acceptance_pct: None,
-        })
-        .collect()
 }
 
 #[test]
