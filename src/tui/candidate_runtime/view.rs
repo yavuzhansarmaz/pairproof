@@ -110,6 +110,30 @@ impl CandidateView {
         .collect()
     }
 
+    /// Status lines, with a local "writing the code" line while a
+    /// submitted approach has not appeared in the snapshot yet.
+    pub fn status_lines_with_pending(
+        &self,
+        pending: Option<&crate::tui::candidate_stage::PendingApproach>,
+    ) -> Vec<String> {
+        let mut lines = self.status_lines();
+        let Some(pending) = pending else {
+            return lines;
+        };
+        if self.question_index != Some(pending.index)
+            || self.selected.as_ref() == Some(&pending.selection)
+        {
+            return lines;
+        }
+        if let Some(first) = lines.first_mut() {
+            *first = sanitize_display(&format!(
+                "selected approach: {}, writing the code",
+                pending.label()
+            ));
+        }
+        lines
+    }
+
     /// Left-pane lines without staging (the server selection is
     /// shown marked, with the cursor on it).
     pub fn question_lines(&self) -> Vec<String> {
@@ -150,7 +174,7 @@ impl CandidateView {
         lines.push(String::new());
         lines.push("Approaches".to_string());
         if self.options.is_empty() {
-            lines.push("approaches are not available yet.".to_string());
+            lines.push("loading".to_string());
         } else {
             let (cursor, marked) = match stage {
                 Some(stage) => (stage.cursor, stage.choice.clone()),
@@ -222,7 +246,8 @@ impl CandidateView {
             lines.push("the session ended as a technical failure.".to_string());
             lines.push("no evaluation was produced; the interview can be rescheduled.".to_string());
         } else if self.is_terminal() {
-            lines.push("session ended.".to_string());
+            lines.push("the expert's client closed.".to_string());
+            lines.push("the session is over.".to_string());
         }
         lines.iter().map(|line| sanitize_display(line)).collect()
     }
@@ -231,8 +256,8 @@ impl CandidateView {
         self.chat_transcript(&[])
     }
 
-    /// Coach pane as a conversation. `>` lines are the coach (drawn
-    /// on the left); `<` lines are the candidate (drawn on the right).
+    /// Coach pane as a conversation. `>` lines are the coach, drawn
+    /// on the left. `<` lines are the candidate, drawn on the right.
     /// A blank line separates turns. `sent` is what the candidate
     /// already submitted, in order, paired with each coach reply.
     pub fn chat_transcript(&self, sent: &[String]) -> Vec<String> {
@@ -252,11 +277,30 @@ impl CandidateView {
         }
         lines
     }
+    /// Centred notice when the expert quits, or the client disappears
+    /// before a final breakdown arrives. The candidate leaves the
+    /// work panes; Enter closes.
+    pub fn expert_closed_lines() -> Vec<String> {
+        vec![
+            "Expert closed".to_string(),
+            String::new(),
+            "the expert's client closed.".to_string(),
+            "the session is over.".to_string(),
+            String::new(),
+            "enter to close".to_string(),
+        ]
+    }
+
     /// Centred final screen shown when the expert ends the session:
     /// only what the candidate may see — the final rating, how many
     /// were solved/finished/skipped, and the grade per question.
     /// No question text, no approach internals, no live lines.
+    /// A terminal snapshot with no breakdown yet means the expert
+    /// closed before grading finished.
     pub fn final_screen_lines(&self) -> Vec<String> {
+        if self.final_breakdown.is_none() && self.phase != "TechnicalFailure" {
+            return Self::expert_closed_lines();
+        }
         let mut lines = vec!["Final breakdown".to_string()];
         if let Some(f) = &self.final_breakdown {
             let solved = f
@@ -307,7 +351,7 @@ impl CandidateView {
             lines.push("no evaluation was produced; the interview can be rescheduled.".to_string());
         }
         lines.push(String::new());
-        lines.push("enter to close".to_string());
+        lines.push("enter to exit".to_string());
         lines.iter().map(|line| sanitize_display(line)).collect()
     }
 

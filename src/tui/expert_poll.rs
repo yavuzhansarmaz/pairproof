@@ -145,6 +145,21 @@ pub(crate) fn tick_runtime(
 }
 
 impl ExpertLoopState {
+    /// Scrolls the final breakdown by `delta` rows, clamped to
+    /// the range the last frame could actually display.
+    pub(crate) fn scroll_final_by(&mut self, delta: i32) {
+        if delta >= 0 {
+            self.final_scroll = self
+                .final_scroll
+                .saturating_add(delta as usize)
+                .min(self.final_max_scroll);
+        } else {
+            self.final_scroll = self
+                .final_scroll
+                .saturating_sub(delta.unsigned_abs() as usize);
+        }
+    }
+
     /// Scrolls the question preview by `delta` rows, clamped to
     /// the range the last frame could actually display.
     pub(crate) fn scroll_preview_by(&mut self, delta: i32) {

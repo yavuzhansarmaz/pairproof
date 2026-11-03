@@ -184,7 +184,7 @@ async fn flow(
     chk(tokens > 0, "real Meta coding booked no tokens on slot 0")?;
     println!("livemeta tokens slot0 actual_tokens={tokens}");
     let _ = candidate.flush();
-    let solution = alpha.join("questions").join("01").join("solution.py");
+    let solution = alpha.join("q1").join("solution.py");
     let deadline = Instant::now() + Duration::from_secs(90);
     loop {
         if std::fs::read_to_string(&solution)

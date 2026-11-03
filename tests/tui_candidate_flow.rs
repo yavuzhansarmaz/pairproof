@@ -295,7 +295,7 @@ fn solution_editor_sync_is_not_subject_to_pairproof_paste_block() {
     let alpha: PathBuf =
         std::env::temp_dir().join(format!("pairproof-flow-{}-editor", std::process::id()));
     let _ = std::fs::remove_dir_all(&alpha);
-    let dir = alpha.join("questions/01");
+    let dir = alpha.join("q1");
     std::fs::create_dir_all(&dir).expect("dirs");
     let path = dir.join("solution.py");
     std::fs::write(&path, b"print(1)\n").expect("initial write");

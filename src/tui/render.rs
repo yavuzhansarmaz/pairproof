@@ -283,11 +283,15 @@ pub(crate) fn body_line(line: &str) -> Line<'static> {
     plain_line(line)
 }
 
+/// `loading.` / `loading..` / `loading...`, one step per tick.
+pub fn loading_label(tick: usize) -> String {
+    format!("loading{}", ".".repeat(tick % 3 + 1))
+}
+
 /// Centred loading lines with animated dots (1-3, cycling), shown
 /// while a background request runs so the screen never looks frozen.
 pub fn loading_lines(tick: usize) -> Vec<String> {
-    let dots = ".".repeat(tick % 3 + 1);
-    vec![format!("working on your request, loading{dots}")]
+    vec![format!("working on your request, {}", loading_label(tick))]
 }
 
 /// Draws `lines` inside a bordered panel. The frame title is

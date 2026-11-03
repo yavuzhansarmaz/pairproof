@@ -1,11 +1,13 @@
 //! Candidate solving screen: two panes in the expert-preview
 //! design language. The question pane gets a bold title line,
 //! navy section headings, a two-column reading padding, a pinned
-//! focus footer, and its own scroll offset; the Coach pane keeps
-//! its existing rendering with its own independent scroll offset
-//! and a pinned `message:` footer. Pane focus, the draggable
-//! split, and every key action are unchanged — this module only
-//! draws.
+//! key hint, and its own scroll offset. The Coach pane keeps its
+//! own scroll offset. Coach lines stay on the left with a navy `>`.
+//! Candidate lines sit on the right with a navy `<`, like a chat.
+//! The green `>` input sits under a rule that stays put while the
+//! transcript scrolls. Pane focus,
+//! the draggable split, and every key action are unchanged — this
+//! module only draws.
 
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
@@ -14,7 +16,8 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::tui::render::{
-    body_line, title_line, FRAME_COLOR, HEADING_COLOR, PAIR_COLOR, PROOF_COLOR, TEXT_COLOR,
+    body_line, help_key_spans, title_line, ENTER_KEY_COLOR, FRAME_COLOR, HEADING_COLOR, PAIR_COLOR,
+    PROOF_COLOR, TEXT_COLOR,
 };
 use crate::tui::render_preview::{preview_line_kind, PreviewRowKind};
 use crate::tui::viewport::{clamp_wrapped_scroll, wrapped_rows, wrapped_window};
@@ -89,25 +92,95 @@ fn question_line(line: &str, first: bool) -> Line<'static> {
     }
 }
 
-/// One coach-pane row. `>` is the coach, drawn on the left in navy.
-/// `<` is the candidate, drawn on the right in bold white. The
-/// marker itself is not shown.
+/// One coach-pane row. The coach stays on the left with a navy
+/// `>`. The candidate sits on the right with a navy `<`. The
+/// message text itself is white.
 fn coach_bubble(line: &str) -> Line<'static> {
     if let Some(text) = line.strip_prefix("< ") {
-        return Line::from(Span::styled(
-            text.to_string(),
-            Style::default().fg(TEXT_COLOR).add_modifier(Modifier::BOLD),
-        ))
+        return Line::from(vec![
+            Span::styled(
+                "< ".to_string(),
+                Style::default()
+                    .fg(HEADING_COLOR)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(text.to_string(), Style::default().fg(TEXT_COLOR)),
+        ])
         .alignment(Alignment::Right);
     }
     if let Some(text) = line.strip_prefix("> ") {
-        return Line::from(Span::styled(
-            text.to_string(),
-            Style::default().fg(HEADING_COLOR),
-        ))
-        .alignment(Alignment::Left);
+        return Line::from(vec![
+            Span::styled(
+                "> ".to_string(),
+                Style::default()
+                    .fg(HEADING_COLOR)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(text.to_string(), Style::default().fg(TEXT_COLOR)),
+        ]);
     }
     body_line(line)
+}
+
+/// Splits the question pane into the scrolling body, an optional
+/// work banner (`working:` / `ready:`), and the pinned key hint.
+fn split_question_footer(lines: &[String]) -> (&[String], Option<&str>, Option<&str>) {
+    let Some(last) = lines.last().map(String::as_str) else {
+        return (lines, None, None);
+    };
+    if !last.starts_with("focus:") {
+        return (lines, None, None);
+    }
+    let rest = &lines[..lines.len() - 1];
+    if let Some(banner) = rest.last().map(String::as_str) {
+        if banner.starts_with("working:") || banner.starts_with("ready:") {
+            return (&rest[..rest.len() - 1], Some(banner), Some(last));
+        }
+    }
+    (rest, None, Some(last))
+}
+
+/// The line pinned above the key hint while code is written, and
+/// after it lands. `working:` is green so the wait is obvious.
+fn work_banner_line(banner: &str) -> Line<'static> {
+    let (working, text) = if let Some(text) = banner.strip_prefix("working:") {
+        (true, text.trim_start())
+    } else if let Some(text) = banner.strip_prefix("ready:") {
+        (false, text.trim_start())
+    } else {
+        (false, banner)
+    };
+    let color = if working { ENTER_KEY_COLOR } else { TEXT_COLOR };
+    Line::from(Span::styled(
+        text.to_string(),
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    ))
+}
+
+/// Key hint pinned under the question pane. The `focus:` prefix is
+/// only a marker; the keys are coloured the same way as every
+/// other screen's footer.
+fn hint_line(footer: &str) -> Line<'static> {
+    let text = footer.strip_prefix("focus:").unwrap_or(footer).trim_start();
+    Line::from(help_key_spans(text))
+}
+
+/// Coach input, pinned under the transcript. The green `>` stands
+/// in for the old `message:` label.
+fn coach_input_line(footer: &str) -> Line<'static> {
+    let text = footer
+        .strip_prefix("message:")
+        .unwrap_or(footer)
+        .trim_start();
+    Line::from(vec![
+        Span::styled(
+            "> ",
+            Style::default()
+                .fg(ENTER_KEY_COLOR)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(text.to_string(), Style::default().fg(TEXT_COLOR)),
+    ])
 }
 
 fn pane_block(title: Line<'static>, focused: bool) -> Block<'static> {
@@ -148,8 +221,8 @@ fn window_lines(
 /// frame navy. The question pane scrolls by `question_scroll`
 /// and the Coach pane by `coach_scroll`, independently; both are
 /// clamped to the content so overscroll never blanks a pane. The
-/// question pane's `focus:` hint line and the Coach pane's
-/// `message:` line are each pinned to the bottom of their pane.
+/// question pane's key hint and the Coach pane's input, with the
+/// rule above it, are each pinned to the bottom of their pane.
 pub fn draw_candidate_screen(
     frame: &mut Frame,
     left: &[String],
@@ -193,7 +266,7 @@ pub fn draw_candidate_screen_with_status(
         ])
         .split(frame.area());
 
-    // Question pane: pinned `focus:` footer, padded scrollable body.
+    // Question pane: pinned key hint, padded scrollable body.
     let block = pane_block(title_line(), !chat_focused);
     let inner = block.inner(chunks[0]);
     frame.render_widget(block, chunks[0]);
@@ -202,25 +275,18 @@ pub fn draw_candidate_screen_with_status(
         width: inner.width.saturating_sub(4),
         ..inner
     };
-    let (content_lines, footer_line): (&[String], Option<&str>) =
-        match left.last().map(String::as_str) {
-            Some(last) if last.starts_with("focus:") => (&left[..left.len() - 1], Some(last)),
-            _ => (left, None),
-        };
-    let rows = if footer_line.is_some() {
-        ratatui::layout::Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([
-                ratatui::layout::Constraint::Min(0),
-                ratatui::layout::Constraint::Length(1),
-            ])
-            .split(padded)
-    } else {
-        ratatui::layout::Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([ratatui::layout::Constraint::Min(0)])
-            .split(padded)
-    };
+    let (content_lines, banner_line, footer_line) = split_question_footer(left);
+    let mut constraints = vec![ratatui::layout::Constraint::Min(0)];
+    if banner_line.is_some() {
+        constraints.push(ratatui::layout::Constraint::Length(1));
+    }
+    if footer_line.is_some() {
+        constraints.push(ratatui::layout::Constraint::Length(1));
+    }
+    let rows = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(constraints)
+        .split(padded);
     let q_width = usize::from(rows[0].width);
     let q_visible = usize::from(rows[0].height);
     let effective_question =
@@ -237,14 +303,18 @@ pub fn draw_candidate_screen_with_status(
             .scroll((q_local.min(u16::MAX as usize) as u16, 0)),
         rows[0],
     );
+    let mut foot = 1usize;
+    if let Some(banner) = banner_line {
+        frame.render_widget(
+            Paragraph::new(work_banner_line(banner)).style(Style::default().fg(TEXT_COLOR)),
+            rows[foot],
+        );
+        foot += 1;
+    }
     if let Some(footer) = footer_line {
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                footer.to_string(),
-                Style::default().fg(HEADING_COLOR),
-            )))
-            .style(Style::default().fg(TEXT_COLOR)),
-            rows[1],
+            Paragraph::new(hint_line(footer)).style(Style::default().fg(TEXT_COLOR)),
+            rows[foot],
         );
     }
 
@@ -322,6 +392,7 @@ pub fn draw_candidate_screen_with_status(
             .constraints([
                 ratatui::layout::Constraint::Min(0),
                 ratatui::layout::Constraint::Length(1),
+                ratatui::layout::Constraint::Length(1),
             ])
             .split(padded)
     } else {
@@ -347,9 +418,14 @@ pub fn draw_candidate_screen_with_status(
         coach_rows[0],
     );
     if let Some(footer) = coach_footer {
+        let rule = "\u{2500}".repeat(usize::from(coach_rows[1].width));
         frame.render_widget(
-            Paragraph::new(body_line(footer)).style(Style::default().fg(TEXT_COLOR)),
+            Paragraph::new(rule).style(Style::default().fg(FRAME_COLOR)),
             coach_rows[1],
+        );
+        frame.render_widget(
+            Paragraph::new(coach_input_line(footer)).style(Style::default().fg(TEXT_COLOR)),
+            coach_rows[2],
         );
     }
 }

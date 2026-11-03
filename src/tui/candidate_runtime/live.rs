@@ -3,17 +3,30 @@
 use super::*;
 
 use super::panes::{
-    clamp_scroll, connect_submit_shows_loading, divider_column, divider_hit, focus_for_pane,
-    live_lines, live_panes, max_scroll, pane_click_target, pane_side_for_column, screen_centered,
-    scroll_after_growth, split_pct_for_column, PaneSide, DEFAULT_QUESTION_PCT,
+    clamp_scroll, coach_pane_width, coach_scroll_rows, connect_submit_shows_loading, divider_hit,
+    focus_for_pane, live_lines, live_panes, max_scroll, pane_click_target, pane_content_width,
+    pane_side_for_column, question_pane_width, question_pinned_count, question_scroll_rows,
+    screen_centered, scroll_after_growth, split_pct_for_column, PaneSide, DEFAULT_QUESTION_PCT,
 };
 use crate::tui::viewport::wrapped_row_count;
 
-/// Local workspace synced to the container `/workspace` root.
+/// Cycles `loading.` and `writing …. this takes a moment.` the same
+/// way as the full-screen loading panel: one, two, then three dots.
+fn animate_loading(lines: &mut [String], tick: usize) {
+    let dots = ".".repeat(tick % 3 + 1);
+    for line in lines {
+        if line == "loading" {
+            *line = format!("loading{dots}");
+        } else if let Some(rest) = line.strip_prefix("working:") {
+            *line = format!("working: {}{dots}", rest.trim());
+        }
+    }
+}
+
+/// The folder the candidate launched from. Mutagen syncs it with the
+/// container workspace, so `q1/`, `q2/`, and so on appear here.
 pub fn default_workspace() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| std::env::temp_dir())
-        .join("pairproof-workspace")
+    std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir())
 }
 pub(crate) fn fresh_verifier(
     state: &mut CandidateRunState,
@@ -45,6 +58,9 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut dragging_split = false;
     let mut question_scroll = 0usize;
     let mut coach_scroll = 0usize;
+    let mut final_scroll = 0usize;
+    let mut final_max_scroll = 0usize;
+    let mut final_page = 1usize;
     let mut coach_following = true;
     let mut scrolled_question: Option<usize> = None;
     while state.app.screen() != CandidateScreen::Exited {
@@ -93,6 +109,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
         if live {
             if let Some(view) = &tick_view {
                 super::live_keys::sync_staging(state, view);
+                super::live_keys::settle_pending(state, view);
                 // A new question starts at the top of the pane.
                 let current = view.question_index;
                 if current != scrolled_question {
@@ -109,58 +126,68 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
         // screen replaces the placeholder solving screen entirely.
         // A background connection submit shows the same loading
         // screen, animated, until its result lands.
+        loading_tick = loading_tick.wrapping_add(1);
         let waiting = connect_rx.is_some()
             || (live
                 && !state.show_help
                 && tick_view
                     .as_ref()
                     .is_some_and(|view| view.waiting_for_statement() && !connection_lost));
-        let panes = if live && !state.show_help && !waiting {
+        let panes = if live && !state.show_help && !waiting && !connection_lost {
             tick_view.as_ref().and_then(|view| {
                 if view.is_terminal() {
                     None
                 } else {
-                    let (left, right) = live_panes(state, view, connection_lost, &status);
+                    let (mut left, right) = live_panes(state, view, connection_lost, &status);
+                    animate_loading(&mut left, loading_tick);
                     Some((left, right, state.focus == CandidateFocus::Chat))
                 }
             })
         } else {
             None
         };
-        let pane_visible = height.saturating_sub(3).max(1);
-        let divider = divider_column(term_width, question_pct);
-        let question_width = usize::from(divider).saturating_sub(7);
-        let coach_width = usize::from(term_width.saturating_sub(divider)).saturating_sub(7);
+        let question_width = pane_content_width(question_pane_width(term_width, question_pct));
+        let coach_width = pane_content_width(coach_pane_width(term_width, question_pct));
+        let mut coach_visible = coach_scroll_rows(height, 0);
         let mut coach_total_wrapped = 0usize;
         if let Some((left, right, _)) = &panes {
-            let left_content: &[String] = match left.last() {
-                Some(last) if last.starts_with("focus:") => &left[..left.len().saturating_sub(1)],
-                _ => left,
-            };
+            let pinned = question_pinned_count(left);
+            let question_visible = question_scroll_rows(height)
+                .saturating_sub(pinned.saturating_sub(1))
+                .max(1);
+            let left_content = &left[..left.len().saturating_sub(pinned)];
             let right_content: &[String] = match right.last() {
                 Some(last) if last.starts_with("message:") => {
                     &right[..right.len().saturating_sub(1)]
                 }
                 _ => right,
             };
+            let status_rows = tick_view
+                .as_ref()
+                .map(|view| {
+                    view.status_lines_with_pending(state.pending_approach.as_ref())
+                        .len()
+                })
+                .unwrap_or(0);
+            coach_visible = coach_scroll_rows(height, status_rows);
             let question_total_wrapped = wrapped_row_count(left_content, question_width);
             coach_total_wrapped = wrapped_row_count(right_content, coach_width);
             coach_scroll = scroll_after_growth(
                 coach_scroll,
                 coach_following,
                 coach_total_wrapped,
-                pane_visible,
+                coach_visible,
             );
-            question_scroll = clamp_scroll(question_scroll, question_total_wrapped, pane_visible);
+            question_scroll =
+                clamp_scroll(question_scroll, question_total_wrapped, question_visible);
         }
         if waiting {
-            loading_tick += 1;
             let visible = crate::tui::render::loading_lines(loading_tick);
             let _ = terminal.draw(|frame| crate::tui::render::draw_loading_screen(frame, &visible));
         } else if let Some((left, right, chat_focused)) = &panes {
             let status_lines = tick_view
                 .as_ref()
-                .map(|view| view.status_lines())
+                .map(|view| view.status_lines_with_pending(state.pending_approach.as_ref()))
                 .unwrap_or_default();
             let _ = terminal.draw(|frame| {
                 crate::tui::render::draw_candidate_screen_with_status(
@@ -185,6 +212,8 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                             )
                         } else if view.is_terminal() {
                             view.final_screen_lines()
+                        } else if connection_lost {
+                            CandidateView::expert_closed_lines()
                         } else {
                             live_lines(state, view, connection_lost, &status)
                         }
@@ -198,9 +227,19 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                 }
                 lines
             };
-            let visible =
-                crate::tui::viewport::visible_with_pinned(&lines, height.saturating_sub(2));
+            let inner_height = height.saturating_sub(2);
+            let breakdown = lines.first().is_some_and(|line| line == "Final breakdown");
+            let visible = if breakdown {
+                let frame = crate::tui::viewport::final_frame(&lines, inner_height, final_scroll);
+                final_scroll = frame.scroll;
+                final_max_scroll = frame.max_scroll;
+                final_page = frame.page;
+                frame.lines
+            } else {
+                crate::tui::viewport::visible_with_pinned(&lines, inner_height)
+            };
             let centered = screen_centered(state.show_help, live, state.app.screen())
+                || connection_lost
                 || tick_view.as_ref().is_some_and(|view| view.is_terminal());
             let _ =
                 terminal.draw(|frame| crate::tui::render::draw_screen(frame, &visible, centered));
@@ -222,6 +261,44 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                             {
                                 state.app.quit();
                             }
+                        }
+                        // The final breakdown is one scrolling page.
+                        // Up/down move it; Enter still closes.
+                        let scrolls_final = connect_rx.is_none()
+                            && live
+                            && !state.show_help
+                            && panes.is_none()
+                            && tick_view.as_ref().is_some_and(|view| {
+                                view.is_terminal()
+                                    && (view.final_breakdown.is_some()
+                                        || view.phase == "TechnicalFailure")
+                            })
+                            && matches!(
+                                key.code,
+                                K::Up | K::Down | K::PageUp | K::PageDown | K::Home | K::End
+                            );
+                        if scrolls_final {
+                            match key.code {
+                                K::Up => {
+                                    final_scroll = final_scroll.saturating_sub(1);
+                                }
+                                K::Down => {
+                                    final_scroll =
+                                        final_scroll.saturating_add(1).min(final_max_scroll);
+                                }
+                                K::PageUp => {
+                                    final_scroll = final_scroll.saturating_sub(final_page);
+                                }
+                                K::PageDown => {
+                                    final_scroll = final_scroll
+                                        .saturating_add(final_page)
+                                        .min(final_max_scroll);
+                                }
+                                K::Home => final_scroll = 0,
+                                K::End => final_scroll = final_max_scroll,
+                                _ => {}
+                            }
+                            continue;
                         }
                         // Arrow/page keys scroll the question pane
                         // while the two panes are up; they were
@@ -247,7 +324,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                                     _ => {}
                                 }
                                 coach_following =
-                                    coach_scroll >= max_scroll(coach_total_wrapped, pane_visible);
+                                    coach_scroll >= max_scroll(coach_total_wrapped, coach_visible);
                             } else {
                                 match key.code {
                                     K::Up => question_scroll = question_scroll.saturating_sub(1),
@@ -329,6 +406,14 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                         use crossterm::event::{MouseButton, MouseEventKind};
                         let width = term_width;
                         match mouse.kind {
+                            MouseEventKind::ScrollDown
+                                if panes.is_none() && final_max_scroll > 0 =>
+                            {
+                                final_scroll = final_scroll.saturating_add(3).min(final_max_scroll);
+                            }
+                            MouseEventKind::ScrollUp if panes.is_none() && final_max_scroll > 0 => {
+                                final_scroll = final_scroll.saturating_sub(3);
+                            }
                             MouseEventKind::ScrollDown if panes.is_some() => {
                                 match pane_side_for_column(mouse.column, width, question_pct) {
                                     PaneSide::Question => {
@@ -337,7 +422,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                                     PaneSide::Coach => {
                                         coach_scroll = coach_scroll.saturating_add(3);
                                         coach_following = coach_scroll
-                                            >= max_scroll(coach_total_wrapped, pane_visible);
+                                            >= max_scroll(coach_total_wrapped, coach_visible);
                                     }
                                 }
                             }
@@ -349,7 +434,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                                     PaneSide::Coach => {
                                         coach_scroll = coach_scroll.saturating_sub(3);
                                         coach_following = coach_scroll
-                                            >= max_scroll(coach_total_wrapped, pane_visible);
+                                            >= max_scroll(coach_total_wrapped, coach_visible);
                                     }
                                 }
                             }

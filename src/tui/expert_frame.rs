@@ -197,7 +197,20 @@ impl ExpertLoopState {
         } else {
             self.build_lines(app)
         };
-        let visible = viewport::visible_with_pinned(&lines, terminal_height.saturating_sub(2));
+        let inner_height = terminal_height.saturating_sub(2);
+        let visible = if app.screen() == app::AppScreen::Final
+            && !self.show_help
+            && !self.show_disclosure
+            && !loading
+        {
+            let frame = viewport::final_frame(&lines, inner_height, self.final_scroll);
+            self.final_scroll = frame.scroll;
+            self.final_max_scroll = frame.max_scroll;
+            self.final_page = frame.page;
+            frame.lines
+        } else {
+            viewport::visible_with_pinned(&lines, inner_height)
+        };
         let centered = frame_centered(
             app.screen(),
             self.show_help,
@@ -256,6 +269,18 @@ impl ExpertLoopState {
             Event::Paste(text) => {
                 if !self.is_loading() {
                     handle_paste(app, &mut self.pastes, &mut self.api_key_input, &text);
+                }
+                None
+            }
+            Event::Mouse(mouse)
+                if app.screen() == app::AppScreen::Final
+                    && !self.show_help
+                    && !self.is_loading() =>
+            {
+                match mouse.kind {
+                    MouseEventKind::ScrollDown => self.scroll_final_by(3),
+                    MouseEventKind::ScrollUp => self.scroll_final_by(-3),
+                    _ => {}
                 }
                 None
             }

@@ -45,7 +45,7 @@ pub fn footer(app: &ExpertApp) -> Option<String> {
                 .to_string()
         }
         AppScreen::Monitor => "e end the session, c reissue after disconnect, esc quit, ? help".to_string(),
-        AppScreen::Final => "enter close".to_string(),
+        AppScreen::Final => "enter to exit".to_string(),
     };
     (!text.is_empty()).then_some(text)
 }
@@ -94,6 +94,10 @@ pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
                 "".into(),
                 "  e  Expert     set up and run a live interview".into(),
                 "  c  Candidate  join a session with a connection string".into(),
+                "".into(),
+                "Candidate: start in an empty folder. That folder is the workspace.".into(),
+                "questions appear there as q1, q2, and so on.".into(),
+                "Expert: any folder is fine.".into(),
                 "".into(),
                 "choose your role to begin.".into(),
             ]),

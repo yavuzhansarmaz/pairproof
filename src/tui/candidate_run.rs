@@ -82,6 +82,11 @@ pub struct CandidateRunState {
     pub back_to_menu: bool,
     /// Staged approach selection per question (live solving screen).
     pub staging: crate::tui::candidate_stage::ApproachStaging,
+    /// Approach just submitted, until the snapshot shows it.
+    pub pending_approach: Option<crate::tui::candidate_stage::PendingApproach>,
+    /// Shown after the code for a question has landed: the question
+    /// index, then what the candidate can do next.
+    pub after_code: Option<(usize, String)>,
 }
 
 impl CandidateRunState {
@@ -105,6 +110,8 @@ impl CandidateRunState {
             show_help: false,
             back_to_menu: false,
             staging: crate::tui::candidate_stage::ApproachStaging::default(),
+            pending_approach: None,
+            after_code: None,
         }
     }
 
@@ -333,7 +340,7 @@ pub fn candidate_screen_lines(state: &CandidateRunState) -> Vec<String> {
                 lines.push("pasting is blocked here; type instead.".to_string());
             }
             lines.extend(state.chat.chat_lines());
-            lines.push("focus: tab or click a panel to switch question/coach".to_string());
+            lines.push("tab panel, esc quit".to_string());
             lines
         }
         CandidateScreen::Final => match state.app.session() {

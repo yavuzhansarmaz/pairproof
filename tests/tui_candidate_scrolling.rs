@@ -1,9 +1,10 @@
 //! Independent Question/Coach scrolling for the candidate panes.
 
 use pairproof::tui::candidate_runtime::{
-    clamp_scroll, max_scroll, pane_side_for_column, scroll_after_growth, PaneSide,
+    clamp_scroll, coach_pane_width, coach_scroll_rows, max_scroll, pane_content_width,
+    pane_side_for_column, scroll_after_growth, PaneSide,
 };
-use pairproof::tui::render::draw_candidate_screen;
+use pairproof::tui::render::{draw_candidate_screen, draw_candidate_screen_with_status};
 use pairproof::tui::viewport::{clamp_wrapped_scroll, wrapped_row_count};
 
 fn left_lines(count: usize) -> Vec<String> {
@@ -163,9 +164,10 @@ fn coach_scroll_uses_wrapped_rows_for_long_replies() {
                 .to_string()
         })
         .collect();
-    let visible_estimate = 21usize;
+    let visible_estimate = coach_scroll_rows(24, 0);
+    let width = pane_content_width(coach_pane_width(80, 60));
     let logical_max = max_scroll(coach.len(), visible_estimate);
-    let wrapped_total = wrapped_row_count(&coach, 26);
+    let wrapped_total = wrapped_row_count(&coach, width);
     let wrapped_max = max_scroll(wrapped_total, visible_estimate);
     assert_eq!(logical_max, 0);
     assert!(wrapped_total > coach.len() * 2, "{wrapped_total}");
@@ -193,6 +195,36 @@ fn wrapped_scroll_clamp_matches_content_bounds() {
         total.saturating_sub(2)
     );
     assert_eq!(clamp_wrapped_scroll(&[], 10, 10, 2), 0);
+}
+
+#[test]
+fn coach_scroll_reaches_the_last_line_under_the_status_box() {
+    let status = [
+        "selected approach: none",
+        "latest test: no test run yet",
+        "phase: in progress",
+        "sync: active",
+    ]
+    .map(str::to_string);
+    let mut right: Vec<String> = (0..80).map(|i| format!("coach line {i:03}")).collect();
+    let content = right.clone();
+    right.push("message: ".to_string());
+    let left = left_lines(5);
+    let width = pane_content_width(coach_pane_width(80, 60));
+    let visible = coach_scroll_rows(24, status.len());
+    let scroll = max_scroll(wrapped_row_count(&content, width), visible);
+    let backend = ratatui::backend::TestBackend::new(80, 24);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            draw_candidate_screen_with_status(frame, &left, &status, &right, true, 60, 0, scroll)
+        })
+        .expect("draw");
+    let text = buffer_text(&terminal.backend().buffer().clone());
+    assert!(text.contains("coach line 079"), "{text}");
+    assert!(!text.contains("coach line 000"), "{text}");
+    assert!(text.contains('\u{2500}'), "{text}");
+    assert!(!text.contains("message:"), "{text}");
 }
 
 #[test]

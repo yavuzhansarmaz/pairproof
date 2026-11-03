@@ -149,8 +149,8 @@ fn candidate_sync_paused_conflict_prefers_conflict_and_agrees_with_gate() {
 #[tokio::test]
 async fn candidate_workspace_preserves_local_copy_on_termination() {
     let alpha = fresh_alpha("preserve");
-    write_solution(&alpha, "questions/01/solution.py", b"print('mine')\n");
-    let path = alpha.join("questions/01/solution.py");
+    write_solution(&alpha, "q1/solution.py", b"print('mine')\n");
+    let path = alpha.join("q1/solution.py");
     let before = std::fs::read(&path).expect("before");
     assert_eq!(
         solution_progress(&alpha, 0, Language::Python),
@@ -179,7 +179,7 @@ fn candidate_solution_progress_reads_workspace_state() {
     );
     assert_eq!(read_local_solution(&alpha, 0, Language::Python), None);
     assert_eq!(solution_snapshot(&alpha, 0, Language::Python), None);
-    write_solution(&alpha, "questions/01/solution.py", b"a\nb\n");
+    write_solution(&alpha, "q1/solution.py", b"a\nb\n");
     assert_eq!(
         solution_progress(&alpha, 0, Language::Python),
         SolutionProgress::Present { bytes: 4, lines: 2 }
@@ -190,17 +190,17 @@ fn candidate_solution_progress_reads_workspace_state() {
     );
     let snap = solution_snapshot(&alpha, 0, Language::Python).expect("snapshot");
     assert_eq!((snap.len(), snap.newline_count()), (4, 2));
-    write_solution(&alpha, "questions/02/solution.py", b"");
+    write_solution(&alpha, "q2/solution.py", b"");
     assert_eq!(
         solution_progress(&alpha, 1, Language::Python),
         SolutionProgress::Empty
     );
-    write_solution(&alpha, "questions/01/solution.js", b"x\n");
+    write_solution(&alpha, "q1/solution.js", b"x\n");
     assert_eq!(
         solution_progress(&alpha, 0, Language::JavaScript),
         SolutionProgress::Present { bytes: 2, lines: 1 }
     );
-    write_solution(&alpha, "questions/01/solution.sql", b"select 1;\n");
+    write_solution(&alpha, "q1/solution.sql", b"select 1;\n");
     assert_eq!(
         solution_progress(&alpha, 0, Language::Sql),
         SolutionProgress::Present {
@@ -214,8 +214,8 @@ fn candidate_solution_progress_reads_workspace_state() {
 #[test]
 fn candidate_stale_solution_view_is_not_written_back() {
     let alpha = fresh_alpha("stale");
-    write_solution(&alpha, "questions/01/solution.py", b"old\n");
-    let path = alpha.join("questions/01/solution.py");
+    write_solution(&alpha, "q1/solution.py", b"old\n");
+    let path = alpha.join("q1/solution.py");
     assert_eq!(
         read_local_solution(&alpha, 0, Language::Python).as_deref(),
         Some("old\n")

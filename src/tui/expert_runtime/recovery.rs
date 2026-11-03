@@ -385,6 +385,17 @@ impl ExpertRuntime {
                     .is_ok()
                 {
                     self.loaded_index = Some(outcome.index);
+                    if let Some(handle) = self.sandbox_handle.clone() {
+                        let text = crate::tui::shared::html_to_text(&shadow_statement);
+                        let _ = crate::sandbox::write_question(
+                            &handle,
+                            &self.username,
+                            outcome.index,
+                            self.orch.session().language(),
+                            &text,
+                        )
+                        .await;
+                    }
                     if let (Some(evaluator), Some((slot, snapshot))) = (
                         self.shadow_evaluator.clone(),
                         self.pipeline.approaches_snapshot(),

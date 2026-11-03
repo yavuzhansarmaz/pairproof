@@ -38,8 +38,9 @@ pub use self::connect_work::{spawn_connect_work, ConnectOutcome};
 pub use self::live::{candidate_loop, default_workspace};
 pub use self::live_keys::handle_live_key;
 pub use self::panes::{
-    clamp_scroll, connect_submit_shows_loading, divider_hit, focus_for_pane, max_scroll,
-    pane_click_target, pane_side_for_column, screen_centered, scroll_after_growth,
+    clamp_scroll, coach_pane_width, coach_scroll_rows, connect_submit_shows_loading, divider_hit,
+    focus_for_pane, max_scroll, pane_click_target, pane_content_width, pane_side_for_column,
+    question_pane_width, question_scroll_rows, screen_centered, scroll_after_growth,
     split_pct_for_column, PaneSide, DEFAULT_QUESTION_PCT,
 };
 pub use self::transport::{SshAuthVerifier, SshCandidateTransport};

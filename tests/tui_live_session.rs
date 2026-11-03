@@ -198,7 +198,7 @@ async fn flow(
         candidate.view().selected
     );
     let _ = candidate.flush();
-    let solution = alpha.join("questions").join("01").join("solution.py");
+    let solution = alpha.join("q1").join("solution.py");
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         if std::fs::read_to_string(&solution)

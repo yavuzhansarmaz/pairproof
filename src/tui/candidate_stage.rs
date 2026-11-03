@@ -15,6 +15,26 @@ pub enum StagedChoice {
     Other,
 }
 
+/// An approach Enter already sent, still waiting for the snapshot
+/// to record it. The status box shows this immediately, because the
+/// expert only publishes the selection after the coding step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingApproach {
+    pub index: usize,
+    pub selection: SnapshotSelection,
+}
+
+impl PendingApproach {
+    /// Same wording as the status box once the snapshot lands.
+    pub fn label(&self) -> String {
+        match &self.selection {
+            SnapshotSelection::Preset(n) => format!("preset {}", n + 1),
+            SnapshotSelection::Other(text) if text.is_empty() => "other (blank)".to_string(),
+            SnapshotSelection::Other(text) => format!("other: {text}"),
+        }
+    }
+}
+
 /// Staged state for one question: cursor row (0..=option count,
 /// where the row at `option count` is `Other`), the marked choice,
 /// and the `Other` text typed for this question.

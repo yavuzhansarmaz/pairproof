@@ -97,7 +97,12 @@ pub fn live_rating(
             .get(&index)
             .map(Vec::as_slice)
             .unwrap_or(empty);
-        if slot.status != QuestionStatus::Pending {
+        // Navigation parks a worked question as Pending. Its selected
+        // approach still belongs to the session score. An unopened
+        // question has no start time, so it adds nothing.
+        let approach_counts =
+            slot.status != QuestionStatus::Pending || slot.started_at_ms.is_some();
+        if approach_counts {
             if let Some(quality) = qualities.last() {
                 let step = quality.step();
                 lines.push(line(
@@ -194,6 +199,25 @@ mod tests {
             .iter()
             .filter(|l| l.slot_index == slot && l.component == c)
             .collect()
+    }
+
+    #[test]
+    fn navigating_away_keeps_the_selected_approach_in_the_live_rating() {
+        let mut s = at_expert();
+        s.select_approach(ApproachChoice::Preset(0), 100, 20)
+            .unwrap();
+        let map = BTreeMap::from([(5, vec![Workable])]);
+        close(live_rating(&s, &map).rating, 6.10);
+        s.navigate_to(6, 21).unwrap();
+        assert_eq!(
+            s.slot(5).expect("left behind").status,
+            crate::core::types::QuestionStatus::Pending
+        );
+        let after = live_rating(&s, &map);
+        close(after.rating, 6.10);
+        assert_eq!(find(&after, 5, Approach).len(), 1);
+        let unopened = BTreeMap::from([(7, vec![Workable])]);
+        close(live_rating(&at_expert(), &unopened).rating, 6.0);
     }
 
     #[test]

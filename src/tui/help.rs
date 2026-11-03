@@ -24,6 +24,8 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
         AppScreen::RoleSelect => lines.extend([
             "  e expert — set up and run a live interview",
             "  c candidate — join with a connection string",
+            "  the candidate starts in an empty folder",
+            "  the expert can start in any folder",
         ]),
         AppScreen::Preflight => lines.extend(["  m change the Meta API key"]),
         AppScreen::Setup => lines.extend([
@@ -56,7 +58,7 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
             "  c reissue a fresh connection string after a disconnect",
             "  e end the session and build the final report",
         ]),
-        AppScreen::Final => lines.extend(["  enter close"]),
+        AppScreen::Final => lines.extend(["  up/down scroll, enter to exit"]),
         AppScreen::Exited => lines.extend(["  goodbye."]),
     }
     lines.push("  d read the disclosure");
@@ -105,6 +107,7 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
     let mut lines = vec!["Help"];
     match (screen, focus) {
         (CandidateScreen::Connect, _) => lines.extend([
+            "start in an empty folder. questions appear there as q1, q2.",
             "paste the connection string from the expert.",
             "enter connect",
             "backspace delete a character",
@@ -140,7 +143,7 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
             "backspace delete a character",
             "tab or click a panel to switch pane",
         ]),
-        (CandidateScreen::Final, _) => lines.extend(["enter close", "esc quit"]),
+        (CandidateScreen::Final, _) => lines.extend(["up/down scroll, enter to exit", "esc quit"]),
         (CandidateScreen::Exited, _) => lines.extend(["goodbye."]),
     }
     if !candidate_is_typing(screen, focus) {

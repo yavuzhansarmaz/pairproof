@@ -56,6 +56,26 @@ impl ExpertRuntime {
         if self.gate.phase() != GatePhase::Ended {
             let _ = self.gate.terminate(&mut self.orch, now_ms);
         }
+        // A quit (zero ack wait) destroys the sandbox as soon as grading
+        // returns. Tell the candidate before that, so the work screen
+        // does not stay up until the container is already gone.
+        if ack_deadline_ms == 0 {
+            let mut closing = build_snapshot_with_recovery(
+                &self.orch,
+                &self.pipeline,
+                self.sync_phase,
+                self.executor.chat_replies(),
+                None,
+                self.snapshot_recovery(),
+            );
+            if !matches!(
+                closing.phase.as_str(),
+                "Completed" | "EndedByExpert" | "TechnicalFailure"
+            ) {
+                closing.phase = "EndedByExpert".to_string();
+            }
+            let _ = publish_snapshot(&*self.control_io, &closing).await;
+        }
         let mut statements: HashMap<String, String> = HashMap::new();
         if let (Some(question), Some(fetched)) = (
             self.orch.current_question().cloned(),

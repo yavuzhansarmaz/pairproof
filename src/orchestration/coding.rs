@@ -96,6 +96,14 @@ pub trait SandboxIo: Send + Sync {
     ) -> PipelineFuture<'a, TestOutcome>;
 }
 
+/// True when a redirect asks for tests, so the coding step may
+/// include them. A plain solution step never does.
+pub(crate) fn instruction_wants_tests(instruction: &str) -> bool {
+    instruction
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| word.eq_ignore_ascii_case("test") || word.eq_ignore_ascii_case("tests"))
+}
+
 fn sandbox_err(err: impl std::fmt::Display) -> PipelineError {
     PipelineError::Sandbox(err.to_string())
 }
@@ -202,7 +210,8 @@ impl QuestionPipeline {
             orch.change_approach(now_ms)?;
         }
         orch.select_approach(ApproachChoice::Preset(preset), expected, now_ms)?;
-        self.run_one_coding_step(orch, coding, sandbox, None).await
+        self.run_one_coding_step(orch, coding, sandbox, None, false)
+            .await
     }
 
     /// Grades a candidate `Other` approach first; a grading failure makes
@@ -234,7 +243,8 @@ impl QuestionPipeline {
         if let Some(index) = index {
             self.other_grades.insert(index, grade);
         }
-        self.run_one_coding_step(orch, coding, sandbox, None).await
+        self.run_one_coding_step(orch, coding, sandbox, None, false)
+            .await
     }
 
     /// Records a continue action exactly once, then runs one coding step.
@@ -246,7 +256,8 @@ impl QuestionPipeline {
         now_ms: u64,
     ) -> Result<CodingStepOutcome, PipelineError> {
         orch.continue_work(now_ms)?;
-        self.run_one_coding_step(orch, coding, sandbox, None).await
+        self.run_one_coding_step(orch, coding, sandbox, None, false)
+            .await
     }
 
     /// Records a redirect exactly once, then runs one coding step with
@@ -260,8 +271,14 @@ impl QuestionPipeline {
         now_ms: u64,
     ) -> Result<CodingStepOutcome, PipelineError> {
         orch.redirect(instruction, now_ms)?;
-        self.run_one_coding_step(orch, coding, sandbox, Some(instruction.to_string()))
-            .await
+        self.run_one_coding_step(
+            orch,
+            coding,
+            sandbox,
+            Some(instruction.to_string()),
+            instruction_wants_tests(instruction),
+        )
+        .await
     }
 
     /// Records the test request exactly once, runs the sandbox test
@@ -308,6 +325,7 @@ impl QuestionPipeline {
         coding: &dyn CodingTransport,
         sandbox: &dyn SandboxIo,
         instruction: Option<String>,
+        tests_requested: bool,
     ) -> Result<CodingStepOutcome, PipelineError> {
         if orch.is_terminal() {
             return Err(CoreError::Terminal.into());
@@ -324,7 +342,7 @@ impl QuestionPipeline {
                 .or_else(|| self.current_statement(orch).map(|f| f.starter_code))
                 .unwrap_or_default(),
             instruction,
-            tests_requested: false,
+            tests_requested,
             language,
         };
         let result = coding.coding_step(orch.session_mut(), &input).await;
@@ -349,5 +367,18 @@ impl QuestionPipeline {
             summary: output.summary,
             runnability: report,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::instruction_wants_tests;
+
+    #[test]
+    fn a_redirect_that_asks_for_tests_is_allowed_to_write_them() {
+        assert!(instruction_wants_tests("write tests and run them"));
+        assert!(instruction_wants_tests("Add a Test for the empty list."));
+        assert!(!instruction_wants_tests("rename the helper"));
+        assert!(!instruction_wants_tests("latest edge case"));
     }
 }

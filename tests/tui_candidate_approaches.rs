@@ -348,5 +348,5 @@ fn snapshot_selection_discriminator_survives_serialization() { let back: Candida
 fn candidate_question_shows_unavailable_when_no_approaches() {
     let lines = view(Vec::new(), None, "Statement.").question_lines();
     assert_eq!(lines[2], "Statement.");
-    assert_eq!(lines[5], "approaches are not available yet.");
+    assert_eq!(lines[5], "loading");
 }

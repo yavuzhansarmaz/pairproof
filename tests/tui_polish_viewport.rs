@@ -14,7 +14,8 @@ use pairproof::tui::render::{
     centered_rect, panel_area, ESC_KEY_COLOR, HELP_KEY_COLOR, PAIR_COLOR, PROOF_COLOR,
 };
 use pairproof::tui::viewport::{
-    is_pinned_summary, split_pinned, truncation_marker, visible_lines, visible_with_pinned,
+    final_frame, is_pinned_summary, split_pinned, summary_table, truncation_marker, visible_lines,
+    visible_with_pinned,
 };
 
 fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
@@ -66,6 +67,75 @@ fn graded(slot: usize, grade: f64) -> GradeOutcome {
     GradeOutcome::Graded(
         QuestionGrade::new(slot, grade, format!("rationale {slot}"), 0.2).expect("grade"),
     )
+}
+
+#[test]
+fn final_breakdown_scrolls_with_the_rating_table_pinned() {
+    let mut lines = vec!["Final breakdown".to_string(), String::new()];
+    for i in 0..30 {
+        lines.push(format!("question detail {i}"));
+    }
+    lines.extend([
+        String::new(),
+        "final rating: 7.50 / 10".to_string(),
+        "solved: 1".to_string(),
+        "finished: 2".to_string(),
+        "skipped: 0".to_string(),
+        "enter to exit".to_string(),
+    ]);
+    let top = final_frame(&lines, 12, 0);
+    assert!(top.lines.len() <= 12, "{:?}", top.lines);
+    assert_eq!(top.lines.last().map(String::as_str), Some("enter to exit"));
+    assert!(
+        top.lines
+            .iter()
+            .any(|line| line.contains('┌') && line.contains('┐')),
+        "rating table: {:?}",
+        top.lines
+    );
+    assert!(
+        top.lines.iter().any(|line| line.contains("7.50 / 10")),
+        "{:?}",
+        top.lines
+    );
+    assert!(
+        top.lines
+            .iter()
+            .any(|line| line.contains("question detail 0")),
+        "{:?}",
+        top.lines
+    );
+    assert!(top.max_scroll > 0, "the breakdown should scroll");
+    let bottom = final_frame(&lines, 12, top.max_scroll);
+    assert_eq!(
+        bottom.lines.last().map(String::as_str),
+        Some("enter to exit")
+    );
+    assert!(
+        bottom.lines.iter().any(|line| line.contains("7.50 / 10")),
+        "the table stays put: {:?}",
+        bottom.lines
+    );
+    assert!(
+        bottom
+            .lines
+            .iter()
+            .any(|line| line.contains("question detail 29")),
+        "scrolling reaches the last detail: {:?}",
+        bottom.lines
+    );
+    assert!(
+        !bottom
+            .lines
+            .iter()
+            .any(|line| line.contains("question detail 0")),
+        "{:?}",
+        bottom.lines
+    );
+    let table = summary_table(&["final rating: 7.50".to_string(), "solved: 1".to_string()]);
+    assert!(table.iter().any(|line| line.contains("rating")));
+    assert!(table.iter().any(|line| line.contains("solved")));
+    assert!(!table.iter().any(|line| line.contains("final rating")));
 }
 
 #[test]

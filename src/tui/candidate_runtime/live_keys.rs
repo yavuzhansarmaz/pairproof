@@ -26,6 +26,69 @@ fn apply(status: &mut Option<String>, result: Result<Intent, CandidateRuntimeErr
         }
     }
 }
+
+/// Remembers a submitted approach so the status box can say the code
+/// is being written before the expert publishes the selection.
+fn remember_submit(
+    state: &mut CandidateRunState,
+    view: &CandidateView,
+    selection: SnapshotSelection,
+) {
+    let Some(index) = view.question_index else {
+        return;
+    };
+    state.pending_approach =
+        Some(crate::tui::candidate_stage::PendingApproach { index, selection });
+    state.after_code = None;
+}
+
+/// Enter on the `other` row. An empty field opens the editor; text
+/// already typed, or a row already marked, is submitted.
+fn submit_other_row<T: CandidateTransport>(
+    state: &mut CandidateRunState,
+    runtime: &mut CandidateRuntime<T>,
+    status: &mut Option<String>,
+    view: &CandidateView,
+) {
+    let text = state.work.other_text().to_string();
+    let marked_other = state
+        .staging
+        .current_stage()
+        .and_then(|stage| stage.choice.clone())
+        == Some(crate::tui::candidate_stage::StagedChoice::Other);
+    if text.trim().is_empty() && !marked_other {
+        state.staging.mark_cursor(view.options.len());
+        state.focus = CandidateFocus::Other;
+        return;
+    }
+    state.staging.mark_cursor(view.options.len());
+    if apply(
+        status,
+        runtime.send_intent(IntentKind::SelectOther { text: text.clone() }),
+    ) {
+        remember_submit(state, view, SnapshotSelection::Other(text));
+        state.work.set_other_text("");
+        state.staging.save_other_text("");
+    }
+}
+
+/// Drops the local "writing the code" line once the snapshot shows
+/// the approach that was submitted.
+pub(crate) fn settle_pending(state: &mut CandidateRunState, view: &CandidateView) {
+    let landed = state.pending_approach.as_ref().is_some_and(|pending| {
+        view.question_index == Some(pending.index)
+            && view.selected.as_ref() == Some(&pending.selection)
+    });
+    if landed {
+        if let Some(pending) = state.pending_approach.take() {
+            let n = pending.index + 1;
+            state.after_code = Some((
+                pending.index,
+                format!("code written in q{n}. d asks for tests. t runs the file."),
+            ));
+        }
+    }
+}
 /// Syncs the local staging to the snapshot's current question and
 /// returns the live view the key handler acts on.
 pub(crate) fn sync_staging(state: &mut CandidateRunState, view: &CandidateView) {
@@ -89,6 +152,15 @@ pub fn handle_live_key<T: CandidateTransport>(
         }
         _ => {}
     }
+    // The expert quit, or the sandbox is gone. Leave the work keys
+    // alone; Enter dismisses the notice. R is handled by the TTY loop
+    // before this, so a fresh string can still reconnect.
+    if runtime.connection_lost() && !runtime.view().is_terminal() {
+        if key.code == K::Enter {
+            state.app.quit();
+        }
+        return;
+    }
     if key.code == K::Char('?')
         && !control
         && !crate::tui::help::candidate_is_typing(CandidateScreen::Solving, state.focus)
@@ -134,36 +206,25 @@ pub fn handle_live_key<T: CandidateTransport>(
                 }
             }
             K::Enter => {
-                let on_other = cursor_on_other(state, view.options.len());
-                let choice = state
+                let option_count = view.options.len();
+                if option_count == 0 {
+                    *status = Some("loading".to_string());
+                } else if cursor_on_other(state, option_count) {
+                    submit_other_row(state, runtime, status, &view);
+                } else if let Some(preset) = state
                     .staging
                     .current_stage()
-                    .and_then(|stage| stage.choice.clone());
-                match choice {
-                    Some(crate::tui::candidate_stage::StagedChoice::Preset(preset)) => {
-                        apply(
-                            status,
-                            runtime.send_intent(IntentKind::SelectPreset { preset }),
-                        );
-                    }
-                    Some(crate::tui::candidate_stage::StagedChoice::Other) => {
-                        let text = state.work.other_text().to_string();
-                        if apply(
-                            status,
-                            runtime.send_intent(IntentKind::SelectOther { text }),
-                        ) {
-                            state.work.set_other_text("");
-                            state.staging.save_other_text("");
-                        }
-                    }
-                    None if on_other => {
-                        state.staging.mark_cursor(view.options.len());
-                        state.focus = CandidateFocus::Other;
-                    }
-                    None => {
-                        *status = Some(
-                            "mark an approach with space, then press enter to submit.".to_string(),
-                        );
+                    .map(|stage| stage.cursor as u8)
+                    .filter(|preset| (*preset as usize) < option_count)
+                {
+                    // Enter submits the highlighted row. Space still
+                    // marks, but the cursor alone is the selection.
+                    state.staging.mark_cursor(option_count);
+                    if apply(
+                        status,
+                        runtime.send_intent(IntentKind::SelectPreset { preset }),
+                    ) {
+                        remember_submit(state, &view, SnapshotSelection::Preset(preset));
                     }
                 }
             }
@@ -231,8 +292,9 @@ pub fn handle_live_key<T: CandidateTransport>(
                 let text = state.work.other_text().to_string();
                 if apply(
                     status,
-                    runtime.send_intent(IntentKind::SelectOther { text }),
+                    runtime.send_intent(IntentKind::SelectOther { text: text.clone() }),
                 ) {
+                    remember_submit(state, &view, SnapshotSelection::Other(text));
                     state.work.set_other_text("");
                     state.staging.save_other_text("");
                     state.staging.mark_cursor(view.options.len());

@@ -208,6 +208,26 @@ fn press(state: &mut CandidateRunState, runtime: &mut CandidateRuntime<FakeTrans
 }
 
 #[test]
+fn enter_submits_the_highlighted_preset_without_space() {
+    let mut runtime = connected_runtime();
+    let mut state = CandidateRunState::new();
+    state.focus = CandidateFocus::Work;
+    press(&mut state, &mut runtime, K::Down);
+    assert!(
+        runtime.transport().sent.is_empty(),
+        "moving the highlight sends nothing"
+    );
+    press(&mut state, &mut runtime, K::Enter);
+    assert_eq!(
+        runtime.transport().sent.last().map(|i| i.kind.clone()),
+        Some(IntentKind::SelectPreset { preset: 1 })
+    );
+    let pending = state.pending_approach.expect("status shows the submit");
+    assert_eq!(pending.index, 0);
+    assert_eq!(pending.selection, SnapshotSelection::Preset(1));
+}
+
+#[test]
 fn space_marks_and_enter_submits_the_preset() {
     let mut runtime = connected_runtime();
     let mut state = CandidateRunState::new();
@@ -413,7 +433,7 @@ fn final_screen_shows_only_candidate_safe_results() {
     assert!(joined.contains("8.0 - solved"), "{joined}");
     assert!(joined.contains("Q2  Add Two"), "{joined}");
     assert!(joined.contains("skipped"), "{joined}");
-    assert_eq!(lines.last().map(String::as_str), Some("enter to close"));
+    assert_eq!(lines.last().map(String::as_str), Some("enter to exit"));
     assert!(
         !joined.contains("Find two numbers."),
         "no question text: {joined}"

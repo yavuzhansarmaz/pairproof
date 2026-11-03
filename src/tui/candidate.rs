@@ -161,6 +161,7 @@ impl CandidateApp {
     pub fn rules_lines(&self) -> Vec<String> {
         [
             "work in a single workspace only; it is the only workspace.",
+            "this folder is that workspace: each question appears here as q1, q2, and so on.",
             "you need no external resources for this session.",
             "please write your own work: bulk pastes are flagged.",
         ]
@@ -211,6 +212,7 @@ impl CandidateApp {
             CandidateScreen::Connect => {
                 let mut lines = vec![
                     "Candidate connection".to_string(),
+                    "start in an empty folder. questions appear here as q1, q2.".to_string(),
                     "paste the connection string from the expert.".to_string(),
                     self.connect_line(),
                 ];

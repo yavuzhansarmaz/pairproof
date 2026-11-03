@@ -57,6 +57,9 @@ pub(crate) struct ExpertLoopState {
     pub(crate) question_preview_max_scroll: usize,
     pub(crate) question_preview_page: usize,
     pub(crate) question_preview_tick: usize,
+    pub(crate) final_scroll: usize,
+    pub(crate) final_max_scroll: usize,
+    pub(crate) final_page: usize,
     pub(crate) pending: PendingWork,
     pub(crate) loading_tick: usize,
     pub(crate) auto_load_attempted: Option<crate::tui::expert_runtime::SelectionScreen>,
@@ -83,6 +86,9 @@ impl Default for ExpertLoopState {
             question_preview_max_scroll: usize::MAX,
             question_preview_page: 10,
             question_preview_tick: 0,
+            final_scroll: 0,
+            final_max_scroll: 0,
+            final_page: 1,
             pending: PendingWork::default(),
             loading_tick: 0,
             auto_load_attempted: None,
@@ -185,13 +191,11 @@ impl ExpertLoopState {
                 let need = need.min(active.option_count(screen));
                 lines = vec![
                     "Random selection".to_string(),
-                    String::new(),
                     format!(
                         "{need} {label} questions will be picked at random from the {} in this list.",
                         active.option_count(screen)
                     ),
                     "your current picks will be replaced.".to_string(),
-                    String::new(),
                     "enter pick at random, b back to the list".to_string(),
                 ];
             }
@@ -335,6 +339,38 @@ impl ExpertLoopState {
                 _ => {}
             }
             return;
+        }
+        if app.screen() == app::AppScreen::Final && !self.show_help && !self.show_disclosure {
+            let scroll_key = match key.code {
+                crossterm::event::KeyCode::Up => {
+                    self.scroll_final_by(-1);
+                    true
+                }
+                crossterm::event::KeyCode::Down => {
+                    self.scroll_final_by(1);
+                    true
+                }
+                crossterm::event::KeyCode::PageUp => {
+                    self.scroll_final_by(-(self.final_page as i32));
+                    true
+                }
+                crossterm::event::KeyCode::PageDown => {
+                    self.scroll_final_by(self.final_page as i32);
+                    true
+                }
+                crossterm::event::KeyCode::Home => {
+                    self.final_scroll = 0;
+                    true
+                }
+                crossterm::event::KeyCode::End => {
+                    self.final_scroll = self.final_max_scroll;
+                    true
+                }
+                _ => false,
+            };
+            if scroll_key {
+                return;
+            }
         }
         if key.code == crossterm::event::KeyCode::Char('r')
             && !self.show_help

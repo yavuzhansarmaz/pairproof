@@ -113,10 +113,7 @@ fn candidate_approach_list_preserves_four_plus_other() {
     let session = started();
     let mut work = CandidateWork::new();
     let missing = work_lines(&session, &work).join("\n");
-    assert!(
-        missing.contains("approaches are not available yet."),
-        "{missing}"
-    );
+    assert!(missing.contains("loading"), "{missing}");
     work.set_approaches(approach_set());
     let view = work_view(&session, &work);
     assert_eq!(view.approaches.len(), 4);

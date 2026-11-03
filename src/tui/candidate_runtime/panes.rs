@@ -15,6 +15,41 @@ pub(crate) fn divider_column(width: u16, pct: u16) -> u16 {
     ((u32::from(width) * u32::from(pct)) / 100) as u16
 }
 
+/// Width of the question pane, matching the horizontal layout split.
+pub fn question_pane_width(term_width: u16, pct: u16) -> u16 {
+    divider_column(term_width, pct)
+}
+
+/// Width of the coach pane, the remainder after the question pane.
+pub fn coach_pane_width(term_width: u16, pct: u16) -> u16 {
+    term_width.saturating_sub(question_pane_width(term_width, pct))
+}
+
+/// Text columns inside a pane: outer border plus two columns of
+/// padding on each side. Must match `render_candidate`.
+pub fn pane_content_width(pane_width: u16) -> usize {
+    usize::from(pane_width).saturating_sub(6)
+}
+
+/// Scrollable rows in the question pane: full height, minus the
+/// border and the pinned key hint.
+pub fn question_scroll_rows(term_height: usize) -> usize {
+    term_height.saturating_sub(3).max(1)
+}
+
+/// Scrollable rows in the coach pane. `status_rows` is the number
+/// of status text lines (0 hides the box). The border, the rule
+/// above the input, and the input line stay pinned.
+pub fn coach_scroll_rows(term_height: usize, status_rows: usize) -> usize {
+    let status_box = if status_rows == 0 {
+        0
+    } else {
+        status_rows.saturating_add(2)
+    };
+    // border (2) + separator (1) + input (1)
+    term_height.saturating_sub(status_box + 4).max(1)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneSide {
     Question,
@@ -168,6 +203,9 @@ pub(crate) fn live_panes(
     if let Some(text) = status {
         left.push(sanitize_display(text));
     }
+    if let Some(banner) = work_banner(state, view) {
+        left.push(banner);
+    }
     left.push(question_hint(state, view.options.len()));
     let mut right = view.chat_transcript(&state.chat.sent_messages());
     right.push(sanitize_display(&format!(
@@ -213,6 +251,43 @@ fn composer_lines(state: &CandidateRunState) -> Vec<String> {
     }
 }
 
+/// Lines pinned under the question body: the optional work banner,
+/// then the key hint. Scroll math must skip both.
+pub fn question_pinned_count(lines: &[String]) -> usize {
+    let mut count = 0usize;
+    if lines.last().is_some_and(|line| line.starts_with("focus:")) {
+        count += 1;
+        if lines.len() >= 2 {
+            let previous = &lines[lines.len() - 2];
+            if previous.starts_with("working:") || previous.starts_with("ready:") {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// What the question pane says while code is being written, and
+/// once that code has landed in the question folder.
+fn work_banner(state: &CandidateRunState, view: &CandidateView) -> Option<String> {
+    if let Some(pending) = &state.pending_approach {
+        if view.question_index == Some(pending.index)
+            && view.selected.as_ref() != Some(&pending.selection)
+        {
+            return Some(format!(
+                "working: writing {}. this takes a moment",
+                pending.label()
+            ));
+        }
+    }
+    if let Some((index, text)) = &state.after_code {
+        if view.question_index == Some(*index) {
+            return Some(format!("ready: {text}"));
+        }
+    }
+    None
+}
+
 fn cursor_on_other(state: &CandidateRunState, option_count: usize) -> bool {
     option_count > 0
         && state
@@ -224,17 +299,22 @@ fn cursor_on_other(state: &CandidateRunState, option_count: usize) -> bool {
 /// Bottom hint. On the other row it describes the approach field,
 /// because that row is where the candidate types.
 fn question_hint(state: &CandidateRunState, option_count: usize) -> String {
+    // The `focus:` prefix is a pin marker. The question pane strips
+    // it and colours the key names like the other screens.
     match state.focus {
         CandidateFocus::Other => {
-            "focus: type your approach, enter submit, backspace delete, tab next".to_string()
+            "focus: enter submit, backspace delete, tab next, esc quit".to_string()
         }
         CandidateFocus::Redirect => {
-            "focus: type additional notes, enter send, backspace delete, tab next".to_string()
+            "focus: enter send, backspace delete, tab next, esc quit".to_string()
+        }
+        CandidateFocus::Chat => {
+            "focus: enter send, backspace delete, up/down scroll, tab panel, esc quit".to_string()
         }
         _ if cursor_on_other(state, option_count) => {
-            "focus: type your approach, enter submit, backspace delete, tab next".to_string()
+            "focus: enter submit, backspace delete, tab next, esc quit".to_string()
         }
-        _ => "focus: up/down move, space select, enter submit, left/right question, tab panel"
+        _ => "focus: up/down move, enter submit, left/right question, tab panel, esc quit"
             .to_string(),
     }
 }

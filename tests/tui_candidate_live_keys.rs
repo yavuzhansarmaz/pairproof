@@ -12,6 +12,7 @@ use pairproof::tui::candidate_runtime::{
 #[derive(Default)]
 struct FakeTransport {
     sent: Vec<Intent>,
+    fail_read: bool,
 }
 
 impl CandidateTransport for FakeTransport {
@@ -32,7 +33,11 @@ impl CandidateTransport for FakeTransport {
         Ok(())
     }
     fn read_snapshot(&mut self) -> Result<Option<CandidateSnapshot>, CandidateRuntimeError> {
-        Ok(None)
+        if self.fail_read {
+            Err(CandidateRuntimeError::Transport)
+        } else {
+            Ok(None)
+        }
     }
     fn flush_sync(&mut self, _s: &str) -> Result<(), CandidateRuntimeError> {
         Ok(())
@@ -157,4 +162,18 @@ fn shared_work_key_classifier_maps_both_paths() {
     assert_eq!(next_focus(CandidateFocus::Other), CandidateFocus::Redirect);
     assert_eq!(next_focus(CandidateFocus::Redirect), CandidateFocus::Chat);
     assert_eq!(next_focus(CandidateFocus::Chat), CandidateFocus::Work);
+}
+
+#[test]
+fn enter_closes_when_the_expert_client_is_gone() {
+    let mut state = CandidateRunState::new();
+    state.focus = CandidateFocus::Work;
+    let mut runtime = connected_runtime();
+    runtime.transport_mut().fail_read = true;
+    let _ = runtime.poll_snapshot();
+    assert!(runtime.connection_lost());
+    let mut status = None;
+    handle_live_key(&mut state, &mut runtime, key(K::Enter), &mut status);
+    assert_eq!(state.app.screen(), CandidateScreen::Exited);
+    assert!(runtime.transport().sent.is_empty());
 }
