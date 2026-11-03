@@ -113,6 +113,16 @@ fn release_workflow_validates_tag_matches_cargo() {
         text.contains("cargo test"),
         "validate job must run cargo test"
     );
+    let mutagen = text
+        .find("mutagen-io/mutagen/releases/download/v0.18.1/mutagen_linux_amd64_v0.18.1.tar.gz")
+        .expect("validate job must install Mutagen v0.18.1 before cargo test");
+    let cargo_test = text
+        .find("cargo test")
+        .expect("validate job must run cargo test");
+    assert!(
+        mutagen < cargo_test,
+        "Mutagen must be installed before cargo test"
+    );
 
     let cargo = cargo_toml();
     let cargo_version = cargo
