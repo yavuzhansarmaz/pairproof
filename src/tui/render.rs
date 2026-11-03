@@ -22,7 +22,7 @@ pub const TEXT_COLOR: Color = Color::Rgb(237, 242, 255);
 pub const HEADING_COLOR: Color = Color::Rgb(120, 165, 230);
 pub use crate::tui::setup_panel::{draw_setup_screen, setup_box_areas, SetupPanel};
 
-pub use crate::tui::render_candidate::draw_candidate_screen;
+pub use crate::tui::render_candidate::{draw_candidate_screen, draw_candidate_screen_with_status};
 pub use crate::tui::render_preview::{
     draw_question_preview_screen, preview_body_rows, preview_metrics, PreviewMetrics, PreviewRow,
     PreviewRowKind, QuestionPreviewData,
@@ -283,11 +283,15 @@ pub(crate) fn body_line(line: &str) -> Line<'static> {
     plain_line(line)
 }
 
+/// `loading.` / `loading..` / `loading...`, one step per tick.
+pub fn loading_label(tick: usize) -> String {
+    format!("loading{}", ".".repeat(tick % 3 + 1))
+}
+
 /// Centred loading lines with animated dots (1-3, cycling), shown
 /// while a background request runs so the screen never looks frozen.
 pub fn loading_lines(tick: usize) -> Vec<String> {
-    let dots = ".".repeat(tick % 3 + 1);
-    vec![format!("working on your request, loading{dots}")]
+    vec![format!("working on your request, {}", loading_label(tick))]
 }
 
 /// Draws `lines` inside a bordered panel. The frame title is

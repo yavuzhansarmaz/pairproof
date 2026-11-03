@@ -48,10 +48,33 @@ impl ExpertRuntime {
         if self.is_recovery_active() {
             self.cancel_recovery();
         }
+        let sid = self.orch.session_id().to_string();
+        self.shadow.poll(&sid, self.orch.session(), &self.layout);
+        self.shadow.shutdown();
         let kill = self.supervisor.kill_switch().await;
         self.last_kill = Some(kill);
         if self.gate.phase() != GatePhase::Ended {
             let _ = self.gate.terminate(&mut self.orch, now_ms);
+        }
+        // A quit (zero ack wait) destroys the sandbox as soon as grading
+        // returns. Tell the candidate before that, so the work screen
+        // does not stay up until the container is already gone.
+        if ack_deadline_ms == 0 {
+            let mut closing = build_snapshot_with_recovery(
+                &self.orch,
+                &self.pipeline,
+                self.sync_phase,
+                self.executor.chat_replies(),
+                None,
+                self.snapshot_recovery(),
+            );
+            if !matches!(
+                closing.phase.as_str(),
+                "Completed" | "EndedByExpert" | "TechnicalFailure"
+            ) {
+                closing.phase = "EndedByExpert".to_string();
+            }
+            let _ = publish_snapshot(&*self.control_io, &closing).await;
         }
         let mut statements: HashMap<String, String> = HashMap::new();
         if let (Some(question), Some(fetched)) = (
@@ -92,7 +115,13 @@ impl ExpertRuntime {
                 Some(&breakdown),
                 self.snapshot_recovery(),
             );
-            let md = generate_report(self.orch.session(), &breakdown, &grades, &[]);
+            let mut md = generate_report(self.orch.session(), &breakdown, &grades, &[]);
+            let shadow_reports: Vec<_> = self.shadow.reports().values().cloned().collect();
+            if !shadow_reports.is_empty() {
+                md.push_str(&crate::orchestration::report::render_shadow_section(
+                    &shadow_reports,
+                ));
+            }
             (grades, snap, md)
         };
         self.final_grades = final_grades;

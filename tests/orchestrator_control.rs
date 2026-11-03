@@ -466,3 +466,22 @@ async fn live_control_channel_round_trip() {
     assert_eq!(read_back.current.as_ref().map(|c| c.index), Some(1));
     assert!(outbox_probe.is_err(), "candidate outbox write must fail: {outbox_probe:?}");
 }
+
+#[tokio::test]
+#[rustfmt::skip]
+async fn disconnect_intent_disconnects_the_candidate_at_once() {
+    let (root, io, mut ex) = setup("disconnect").await;
+    let mut orch = started(); let mut pipe = loaded_pipe(&orch).await; let fakes = Fakes::new();
+    assert!(orch.is_connected());
+    append(&root, &line(&Intent::new("s1", 1, IntentKind::Disconnect)));
+    let reports = ex.drain(&io, &mut orch, &mut pipe, &fakes.transports(), 10).await.unwrap();
+    assert_eq!(reports.iter().map(|r| r.outcome).collect::<Vec<_>>(), vec![ApplyOutcome::Applied], "{reports:?}");
+    assert!(!orch.is_connected(), "monitor must see the disconnect immediately");
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::CandidateDisconnected)), 1);
+    // A second Disconnect (e.g. teardown racing the signal) is a no-op.
+    append(&root, &line(&Intent::new("s1", 2, IntentKind::Disconnect)));
+    let again = ex.drain(&io, &mut orch, &mut pipe, &fakes.transports(), 11).await.unwrap();
+    assert_eq!(again.iter().map(|r| r.outcome).collect::<Vec<_>>(), vec![ApplyOutcome::Duplicate, ApplyOutcome::Applied], "{again:?}");
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::CandidateDisconnected)), 1);
+    let _ = std::fs::remove_dir_all(root);
+}

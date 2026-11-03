@@ -51,7 +51,7 @@ fn open_api_key_change(app: &mut app::ExpertApp) {
 /// Starts a background pool fetch for a selection screen: the
 /// runtime moves to a worker thread (the loading screen shows in
 /// the meantime) and comes back through `PendingWork::selection_rx`.
-fn start_selection_fetch(
+pub(crate) fn start_selection_fetch(
     runtime: &mut Option<ExpertRuntime>,
     pending: &mut PendingWork,
     screen: SelectionScreen,
@@ -170,17 +170,30 @@ pub(crate) fn handle_key(
             _ = app.handle(AppEvent::SelectCandidate)
         }
         K::Char('e') if app.screen() == AppScreen::Monitor => {
-            if let Some(active) = runtime.as_mut() {
-                match block_on(tokio_rt, active.end_session(now_ms())) {
-                    Some(Ok(_)) => {
-                        app.set_final_lines(active.final_lines());
-                        app.clear_status_message();
-                        let _ = app.handle(AppEvent::EndSession);
-                    }
-                    Some(Err(err)) => set_error(app, "end failed", &err.to_string()),
-                    None => set_error(app, "end failed", "runtime unavailable"),
-                }
+            // Grading, the final ack, and cleanup can take up to a
+            // minute. Run them off the TTY thread so the loading
+            // screen keeps animating instead of a frozen monitor.
+            if pending.end_rx.is_some() {
+                return;
             }
+            let Some(mut active) = runtime.take() else {
+                return;
+            };
+            let (tx, rx) = std::sync::mpsc::channel();
+            pending.end_rx = Some(rx);
+            let now = now_ms();
+            std::thread::spawn(move || {
+                let result = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|err| err.to_string())
+                    .and_then(|rt| {
+                        rt.block_on(active.end_session(now))
+                            .map(|_| ())
+                            .map_err(|err| err.to_string())
+                    });
+                let _ = tx.send((active, result));
+            });
         }
         K::Char('c') if app.screen() == AppScreen::Monitor => {
             if let Some(active) = runtime.as_mut() {

@@ -51,6 +51,7 @@ fn frame_centered(
             | app::AppScreen::SelectMedium
             | app::AppScreen::SelectHard
             | app::AppScreen::Monitor
+            | app::AppScreen::Final
     ) && !list_open
 }
 
@@ -87,10 +88,16 @@ impl ExpertLoopState {
         );
     }
 
-    /// Animated centred loading lines for one frame.
+    /// Animated centred loading lines for one frame. Ending a
+    /// session says so, because that wait is the long one.
     pub(crate) fn loading_lines(&mut self) -> Vec<String> {
         self.loading_tick += 1;
-        render::loading_lines(self.loading_tick)
+        let dots = ".".repeat(self.loading_tick % 3 + 1);
+        if self.pending.end_rx.is_some() {
+            vec![format!("ending the session, loading{dots}")]
+        } else {
+            render::loading_lines(self.loading_tick)
+        }
     }
 
     /// One loop tick before drawing: first-visit preflight, finished
@@ -102,6 +109,8 @@ impl ExpertLoopState {
         }
         self.poll_proposal(app);
         self.poll_runtime_build(app);
+        self.poll_end_session(app);
+        self.maybe_auto_start_selection_fetch(app);
         self.poll_selection_fetch(app);
         self.poll_api_key_check(app);
         self.poll_question_preview();
@@ -188,7 +197,20 @@ impl ExpertLoopState {
         } else {
             self.build_lines(app)
         };
-        let visible = viewport::visible_with_pinned(&lines, terminal_height.saturating_sub(2));
+        let inner_height = terminal_height.saturating_sub(2);
+        let visible = if app.screen() == app::AppScreen::Final
+            && !self.show_help
+            && !self.show_disclosure
+            && !loading
+        {
+            let frame = viewport::final_frame(&lines, inner_height, self.final_scroll);
+            self.final_scroll = frame.scroll;
+            self.final_max_scroll = frame.max_scroll;
+            self.final_page = frame.page;
+            frame.lines
+        } else {
+            viewport::visible_with_pinned(&lines, inner_height)
+        };
         let centered = frame_centered(
             app.screen(),
             self.show_help,
@@ -250,6 +272,18 @@ impl ExpertLoopState {
                 }
                 None
             }
+            Event::Mouse(mouse)
+                if app.screen() == app::AppScreen::Final
+                    && !self.show_help
+                    && !self.is_loading() =>
+            {
+                match mouse.kind {
+                    MouseEventKind::ScrollDown => self.scroll_final_by(3),
+                    MouseEventKind::ScrollUp => self.scroll_final_by(-3),
+                    _ => {}
+                }
+                None
+            }
             Event::Mouse(mouse) if self.show_question_preview && !self.is_loading() => {
                 // Mouse wheel scrolls the preview three rows a notch.
                 match mouse.kind {
@@ -286,12 +320,44 @@ impl ExpertLoopState {
 
     /// Quitting with a built runtime still ends the session (without
     /// waiting for the final ack) so sandbox cleanup always runs.
+    /// An end already running on the loading-screen worker is joined
+    /// first, so quitting during that screen does not drop cleanup.
     pub(crate) fn finish(&mut self) {
+        if let Some(rx) = self.pending.end_rx.take() {
+            if let Ok((active, _)) = rx.recv() {
+                self.runtime = Some(active);
+            }
+        }
         if let Some(active) = self.runtime.as_mut() {
             let _ = block_on(
                 &mut self.tokio_rt,
                 active.end_session_with_ack_deadline(now_ms(), 0),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FrameKind;
+    use crate::tui::app;
+    use crate::tui::expert_loop::ExpertLoopState;
+
+    #[test]
+    fn ending_the_session_shows_the_loading_screen() {
+        let mut state = ExpertLoopState::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        state.pending.end_rx = Some(rx);
+        let app = app::ExpertApp::new();
+        let plan = state.frame_plan(&app, 80, 24);
+        assert_eq!(plan.kind, FrameKind::Loading);
+        assert!(
+            plan.visible
+                .iter()
+                .any(|line| line.starts_with("ending the session, loading")),
+            "{:?}",
+            plan.visible
+        );
+        drop(tx);
     }
 }

@@ -159,14 +159,9 @@ impl ApproachChoice {
         match self {
             ApproachChoice::Preset(n) if n <= 3 => Ok(ApproachChoice::Preset(n)),
             ApproachChoice::Preset(n) => Err(CoreError::InvalidApproach(format!("preset {n}"))),
-            ApproachChoice::Other(text) => {
-                let trimmed = text.trim().to_string();
-                if trimmed.is_empty() {
-                    Err(CoreError::InvalidApproach("empty other text".to_string()))
-                } else {
-                    Ok(ApproachChoice::Other(trimmed))
-                }
-            }
+            // An empty `Other` is a deliberate blank submission; it
+            // is graded as-is instead of being rejected.
+            ApproachChoice::Other(text) => Ok(ApproachChoice::Other(text.trim().to_string())),
         }
     }
 }
@@ -292,10 +287,13 @@ mod tests {
     }
 
     #[test]
-    fn approach_validation_rejects_bad_preset_and_blank_other() {
+    fn approach_validation_rejects_bad_preset_and_allows_blank_other() {
         assert!(ApproachChoice::Preset(3).validated().is_ok());
         assert!(ApproachChoice::Preset(4).validated().is_err());
-        assert!(ApproachChoice::Other("  ".to_string()).validated().is_err());
+        assert_eq!(
+            ApproachChoice::Other("  ".to_string()).validated(),
+            Ok(ApproachChoice::Other(String::new()))
+        );
         assert_eq!(
             ApproachChoice::Other("  dp  ".to_string()).validated(),
             Ok(ApproachChoice::Other("dp".to_string()))

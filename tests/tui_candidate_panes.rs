@@ -93,7 +93,7 @@ fn drawn(scroll: usize, width: u16, height: u16) -> ratatui::buffer::Buffer {
     let left = long_left_lines();
     let right = vec!["coach: hello".to_string(), "message: ".to_string()];
     terminal
-        .draw(|frame| draw_candidate_screen(frame, &left, &right, false, 60, scroll))
+        .draw(|frame| draw_candidate_screen(frame, &left, &right, false, 60, scroll, 0))
         .expect("draw");
     terminal.backend().buffer().clone()
 }
@@ -120,7 +120,8 @@ fn candidate_question_pane_has_padding_headings_and_pinned_footer() {
     let last_inner_row = (0..area.width)
         .map(|x| buffer[(x, area.height - 2)].symbol())
         .collect::<String>();
-    assert!(last_inner_row.contains("focus:"), "{last_inner_row}");
+    assert!(last_inner_row.contains("tab"), "{last_inner_row}");
+    assert!(!last_inner_row.contains("focus"), "{last_inner_row}");
     // Title starts after border + two-column padding.
     let title_row = text
         .lines()
@@ -158,5 +159,6 @@ fn candidate_question_pane_scrolls_and_keeps_footer() {
     let last_inner_row = (0..area.width)
         .map(|x| buffer[(x, area.height - 2)].symbol())
         .collect::<String>();
-    assert!(last_inner_row.contains("focus:"), "{last_inner_row}");
+    assert!(last_inner_row.contains("tab"), "{last_inner_row}");
+    assert!(!last_inner_row.contains("focus"), "{last_inner_row}");
 }

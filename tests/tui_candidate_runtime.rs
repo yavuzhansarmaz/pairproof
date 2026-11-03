@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use pairproof::connection::{ConnectionString, Endpoint, EphemeralUsername, Fingerprint, Secret};
 use pairproof::orchestration::control::{
     CandidateSnapshot, Intent, IntentKind, SnapshotFinal, SnapshotFinalQuestion, SnapshotOption,
-    SnapshotQuestion, SnapshotTest,
+    SnapshotQuestion, SnapshotSelection, SnapshotTest,
 };
 use pairproof::orchestration::ssh_auth::SshAuthError;
 use pairproof::tui::candidate::{candidate_sync_message, CandidateConnectError};
@@ -111,8 +111,8 @@ fn connection() -> (ConnectionString, String) {
 fn snapshot(session_id: &str, phase: &str, final_breakdown: Option<SnapshotFinal>) -> CandidateSnapshot {
     CandidateSnapshot { v: 1, session_id: session_id.to_string(), phase: phase.to_string(), sync_phase: "Sync: active".to_string(),
         current: Some(SnapshotQuestion { index: 0, title: "Two Sum".to_string(), slug: "two-sum".to_string(), statement: Some("Find two numbers that sum to target.".to_string()) }),
-        options: vec![SnapshotOption { title: "Hash map".to_string(), summary: "One pass lookup".to_string() }], selected: Some("preset 0".to_string()),
-        latest_test: Some(SnapshotTest { passed: 3, failed: 1, at_ms: 10 }), chat_replies: vec!["Try a hash map.".to_string()], final_breakdown, recovery: None }
+        options: vec![SnapshotOption { title: "Hash map".to_string(), summary: "One pass lookup".to_string() }], nav: Vec::new(), selected: Some(SnapshotSelection::Preset(0)),
+        latest_test: Some(SnapshotTest { passed: 3, failed: 1, at_ms: 10 }), chat_replies: vec!["Try a hash map.".to_string()], final_breakdown, chat_partial: None, recovery: None }
 }
 
 fn workspace(name: &str) -> PathBuf {
@@ -247,7 +247,7 @@ fn candidate_runtime_renders_only_snapshot_data() {
     );
     assert_eq!(view.options.len(), 1);
     assert_eq!(view.options[0].title, "Hash map");
-    assert_eq!(view.selected.as_deref(), Some("preset 0"));
+    assert_eq!(view.selected, Some(SnapshotSelection::Preset(0)));
     assert_eq!(view.latest_test.map(|t| (t.passed, t.failed)), Some((3, 1)));
     assert_eq!(view.chat_replies, vec!["Try a hash map.".to_string()]);
     let lines = view.lines().join("\n");
@@ -279,6 +279,8 @@ fn candidate_runtime_hides_final_until_snapshot_final() {
         rating: 7.5,
         per_question: vec![SnapshotFinalQuestion {
             slot_index: 0,
+            title: String::new(),
+            state: String::new(),
             grade: Some(8.0),
             rationale: Some("Solid approach".to_string()),
         }],
@@ -383,7 +385,7 @@ fn candidate_runtime_rejects_missing_session_binding() {
 #[test]
 #[rustfmt::skip]
 fn candidate_acks_final_snapshot_once() {
-    let fin = SnapshotFinal { rating: 7.5, per_question: vec![SnapshotFinalQuestion { slot_index: 0, grade: Some(8.0), rationale: Some("Solid".into()) }] };
+    let fin = SnapshotFinal { rating: 7.5, per_question: vec![SnapshotFinalQuestion { slot_index: 0, title: String::new(), state: String::new(), grade: Some(8.0), rationale: Some("Solid".into()) }] };
     let mut fake = FakeTransport::default(); fake.snapshots.push_back(Some(snapshot("s1", "InProgress", None)));
     for _ in 0..3 { fake.snapshots.push_back(Some(snapshot("s1", "Completed", Some(fin.clone())))); } let (dir, mut value) = connected("ack-once", fake);
     value.poll_snapshot().expect("poll non-final"); assert!(value.transport().acks.is_empty()); assert!(!value.final_ack_sent());

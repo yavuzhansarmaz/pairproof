@@ -2,9 +2,9 @@
 //! bounded per-tick runtime step.
 
 use crate::tui::app;
-use crate::tui::expert_keys::selection_screen;
+use crate::tui::expert_keys::{selection_screen, start_selection_fetch};
 use crate::tui::expert_loop::ExpertLoopState;
-use crate::tui::expert_runtime::{ExpertRuntime, PollOutcome};
+use crate::tui::expert_runtime::{ExpertRuntime, PollOutcome, SelectionScreen};
 use crate::tui::expert_tty::{block_on, now_ms, set_error};
 
 impl ExpertLoopState {
@@ -57,6 +57,44 @@ impl ExpertLoopState {
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
     }
+
+    /// Applies a finished background session end. Success opens the
+    /// final breakdown; failure returns to the live monitor.
+    pub(crate) fn poll_end_session(&mut self, app: &mut app::ExpertApp) {
+        let Some(rx) = &self.pending.end_rx else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok((active, Ok(()))) => {
+                self.pending.end_rx = None;
+                app.set_final_lines(active.final_lines());
+                app.clear_status_message();
+                self.runtime = Some(active);
+                let _ = app.handle(app::AppEvent::EndSession);
+            }
+            Ok((active, Err(err))) => {
+                self.pending.end_rx = None;
+                self.runtime = Some(active);
+                set_error(app, "end failed", &err);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.pending.end_rx = None;
+                set_error(app, "end failed", "runtime unavailable");
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
+}
+
+/// Whether entering `screen` should auto-start its pool fetch.
+pub(crate) fn should_auto_start_selection(
+    attempted: Option<SelectionScreen>,
+    screen: SelectionScreen,
+    has_options: bool,
+    fetch_pending: bool,
+    allowed: bool,
+) -> bool {
+    attempted != Some(screen) && !has_options && !fetch_pending && allowed
 }
 
 /// Bounded per-tick runtime step: poll for the candidate hello on
@@ -107,6 +145,21 @@ pub(crate) fn tick_runtime(
 }
 
 impl ExpertLoopState {
+    /// Scrolls the final breakdown by `delta` rows, clamped to
+    /// the range the last frame could actually display.
+    pub(crate) fn scroll_final_by(&mut self, delta: i32) {
+        if delta >= 0 {
+            self.final_scroll = self
+                .final_scroll
+                .saturating_add(delta as usize)
+                .min(self.final_max_scroll);
+        } else {
+            self.final_scroll = self
+                .final_scroll
+                .saturating_sub(delta.unsigned_abs() as usize);
+        }
+    }
+
     /// Scrolls the question preview by `delta` rows, clamped to
     /// the range the last frame could actually display.
     pub(crate) fn scroll_preview_by(&mut self, delta: i32) {
@@ -197,6 +250,30 @@ impl ExpertLoopState {
         }
     }
 
+    /// Auto-starts the pool fetch once per selection-screen entry.
+    pub(crate) fn maybe_auto_start_selection_fetch(&mut self, app: &mut app::ExpertApp) {
+        let Some(screen) = selection_screen(app) else {
+            return;
+        };
+        let (has_options, allowed) = match self.runtime.as_ref() {
+            Some(active) => (
+                active.has_options(screen),
+                active.selection_allowed(screen, now_ms()),
+            ),
+            None => return,
+        };
+        if should_auto_start_selection(
+            self.auto_load_attempted,
+            screen,
+            has_options,
+            self.pending.selection_rx.is_some(),
+            allowed,
+        ) {
+            self.auto_load_attempted = Some(screen);
+            start_selection_fetch(&mut self.runtime, &mut self.pending, screen, now_ms());
+        }
+    }
+
     /// Applies a finished background pool fetch; a fully auto-picked
     /// small pool is announced so it is not mistaken for breakage.
     pub(crate) fn poll_selection_fetch(&mut self, app: &mut app::ExpertApp) {
@@ -233,5 +310,68 @@ impl ExpertLoopState {
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn starts_when_fresh() {
+        assert!(should_auto_start_selection(
+            None,
+            SelectionScreen::Medium,
+            false,
+            false,
+            true
+        ));
+    }
+
+    #[test]
+    fn does_not_start_when_already_attempted() {
+        assert!(!should_auto_start_selection(
+            Some(SelectionScreen::Medium),
+            SelectionScreen::Medium,
+            false,
+            false,
+            true
+        ));
+    }
+
+    #[test]
+    fn does_not_start_when_options_pending_or_disallowed() {
+        assert!(!should_auto_start_selection(
+            None,
+            SelectionScreen::Medium,
+            true,
+            false,
+            true
+        ));
+        assert!(!should_auto_start_selection(
+            None,
+            SelectionScreen::Medium,
+            false,
+            true,
+            true
+        ));
+        assert!(!should_auto_start_selection(
+            None,
+            SelectionScreen::Medium,
+            false,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn different_screen_may_start() {
+        assert!(should_auto_start_selection(
+            Some(SelectionScreen::Medium),
+            SelectionScreen::Hard,
+            false,
+            false,
+            true
+        ));
     }
 }

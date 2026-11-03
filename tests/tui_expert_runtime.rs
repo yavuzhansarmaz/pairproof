@@ -100,7 +100,7 @@ async fn make_runtime_with_sync(name: &str, hang: bool, sync_phase: SessionSyncP
     let root = tmp(name); let control = root.join("control"); let artifacts = root.join("artifacts");
     let io = LocalControlIo::new(control.clone()); io.setup_dirs("pp-testuser").await.unwrap();
     let spec = ExpertSessionSpec { session_id: "s1".into(), language: Language::Python, easy: qs("e", 5, Difficulty::Easy), endpoint: Endpoint::new("203.0.113.10", 22022).unwrap(), username: EphemeralUsername::parse("pp-a1b2c3d4").unwrap(), fingerprint: Fingerprint::parse(&"a".repeat(64)).unwrap() };
-    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher: Arc::new(FakeFetcher { hang }), generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding::default()), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts.clone(), topics: Vec::new(), level: String::new(), sync_phase };
+    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher: Arc::new(FakeFetcher { hang }), generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding::default()), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts.clone(), topics: Vec::new(), level: String::new(), sync_phase, shadow_evaluator: None };
     let runtime = ExpertRuntime::new(spec, deps, T0).await.unwrap();
     (root, control, runtime)
 }
@@ -435,13 +435,13 @@ async fn expert_scored_session_shows_approach_lines_and_rating() {
     push_intent(&control, 1, IntentKind::SelectPreset { preset: 1 });
     runtime.drain_intents(T0 + 3_000).await.unwrap();
     let live = runtime.monitor_view(T0 + 3_000);
-    assert!(live.rating_lines.iter().any(|l| l.contains("Approach") && l.contains("Best")), "live lines: {:?}", live.rating_lines);
+    assert!(live.rating_lines.iter().any(|l| l.contains("approach") && l.contains("Best")), "live lines: {:?}", live.rating_lines);
     assert!((live.rating - 6.15).abs() < 1e-9, "live rating: {}", live.rating);
     push_intent(&control, 2, IntentKind::Finish);
     runtime.drain_intents(T0 + 4_000).await.unwrap();
     assert_eq!(runtime.orchestrator().current_index(), Some(1));
     let done = runtime.monitor_view(T0 + 4_000);
-    assert!(done.rating_lines.iter().any(|l| l.contains("Approach") && l.contains("Best")), "finished lines: {:?}", done.rating_lines);
+    assert!(done.rating_lines.iter().any(|l| l.contains("approach") && l.contains("Best")), "finished lines: {:?}", done.rating_lines);
     assert!((done.rating - 6.25).abs() < 1e-9, "finished rating: {}", done.rating);
     write_ack(&control, "s1");
     runtime.end_session(T0 + 5_000).await.unwrap();

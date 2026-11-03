@@ -4,6 +4,7 @@ pub mod actions;
 pub mod artifacts;
 pub mod event_log;
 pub mod events;
+pub mod navigation;
 pub mod records;
 pub mod session;
 #[cfg(test)]

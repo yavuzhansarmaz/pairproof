@@ -23,6 +23,10 @@ pub(crate) type QuestionPreviewReceiver = std::sync::mpsc::Receiver<(
     Result<String, String>,
 )>;
 
+/// One finished session end: the runtime handed back, and whether
+/// grading, the final ack, and cleanup succeeded.
+pub(crate) type EndSessionReceiver = std::sync::mpsc::Receiver<(ExpertRuntime, Result<(), String>)>;
+
 /// Background work the TTY loop waits on: a proposal request and
 /// a deferred runtime build, both surfaced as the loading screen.
 #[derive(Default)]
@@ -33,6 +37,7 @@ pub(crate) struct PendingWork {
     pub(crate) selection_rx: Option<SelectionFetchReceiver>,
     pub(crate) api_key_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
     pub(crate) preview_rx: Option<QuestionPreviewReceiver>,
+    pub(crate) end_rx: Option<EndSessionReceiver>,
 }
 
 /// Mutable state owned by the expert TTY loop.
@@ -52,8 +57,12 @@ pub(crate) struct ExpertLoopState {
     pub(crate) question_preview_max_scroll: usize,
     pub(crate) question_preview_page: usize,
     pub(crate) question_preview_tick: usize,
+    pub(crate) final_scroll: usize,
+    pub(crate) final_max_scroll: usize,
+    pub(crate) final_page: usize,
     pub(crate) pending: PendingWork,
     pub(crate) loading_tick: usize,
+    pub(crate) auto_load_attempted: Option<crate::tui::expert_runtime::SelectionScreen>,
 }
 
 impl Default for ExpertLoopState {
@@ -77,8 +86,12 @@ impl Default for ExpertLoopState {
             question_preview_max_scroll: usize::MAX,
             question_preview_page: 10,
             question_preview_tick: 0,
+            final_scroll: 0,
+            final_max_scroll: 0,
+            final_page: 1,
             pending: PendingWork::default(),
             loading_tick: 0,
+            auto_load_attempted: None,
         }
     }
 }
@@ -130,9 +143,6 @@ impl ExpertLoopState {
                             active.countdown_secs(now)
                         ));
                     }
-                    if active.is_disconnected() {
-                        lines.push("press c to reissue a fresh connection string.".to_string());
-                    }
                 }
                 _ => {}
             }
@@ -181,13 +191,11 @@ impl ExpertLoopState {
                 let need = need.min(active.option_count(screen));
                 lines = vec![
                     "Random selection".to_string(),
-                    String::new(),
                     format!(
                         "{need} {label} questions will be picked at random from the {} in this list.",
                         active.option_count(screen)
                     ),
                     "your current picks will be replaced.".to_string(),
-                    String::new(),
                     "enter pick at random, b back to the list".to_string(),
                 ];
             }
@@ -195,13 +203,15 @@ impl ExpertLoopState {
         lines
     }
 
-    /// True while a background request (proposal or runtime build)
-    /// runs.
+    /// True while a background request (proposal, runtime build, or
+    /// session end) runs. The TTY loop draws the loading screen
+    /// instead of blocking the frame.
     pub(crate) fn is_loading(&self) -> bool {
         self.pending.proposal_rx.is_some()
             || self.pending.runtime_rx.is_some()
             || self.pending.selection_rx.is_some()
             || self.pending.api_key_rx.is_some()
+            || self.pending.end_rx.is_some()
     }
 
     /// Routes one key event through API-key entry and help overlays.
@@ -216,11 +226,16 @@ impl ExpertLoopState {
         if self.is_loading() {
             // Loading: only quit keys are live; the rest is ignored
             // so the request cannot be re-entered or navigated away.
-            let quit = key.code == crossterm::event::KeyCode::Esc
-                || (key.code == crossterm::event::KeyCode::Char('c')
-                    && key
-                        .modifiers
-                        .contains(crossterm::event::KeyModifiers::CONTROL));
+            // Ending a session is the exception: that work has already
+            // started, and quitting here would freeze on cleanup
+            // instead of keeping the loading screen up until it lands.
+            let ending = self.pending.end_rx.is_some();
+            let quit = !ending
+                && (key.code == crossterm::event::KeyCode::Esc
+                    || (key.code == crossterm::event::KeyCode::Char('c')
+                        && key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL)));
             if quit {
                 let _ = app.handle(app::AppEvent::Quit);
             }
@@ -324,6 +339,38 @@ impl ExpertLoopState {
                 _ => {}
             }
             return;
+        }
+        if app.screen() == app::AppScreen::Final && !self.show_help && !self.show_disclosure {
+            let scroll_key = match key.code {
+                crossterm::event::KeyCode::Up => {
+                    self.scroll_final_by(-1);
+                    true
+                }
+                crossterm::event::KeyCode::Down => {
+                    self.scroll_final_by(1);
+                    true
+                }
+                crossterm::event::KeyCode::PageUp => {
+                    self.scroll_final_by(-(self.final_page as i32));
+                    true
+                }
+                crossterm::event::KeyCode::PageDown => {
+                    self.scroll_final_by(self.final_page as i32);
+                    true
+                }
+                crossterm::event::KeyCode::Home => {
+                    self.final_scroll = 0;
+                    true
+                }
+                crossterm::event::KeyCode::End => {
+                    self.final_scroll = self.final_max_scroll;
+                    true
+                }
+                _ => false,
+            };
+            if scroll_key {
+                return;
+            }
         }
         if key.code == crossterm::event::KeyCode::Char('r')
             && !self.show_help

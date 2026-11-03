@@ -130,6 +130,7 @@ async fn make_runtime_named(pool: Arc<FakePool>, name: &str) -> ExpertRuntime {
         topics: vec!["array".into()],
         level: String::new(),
         sync_phase: SessionSyncPhase::NotStarted,
+        shadow_evaluator: None,
     };
     let mut runtime = ExpertRuntime::new(spec, deps, T0).await.unwrap();
     runtime.set_pool(pool as Arc<dyn PoolClient>);

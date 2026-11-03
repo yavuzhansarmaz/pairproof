@@ -155,6 +155,15 @@ impl ExpertRuntime {
             generator: &*self.generator,
             chat: &*self.chat,
         };
+        let base = build_snapshot_with_recovery(
+            &self.orch,
+            &self.pipeline,
+            self.sync_phase,
+            self.executor.chat_replies(),
+            None,
+            self.snapshot_recovery(),
+        );
+        self.executor.set_snapshot_base(base);
         let reports = self
             .executor
             .drain(
@@ -165,10 +174,26 @@ impl ExpertRuntime {
                 now_ms,
             )
             .await?;
+        // A Disconnect intent lands here within one drain tick; sync
+        // the gate so the monitor shows the disconnect (and the
+        // reissue action) immediately, not at the heartbeat timeout.
+        if self.started
+            && !self.ended
+            && !self.orch.is_connected()
+            && self.gate.phase() == GatePhase::Locked
+        {
+            let _ = self.gate.handle_disconnect(&mut self.orch, now_ms);
+        }
+        for (slot, grade) in self.pipeline.other_grades() {
+            self.shadow.record_other(slot, grade);
+        }
+        let session_id = self.orch.session_id().to_string();
+        self.shadow
+            .poll(&session_id, self.orch.session(), &self.layout);
         if reports.iter().any(|r| r.outcome == ApplyOutcome::Applied) {
             self.last_seen_ms = self.fresh_now(now_ms);
         }
-        let snapshot = build_snapshot_with_recovery(
+        let mut snapshot = build_snapshot_with_recovery(
             &self.orch,
             &self.pipeline,
             self.sync_phase,
@@ -176,6 +201,7 @@ impl ExpertRuntime {
             None,
             self.snapshot_recovery(),
         );
+        snapshot.chat_partial = self.executor.chat_partial().map(str::to_string);
         publish_snapshot(&*self.control_io, &snapshot).await?;
         self.maybe_trigger_load();
         self.check_heartbeat(self.fresh_now(now_ms)).await;

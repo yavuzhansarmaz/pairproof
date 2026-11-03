@@ -84,7 +84,8 @@ pub(crate) async fn build_expert_runtime(
     use crate::orchestration::Clock;
     use crate::orchestration::{
         ControlIo, DockerControlIo, LeetcodeStatementFetcher, MetaApproachGenerator,
-        MetaChatTransport, MetaCodingTransport, MetaQuestionGrader,
+        MetaChatTransport, MetaCodingTransport, MetaQuestionGrader, MetaShadowEvaluator,
+        ShadowEvaluator,
     };
     use crate::sandbox::lifecycle::{create_and_provision, destroy, rotate_secret};
     let (docs, topics, level, language) = match proposal {
@@ -158,6 +159,9 @@ pub(crate) async fn build_expert_runtime(
             topics,
             level,
             sync_phase: SessionSyncPhase::NotStarted,
+            shadow_evaluator: meta_client().ok().map(|client| {
+                Arc::new(MetaShadowEvaluator::new(client)) as Arc<dyn ShadowEvaluator>
+            }),
         };
         let spec = ExpertSessionSpec {
             session_id: session_id.clone(),

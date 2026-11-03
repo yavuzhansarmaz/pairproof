@@ -297,13 +297,23 @@ impl Default for SshAuthVerifier {
         Self::new()
     }
 }
+/// Verifies `c` over SSH and stashes the verified material for the
+/// runtime build; shared by the verifier and the worker thread that
+/// verifies off the TTY thread.
+pub(crate) fn verify_and_stash(
+    c: &ConnectionString,
+    stash: &Arc<Mutex<Option<(ConnectionString, String)>>>,
+) -> Result<(), CandidateConnectError> {
+    let mut key_line = None;
+    authenticate_ssh(c, &mut key_line)?;
+    if let (Ok(mut slot), Some(line)) = (stash.lock(), key_line) {
+        *slot = Some((c.clone(), line));
+    }
+    Ok(())
+}
+
 impl ConnectionVerifier for SshAuthVerifier {
     fn verify(&self, c: &ConnectionString, _now_ms: u64) -> Result<(), CandidateConnectError> {
-        let mut key_line = None;
-        authenticate_ssh(c, &mut key_line)?;
-        if let (Ok(mut slot), Some(line)) = (self.stash.lock(), key_line) {
-            *slot = Some((c.clone(), line));
-        }
-        Ok(())
+        verify_and_stash(c, &self.stash)
     }
 }

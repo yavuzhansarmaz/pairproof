@@ -259,7 +259,7 @@ pub fn work_lines(session: &Session, work: &CandidateWork) -> Vec<String> {
         }
         lines.push("other: describe your own approach".to_string());
     } else {
-        lines.push("approaches are not available yet.".to_string());
+        lines.push("loading".to_string());
     }
     lines.push(format!(
         "selected approach: {}",

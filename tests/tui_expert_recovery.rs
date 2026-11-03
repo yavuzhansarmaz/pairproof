@@ -169,7 +169,7 @@ async fn make_runtime(name: &str, fetcher: Arc<FlakyFetcher>) -> (PathBuf, PathB
     let root = tmp(name); let control = root.join("control"); let artifacts = root.join("artifacts");
     let io = LocalControlIo::new(control.clone()); io.setup_dirs("pp-testuser").await.unwrap();
     let spec = ExpertSessionSpec { session_id: "s1".into(), language: Language::Python, easy: qs("e", 5, Difficulty::Easy), endpoint: Endpoint::new("203.0.113.10", 22022).unwrap(), username: EphemeralUsername::parse("pp-a1b2c3d4").unwrap(), fingerprint: Fingerprint::parse(&"a".repeat(64)).unwrap() };
-    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher, generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts.clone(), topics: Vec::new(), level: String::new(), sync_phase: SessionSyncPhase::NotStarted };
+    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher, generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts.clone(), topics: Vec::new(), level: String::new(), sync_phase: SessionSyncPhase::NotStarted, shadow_evaluator: None };
     let runtime = ExpertRuntime::new(spec, deps, T0).await.unwrap();
     (root, control, runtime)
 }
@@ -178,7 +178,7 @@ async fn make_runtime_failing_coding(name: &str, fetcher: Arc<FlakyFetcher>) -> 
     let root = tmp(name); let control = root.join("control"); let artifacts = root.join("artifacts");
     let io = LocalControlIo::new(control.clone()); io.setup_dirs("pp-testuser").await.unwrap();
     let spec = ExpertSessionSpec { session_id: "s1".into(), language: Language::Python, easy: qs("e", 5, Difficulty::Easy), endpoint: Endpoint::new("203.0.113.10", 22022).unwrap(), username: EphemeralUsername::parse("pp-a1b2c3d4").unwrap(), fingerprint: Fingerprint::parse(&"a".repeat(64)).unwrap() };
-    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher, generator: Arc::new(FakeGenerator), coding: Arc::new(FailingCoding), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts.clone(), topics: Vec::new(), level: String::new(), sync_phase: SessionSyncPhase::NotStarted };
+    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher, generator: Arc::new(FakeGenerator), coding: Arc::new(FailingCoding), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts.clone(), topics: Vec::new(), level: String::new(), sync_phase: SessionSyncPhase::NotStarted, shadow_evaluator: None };
     let runtime = ExpertRuntime::new(spec, deps, T0).await.unwrap();
     (root, control, runtime)
 }

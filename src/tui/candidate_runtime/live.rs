@@ -3,15 +3,30 @@
 use super::*;
 
 use super::panes::{
-    connect_submit_shows_loading, divider_column, divider_hit, live_lines, live_panes,
-    screen_centered, split_pct_for_column, DEFAULT_QUESTION_PCT,
+    clamp_scroll, coach_pane_width, coach_scroll_rows, connect_submit_shows_loading, divider_hit,
+    focus_for_pane, live_lines, live_panes, max_scroll, pane_click_target, pane_content_width,
+    pane_side_for_column, question_pane_width, question_pinned_count, question_scroll_rows,
+    screen_centered, scroll_after_growth, split_pct_for_column, PaneSide, DEFAULT_QUESTION_PCT,
 };
+use crate::tui::viewport::wrapped_row_count;
 
-/// Local workspace synced to the container `/workspace` root.
+/// Cycles `loading.` and `writing …. this takes a moment.` the same
+/// way as the full-screen loading panel: one, two, then three dots.
+fn animate_loading(lines: &mut [String], tick: usize) {
+    let dots = ".".repeat(tick % 3 + 1);
+    for line in lines {
+        if line == "loading" {
+            *line = format!("loading{dots}");
+        } else if let Some(rest) = line.strip_prefix("working:") {
+            *line = format!("working: {}{dots}", rest.trim());
+        }
+    }
+}
+
+/// The folder the candidate launched from. Mutagen syncs it with the
+/// container workspace, so `q1/`, `q2/`, and so on appear here.
 pub fn default_workspace() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| std::env::temp_dir())
-        .join("pairproof-workspace")
+    std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir())
 }
 pub(crate) fn fresh_verifier(
     state: &mut CandidateRunState,
@@ -38,79 +53,169 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut live = false;
     let mut status: Option<String> = None;
     let mut loading_tick = 0usize;
-    let mut connect_pending = false;
+    let mut connect_rx: Option<std::sync::mpsc::Receiver<ConnectOutcome>> = None;
     let mut question_pct = DEFAULT_QUESTION_PCT;
     let mut dragging_split = false;
     let mut question_scroll = 0usize;
+    let mut coach_scroll = 0usize;
+    let mut final_scroll = 0usize;
+    let mut final_max_scroll = 0usize;
+    let mut final_page = 1usize;
+    let mut coach_following = true;
     let mut scrolled_question: Option<usize> = None;
     while state.app.screen() != CandidateScreen::Exited {
+        // Apply a finished background connection, if one landed; while
+        // it runs the loop keeps drawing the animated loading screen.
+        match connect_rx.as_ref().map(|rx| rx.try_recv()) {
+            Some(Ok(ConnectOutcome::SubmitFailed(err))) => {
+                connect_rx = None;
+                state.app.record_connect_error(err);
+            }
+            Some(Ok(ConnectOutcome::Failed(err))) => {
+                connect_rx = None;
+                runtime = None;
+                super::reset_after_connect_failure(state, &mut stash, &mut status, &err);
+            }
+            Some(Ok(ConnectOutcome::Connected(built))) => {
+                connect_rx = None;
+                state.app.mark_connection_verified();
+                runtime = Some(*built);
+                status = None;
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                connect_rx = None;
+                runtime = None;
+                super::reset_after_connect_failure(
+                    state,
+                    &mut stash,
+                    &mut status,
+                    &CandidateRuntimeError::Transport,
+                );
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Empty)) | None => {}
+        }
         if live {
             if let Some(active) = runtime.as_mut() {
                 if let Err(err) = active.poll_snapshot() {
                     status = Some(crate::tui::help::candidate_error_message(&err).to_string());
                 }
+            }
+        }
+        let tick_view = runtime.as_ref().map(|active| active.view());
+        let connection_lost = runtime
+            .as_ref()
+            .map(|active| active.connection_lost())
+            .unwrap_or(false);
+        if live {
+            if let Some(view) = &tick_view {
+                super::live_keys::sync_staging(state, view);
+                super::live_keys::settle_pending(state, view);
                 // A new question starts at the top of the pane.
-                let current = active.view().question_index;
+                let current = view.question_index;
                 if current != scrolled_question {
                     scrolled_question = current;
                     question_scroll = 0;
                 }
             }
         }
-        let height = terminal.size().map(|s| s.height as usize).unwrap_or(24);
+        let (term_width, height) = terminal
+            .size()
+            .map(|s| (s.width, s.height as usize))
+            .unwrap_or((0, 24));
         // While the statement is still arriving, the shared loading
         // screen replaces the placeholder solving screen entirely.
-        // A deferred connection submit shows the same loading screen
-        // before its blocking verification runs.
-        let waiting = connect_pending
+        // A background connection submit shows the same loading
+        // screen, animated, until its result lands.
+        loading_tick = loading_tick.wrapping_add(1);
+        let waiting = connect_rx.is_some()
             || (live
                 && !state.show_help
-                && runtime.as_ref().is_some_and(|active| {
-                    active.view().waiting_for_statement() && !active.connection_lost()
-                }));
-        let panes = if live && !state.show_help && !waiting {
-            runtime.as_ref().and_then(|active| {
-                if active.view().is_terminal() {
+                && tick_view
+                    .as_ref()
+                    .is_some_and(|view| view.waiting_for_statement() && !connection_lost));
+        let panes = if live && !state.show_help && !waiting && !connection_lost {
+            tick_view.as_ref().and_then(|view| {
+                if view.is_terminal() {
                     None
                 } else {
-                    let (left, right) = live_panes(state, active, &status);
-                    let pane_height = height.saturating_sub(2);
-                    Some((
-                        left,
-                        crate::tui::viewport::visible_with_pinned(&right, pane_height),
-                        state.focus == CandidateFocus::Chat,
-                    ))
+                    let (mut left, right) = live_panes(state, view, connection_lost, &status);
+                    animate_loading(&mut left, loading_tick);
+                    Some((left, right, state.focus == CandidateFocus::Chat))
                 }
             })
         } else {
             None
         };
+        let question_width = pane_content_width(question_pane_width(term_width, question_pct));
+        let coach_width = pane_content_width(coach_pane_width(term_width, question_pct));
+        let mut coach_visible = coach_scroll_rows(height, 0);
+        let mut coach_total_wrapped = 0usize;
+        if let Some((left, right, _)) = &panes {
+            let pinned = question_pinned_count(left);
+            let question_visible = question_scroll_rows(height)
+                .saturating_sub(pinned.saturating_sub(1))
+                .max(1);
+            let left_content = &left[..left.len().saturating_sub(pinned)];
+            let right_content: &[String] = match right.last() {
+                Some(last) if last.starts_with("message:") => {
+                    &right[..right.len().saturating_sub(1)]
+                }
+                _ => right,
+            };
+            let status_rows = tick_view
+                .as_ref()
+                .map(|view| {
+                    view.status_lines_with_pending(state.pending_approach.as_ref())
+                        .len()
+                })
+                .unwrap_or(0);
+            coach_visible = coach_scroll_rows(height, status_rows);
+            let question_total_wrapped = wrapped_row_count(left_content, question_width);
+            coach_total_wrapped = wrapped_row_count(right_content, coach_width);
+            coach_scroll = scroll_after_growth(
+                coach_scroll,
+                coach_following,
+                coach_total_wrapped,
+                coach_visible,
+            );
+            question_scroll =
+                clamp_scroll(question_scroll, question_total_wrapped, question_visible);
+        }
         if waiting {
-            loading_tick += 1;
             let visible = crate::tui::render::loading_lines(loading_tick);
             let _ = terminal.draw(|frame| crate::tui::render::draw_loading_screen(frame, &visible));
         } else if let Some((left, right, chat_focused)) = &panes {
+            let status_lines = tick_view
+                .as_ref()
+                .map(|view| view.status_lines_with_pending(state.pending_approach.as_ref()))
+                .unwrap_or_default();
             let _ = terminal.draw(|frame| {
-                crate::tui::render::draw_candidate_screen(
+                crate::tui::render::draw_candidate_screen_with_status(
                     frame,
                     left,
+                    &status_lines,
                     right,
                     *chat_focused,
                     question_pct,
                     question_scroll,
+                    coach_scroll,
                 )
             });
         } else {
             let lines = if live {
-                match runtime.as_ref() {
-                    Some(active) => {
+                match tick_view.as_ref() {
+                    Some(view) => {
                         if state.show_help {
                             crate::tui::help::candidate_help_lines_for(
                                 CandidateScreen::Solving,
                                 state.focus,
                             )
+                        } else if view.is_terminal() {
+                            view.final_screen_lines()
+                        } else if connection_lost {
+                            CandidateView::expert_closed_lines()
                         } else {
-                            live_lines(state, active, &status)
+                            live_lines(state, view, connection_lost, &status)
                         }
                     }
                     None => candidate_screen_lines(state),
@@ -122,23 +227,22 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                 }
                 lines
             };
-            let visible =
-                crate::tui::viewport::visible_with_pinned(&lines, height.saturating_sub(2));
-            let centered = screen_centered(state.show_help, live, state.app.screen());
+            let inner_height = height.saturating_sub(2);
+            let breakdown = lines.first().is_some_and(|line| line == "Final breakdown");
+            let visible = if breakdown {
+                let frame = crate::tui::viewport::final_frame(&lines, inner_height, final_scroll);
+                final_scroll = frame.scroll;
+                final_max_scroll = frame.max_scroll;
+                final_page = frame.page;
+                frame.lines
+            } else {
+                crate::tui::viewport::visible_with_pinned(&lines, inner_height)
+            };
+            let centered = screen_centered(state.show_help, live, state.app.screen())
+                || connection_lost
+                || tick_view.as_ref().is_some_and(|view| view.is_terminal());
             let _ =
                 terminal.draw(|frame| crate::tui::render::draw_screen(frame, &visible, centered));
-        }
-        if connect_pending {
-            // The loading frame is on screen; now run the blocking
-            // connection submit and runtime build behind it.
-            connect_pending = false;
-            handle_candidate_key(state, KeyEvent::new(K::Enter, KeyModifiers::NONE));
-            if state.app.screen() == CandidateScreen::Rules {
-                establish_runtime_after_rules(state, &mut runtime, &mut stash, &mut status);
-            }
-            if runtime.is_some() && state.app.rules_accepted() {
-                live = true;
-            }
         }
         if crossterm::event::poll(Duration::from_millis(250)).unwrap_or(false) {
             // Drain every queued event before the next snapshot/draw:
@@ -147,20 +251,92 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             while let Ok(event) = crossterm::event::read() {
                 match event {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
+                        if connect_rx.is_some() {
+                            // Connecting in the background: only quit
+                            // keys are live; the rest is ignored so
+                            // the attempt cannot be re-entered.
+                            if key.code == K::Esc
+                                || (key.code == K::Char('c')
+                                    && key.modifiers.contains(KeyModifiers::CONTROL))
+                            {
+                                state.app.quit();
+                            }
+                        }
+                        // The final breakdown is one scrolling page.
+                        // Up/down move it; Enter still closes.
+                        let scrolls_final = connect_rx.is_none()
+                            && live
+                            && !state.show_help
+                            && panes.is_none()
+                            && tick_view.as_ref().is_some_and(|view| {
+                                view.is_terminal()
+                                    && (view.final_breakdown.is_some()
+                                        || view.phase == "TechnicalFailure")
+                            })
+                            && matches!(
+                                key.code,
+                                K::Up | K::Down | K::PageUp | K::PageDown | K::Home | K::End
+                            );
+                        if scrolls_final {
+                            match key.code {
+                                K::Up => {
+                                    final_scroll = final_scroll.saturating_sub(1);
+                                }
+                                K::Down => {
+                                    final_scroll =
+                                        final_scroll.saturating_add(1).min(final_max_scroll);
+                                }
+                                K::PageUp => {
+                                    final_scroll = final_scroll.saturating_sub(final_page);
+                                }
+                                K::PageDown => {
+                                    final_scroll = final_scroll
+                                        .saturating_add(final_page)
+                                        .min(final_max_scroll);
+                                }
+                                K::Home => final_scroll = 0,
+                                K::End => final_scroll = final_max_scroll,
+                                _ => {}
+                            }
+                            continue;
+                        }
                         // Arrow/page keys scroll the question pane
                         // while the two panes are up; they were
                         // no-ops in the live key handler, so no
                         // candidate action changes.
-                        let scrolls_pane = live
+                        let scrolls_pane = connect_rx.is_none()
+                            && live
                             && panes.is_some()
-                            && matches!(key.code, K::Up | K::Down | K::PageUp | K::PageDown);
-                        if scrolls_pane {
-                            match key.code {
-                                K::Up => question_scroll = question_scroll.saturating_sub(1),
-                                K::Down => question_scroll = question_scroll.saturating_add(1),
-                                K::PageUp => question_scroll = question_scroll.saturating_sub(10),
-                                K::PageDown => question_scroll = question_scroll.saturating_add(10),
-                                _ => {}
+                            && match key.code {
+                                K::Up | K::Down => state.focus == CandidateFocus::Chat,
+                                K::PageUp | K::PageDown => true,
+                                _ => false,
+                            };
+                        if connect_rx.is_some() {
+                            // Already handled above; swallow the key.
+                        } else if scrolls_pane {
+                            if state.focus == CandidateFocus::Chat {
+                                match key.code {
+                                    K::Up => coach_scroll = coach_scroll.saturating_sub(1),
+                                    K::Down => coach_scroll = coach_scroll.saturating_add(1),
+                                    K::PageUp => coach_scroll = coach_scroll.saturating_sub(10),
+                                    K::PageDown => coach_scroll = coach_scroll.saturating_add(10),
+                                    _ => {}
+                                }
+                                coach_following =
+                                    coach_scroll >= max_scroll(coach_total_wrapped, coach_visible);
+                            } else {
+                                match key.code {
+                                    K::Up => question_scroll = question_scroll.saturating_sub(1),
+                                    K::Down => question_scroll = question_scroll.saturating_add(1),
+                                    K::PageUp => {
+                                        question_scroll = question_scroll.saturating_sub(10)
+                                    }
+                                    K::PageDown => {
+                                        question_scroll = question_scroll.saturating_add(10)
+                                    }
+                                    _ => {}
+                                }
                             }
                         } else if live {
                             let lost = runtime
@@ -190,49 +366,89 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                                 state.show_help,
                             ) && connect_enter
                             {
-                                // Show the loading frame first; the
-                                // submit runs right after that draw.
-                                connect_pending = true;
+                                // Start the blocking connection on a
+                                // worker thread; the loop keeps drawing
+                                // the animated loading screen and polls
+                                // the result at the top of each tick.
+                                let input = state.app.connect_input();
+                                let worker_stash = Arc::clone(&stash);
+                                let existing = runtime.take();
+                                connect_rx = Some(spawn_connect_work(move || {
+                                    run_connect_work(input, now_ms(), worker_stash, existing)
+                                }));
                                 break;
                             }
                             handle_candidate_key(state, key);
                             if connect_enter && state.app.screen() == CandidateScreen::Rules {
-                                establish_runtime_after_rules(
-                                    state,
-                                    &mut runtime,
-                                    &mut stash,
-                                    &mut status,
-                                );
+                                // The submit already verified on this
+                                // thread (the path above was not taken);
+                                // still build the runtime in the
+                                // background behind the loading screen.
+                                let worker_stash = Arc::clone(&stash);
+                                let existing = runtime.take();
+                                connect_rx = Some(spawn_connect_work(move || {
+                                    run_runtime_build(existing, worker_stash)
+                                }));
                             }
                             if runtime.is_some() && state.app.rules_accepted() {
                                 live = true;
                             }
                         }
                     }
-                    Event::Paste(text) => handle_candidate_paste(state, &text),
-                    Event::Mouse(mouse) => {
+                    Event::Paste(text) => {
+                        if connect_rx.is_none() {
+                            handle_candidate_paste(state, &text)
+                        }
+                    }
+                    Event::Mouse(mouse) if connect_rx.is_none() => {
                         // Dragging the pane divider resizes the solving
                         // panes; both keep at least 30% of the width.
                         use crossterm::event::{MouseButton, MouseEventKind};
-                        let width = terminal.size().map(|s| s.width).unwrap_or(0);
+                        let width = term_width;
                         match mouse.kind {
                             MouseEventKind::ScrollDown
-                                if panes.is_some()
-                                    && mouse.column < divider_column(width, question_pct) =>
+                                if panes.is_none() && final_max_scroll > 0 =>
                             {
-                                question_scroll = question_scroll.saturating_add(3);
+                                final_scroll = final_scroll.saturating_add(3).min(final_max_scroll);
                             }
-                            MouseEventKind::ScrollUp
-                                if panes.is_some()
-                                    && mouse.column < divider_column(width, question_pct) =>
-                            {
-                                question_scroll = question_scroll.saturating_sub(3);
+                            MouseEventKind::ScrollUp if panes.is_none() && final_max_scroll > 0 => {
+                                final_scroll = final_scroll.saturating_sub(3);
+                            }
+                            MouseEventKind::ScrollDown if panes.is_some() => {
+                                match pane_side_for_column(mouse.column, width, question_pct) {
+                                    PaneSide::Question => {
+                                        question_scroll = question_scroll.saturating_add(3)
+                                    }
+                                    PaneSide::Coach => {
+                                        coach_scroll = coach_scroll.saturating_add(3);
+                                        coach_following = coach_scroll
+                                            >= max_scroll(coach_total_wrapped, coach_visible);
+                                    }
+                                }
+                            }
+                            MouseEventKind::ScrollUp if panes.is_some() => {
+                                match pane_side_for_column(mouse.column, width, question_pct) {
+                                    PaneSide::Question => {
+                                        question_scroll = question_scroll.saturating_sub(3)
+                                    }
+                                    PaneSide::Coach => {
+                                        coach_scroll = coach_scroll.saturating_sub(3);
+                                        coach_following = coach_scroll
+                                            >= max_scroll(coach_total_wrapped, coach_visible);
+                                    }
+                                }
                             }
                             MouseEventKind::Down(MouseButton::Left)
                                 if panes.is_some()
                                     && divider_hit(mouse.column, width, question_pct) =>
                             {
                                 dragging_split = true;
+                            }
+                            MouseEventKind::Down(MouseButton::Left) if panes.is_some() => {
+                                state.focus = focus_for_pane(
+                                    state.focus,
+                                    pane_click_target(mouse.column, width, question_pct),
+                                );
                             }
                             MouseEventKind::Drag(MouseButton::Left) if dragging_split => {
                                 question_pct = split_pct_for_column(mouse.column, width);
@@ -252,6 +468,12 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
         }
     }
     if let Some(active) = runtime.as_mut() {
+        // Leaving a live session (Esc/Ctrl-C): signal the expert
+        // before tearing sync down, so its monitor reflects the
+        // disconnect immediately rather than at heartbeat timeout.
+        if live && !active.view().is_terminal() {
+            let _ = active.disconnect();
+        }
         let _ = active.end();
     }
     Ok(())

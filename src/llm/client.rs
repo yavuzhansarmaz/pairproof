@@ -166,26 +166,25 @@ fn parse_stream_payload(payload: &str) -> Option<(String, Option<Usage>)> {
     Some((delta.to_string(), usage))
 }
 
-/// Accumulates streamed deltas into a complete chat outcome.
-fn accumulate_stream(payloads: &[&str], model: &str) -> Result<ChatOutcome, MetaApiError> {
-    let mut content = String::new();
-    let mut usage = Usage::default();
-    for payload in payloads {
-        if let Some((delta, maybe_usage)) = parse_stream_payload(payload) {
-            content.push_str(&delta);
-            usage = maybe_usage.unwrap_or(usage);
-        }
+/// Folds one payload into the running content and usage.
+#[rustfmt::skip]
+fn fold_stream_payload(payload: &str, content: &mut String, usage: &mut Usage, on_chunk: &mut (dyn FnMut(&str) + Send)) {
+    if let Some((delta, maybe_usage)) = parse_stream_payload(payload) {
+        if !delta.is_empty() { content.push_str(&delta); on_chunk(&delta); }
+        if let Some(next) = maybe_usage { *usage = next; }
     }
-    if content.is_empty() {
-        return Err(MetaApiError::EmptyStream);
-    }
-    Ok(ChatOutcome {
-        content,
-        usage,
-        model: model.to_string(),
-    })
 }
-
+/// Accumulates streamed deltas into a complete chat outcome.
+#[cfg(test)] #[rustfmt::skip]
+fn accumulate_stream(payloads: &[&str], model: &str) -> Result<ChatOutcome, MetaApiError> { accumulate_stream_each(payloads, model, &mut |_| {}) }
+/// Accumulates streamed deltas, reporting each non-empty delta in order.
+#[cfg(test)] #[rustfmt::skip]
+fn accumulate_stream_each(payloads: &[&str], model: &str, on_chunk: &mut (dyn FnMut(&str) + Send)) -> Result<ChatOutcome, MetaApiError> {
+    let (mut content, mut usage) = (String::new(), Usage::default());
+    for payload in payloads { fold_stream_payload(payload, &mut content, &mut usage, on_chunk); }
+    if content.is_empty() { return Err(MetaApiError::EmptyStream); }
+    Ok(ChatOutcome { content, usage, model: model.to_string() })
+}
 #[derive(Clone)]
 pub struct MetaClient {
     http: reqwest::Client,
@@ -279,30 +278,23 @@ impl MetaClient {
     }
 
     /// Runs one streaming chat completion with explicit options.
-    pub async fn chat_stream_with_options(
-        &self,
-        model: &str,
-        messages: Vec<Message>,
-        options: ChatOptions,
-    ) -> Result<ChatOutcome, MetaApiError> {
+    #[rustfmt::skip]
+    pub async fn chat_stream_with_options(&self, model: &str, messages: Vec<Message>, options: ChatOptions) -> Result<ChatOutcome, MetaApiError> { self.chat_stream_each(model, messages, options, &mut |_| {}).await }
+
+    /// Runs one streaming chat completion, reporting each delta as it arrives.
+    #[rustfmt::skip]
+    pub async fn chat_stream_each(&self, model: &str, messages: Vec<Message>, options: ChatOptions, on_chunk: &mut (dyn FnMut(&str) + Send)) -> Result<ChatOutcome, MetaApiError> {
         let url = format!("{}/chat/completions", self.base_url);
         let request = build_request(model, messages, true, options);
-        let builder = self.http.post(&url).bearer_auth(&self.api_key);
-        let response = builder.json(&request).send().await?;
-        let mut response = Self::ensure_success(response).await?;
-        let mut buffer = String::new();
-        let mut payloads: Vec<String> = Vec::new();
+        let response = Self::ensure_success(self.http.post(&url).bearer_auth(&self.api_key).json(&request).send().await?).await?;
+        let (mut response, mut buffer, mut content, mut usage) = (response, String::new(), String::new(), Usage::default());
         while let Some(chunk) = response.chunk().await? {
             buffer.push_str(&String::from_utf8_lossy(&chunk));
-            while let Some(index) = buffer.find('\n') {
-                let line: String = buffer.drain(..=index).collect();
-                if let Some(payload) = line.trim().strip_prefix("data:") {
-                    payloads.push(payload.trim().to_string());
-                }
-            }
+            while let Some(index) = buffer.find('\n') { let line: String = buffer.drain(..=index).collect(); if let Some(p) = line.trim().strip_prefix("data:") { fold_stream_payload(p.trim(), &mut content, &mut usage, on_chunk); } }
         }
-        let refs: Vec<&str> = payloads.iter().map(|s| s.as_str()).collect();
-        accumulate_stream(&refs, model)
+        if let Some(p) = buffer.trim().strip_prefix("data:") { fold_stream_payload(p.trim(), &mut content, &mut usage, on_chunk); }
+        if content.is_empty() { return Err(MetaApiError::EmptyStream); }
+        Ok(ChatOutcome { content, usage, model: model.to_string() })
     }
 
     /// Converts a non-success HTTP response into a typed API error.
@@ -342,6 +334,15 @@ mod tests {
         let outcome = accumulate_stream(&payloads, "m").expect("stream assembles");
         assert_eq!(outcome.content, "Hello");
         assert_eq!(outcome.usage.total_tokens, 12);
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn stream_each_reports_deltas_in_order() {
+        let payloads = [r#"{"choices":[{"delta":{"content":"Hel"}}]}"#, r#"{"choices":[{"delta":{"content":"lo"}}]}"#, "[DONE]"];
+        let mut seen: Vec<String> = Vec::new();
+        let outcome = accumulate_stream_each(&payloads, "m", &mut |d| seen.push(d.to_string())).expect("stream assembles");
+        assert_eq!(seen, vec!["Hel".to_string(), "lo".to_string()]); assert_eq!(outcome.content, "Hello");
     }
 
     #[test]

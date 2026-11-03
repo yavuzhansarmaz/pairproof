@@ -114,7 +114,7 @@ async fn make_runtime(name: &str) -> (PathBuf, ExpertRuntime) {
     let root = tmp(name); let control = root.join("control"); let artifacts = root.join("artifacts");
     let io = LocalControlIo::new(control.clone()); io.setup_dirs("pp-testuser").await.unwrap();
     let spec = ExpertSessionSpec { session_id: "s1".into(), language: Language::Python, easy: qs("e", 5, Difficulty::Easy), endpoint: Endpoint::new("203.0.113.10", 22022).unwrap(), username: EphemeralUsername::parse("pp-a1b2c3d4").unwrap(), fingerprint: Fingerprint::parse(&"a".repeat(64)).unwrap() };
-    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control)), fetcher: Arc::new(FakeFetcher), generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts, topics: Vec::new(), level: String::new(), sync_phase: SessionSyncPhase::NotStarted };
+    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control)), fetcher: Arc::new(FakeFetcher), generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts, topics: Vec::new(), level: String::new(), sync_phase: SessionSyncPhase::NotStarted, shadow_evaluator: None };
     let runtime = ExpertRuntime::new(spec, deps, T0).await.unwrap();
     (root, runtime)
 }
@@ -139,13 +139,15 @@ fn candidate_view(rec: Option<SnapshotRecovery>) -> CandidateView {
             title: "Hash map".to_string(),
             summary: "One pass lookup".to_string(),
         }],
-        selected: Some("preset 0".to_string()),
+        nav: Vec::new(),
+        selected: Some(SnapshotSelection::Preset(0)),
         latest_test: Some(SnapshotTest {
             passed: 3,
             failed: 1,
             at_ms: 10,
         }),
         chat_replies: vec!["Try a hash map.".to_string()],
+        chat_partial: None,
         final_breakdown: None,
         recovery: rec,
     }
@@ -354,7 +356,8 @@ fn recovery_ui_preserves_existing_candidate_progress() {
             title: "Hash map".to_string(),
             summary: "One pass lookup".to_string(),
         }],
-        selected: Some("preset 0".to_string()),
+        nav: Vec::new(),
+        selected: Some(SnapshotSelection::Preset(0)),
         latest_test: Some(SnapshotTest {
             passed: 3,
             failed: 1,
@@ -362,6 +365,7 @@ fn recovery_ui_preserves_existing_candidate_progress() {
         }),
         chat_replies: vec!["Try a hash map.".to_string()],
         final_breakdown: None,
+        chat_partial: None,
         recovery: Some(recovery(true, 30_000, false)),
     };
     let view = CandidateView::from_snapshot(Some(&snapshot));
@@ -373,7 +377,7 @@ fn recovery_ui_preserves_existing_candidate_progress() {
         "{joined}"
     );
     assert!(joined.contains("Hash map"), "{joined}");
-    assert!(joined.contains("selected approach: preset 0"), "{joined}");
+    assert!(joined.contains("selected approach: preset 1"), "{joined}");
     assert!(
         joined.contains("technical problem - service temporarily unavailable."),
         "{joined}"

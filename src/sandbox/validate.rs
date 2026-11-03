@@ -103,10 +103,7 @@ pub fn question_layout(
         )));
     }
     let n = index + 1;
-    let question = WorkspacePath::new(&format!("questions/{n:02}/question.md"))?;
-    let solution = WorkspacePath::new(&format!(
-        "questions/{n:02}/solution.{}",
-        language.file_extension()
-    ))?;
+    let question = WorkspacePath::new(&format!("q{n}/question.md"))?;
+    let solution = WorkspacePath::new(&format!("q{n}/solution.{}", language.file_extension()))?;
     Ok((question, solution))
 }

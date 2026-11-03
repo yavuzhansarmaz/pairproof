@@ -249,7 +249,12 @@ fn back_is_rejected_past_the_runtime_commit_point() {
     assert_eq!(app.screen(), AppScreen::Monitor);
     let lines = screen_lines(&app).join("\n");
     assert!(!lines.contains("b back"), "{lines}");
-    assert!(lines.contains("press e to end the session."), "{lines}");
+    // The `e`/`c` hints live only in the footer; the content area
+    // must not repeat them as `press ...` lines.
+    assert!(!lines.contains("press e to end the session."), "{lines}");
+    assert!(!lines.contains("press c to reissue"), "{lines}");
+    assert!(lines.contains("e end the session"), "{lines}");
+    assert!(lines.contains("c reissue after disconnect"), "{lines}");
     assert!(!lines.contains("Press Enter to end"), "{lines}");
     app.handle(AppEvent::EndSession).expect("to final");
     assert!(!app.can_go_back());

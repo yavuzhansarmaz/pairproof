@@ -19,7 +19,7 @@ use crate::orchestration::control::{
     ProcessedState, CONTROL_ROOT, INBOX_DIR, INTENT_REL, MAX_CONTROL_READ_BYTES, OUTBOX_DIR,
     PROCESSED_FILE, SNAPSHOT_REL,
 };
-use crate::orchestration::pipeline::{ApproachGenerator, PipelineError, QuestionPipeline};
+use crate::orchestration::pipeline::{ApproachGenerator, QuestionPipeline};
 use crate::orchestration::session::Orchestrator;
 use crate::sandbox::command::{exec_as, exec_root};
 use crate::sandbox::lifecycle::{SandboxHandle, OP_TIMEOUT};
@@ -73,9 +73,11 @@ impl ApplyReport {
 pub struct ControlExecutor {
     session_id: String,
     processed: ProcessedState,
-    chat_history: Vec<Message>,
-    chat_replies: Vec<String>,
+    pub(crate) chat_history: Vec<Message>,
+    pub(crate) chat_replies: Vec<String>,
     reconnects_seen: Option<usize>,
+    pub(crate) snapshot_base: Option<CandidateSnapshot>,
+    pub(crate) chat_partial: String,
 }
 impl ControlExecutor {
     /// Creates an executor, reloading any persisted processed ledger.
@@ -86,7 +88,7 @@ impl ControlExecutor {
             Some(_) => return Err(ControlError::WrongSession),
             None => ProcessedState::new(session_id),
         };
-        Ok(Self { session_id: session_id.into(), processed, chat_history: Vec::new(), chat_replies: Vec::new(), reconnects_seen: None })
+        Ok(Self { session_id: session_id.into(), processed, chat_history: Vec::new(), chat_replies: Vec::new(), reconnects_seen: None, snapshot_base: None, chat_partial: String::new() })
     }
     /// Returns the durable processed ledger.
     pub fn processed(&self) -> &ProcessedState {
@@ -96,6 +98,12 @@ impl ControlExecutor {
     pub fn chat_replies(&self) -> &[String] {
         &self.chat_replies
     }
+    /// Sets the base snapshot used for in-progress partial publications.
+    #[rustfmt::skip]
+    pub fn set_snapshot_base(&mut self, snapshot: CandidateSnapshot) { self.snapshot_base = Some(snapshot); }
+    /// Returns the in-progress partial reply, if any.
+    #[rustfmt::skip]
+    pub fn chat_partial(&self) -> Option<&str> { if self.chat_partial.is_empty() { None } else { Some(&self.chat_partial) } }
     /// Returns the session this executor is bound to.
     pub fn session_id(&self) -> &str {
         &self.session_id
@@ -129,7 +137,7 @@ impl ControlExecutor {
                     outcome: ApplyOutcome::Rejected, error: Some(ControlError::SequenceGap { expected, got: intent.seq }.to_string()) });
                 continue;
             }
-            match self.apply_one(intent, orch, pipe, transports, now_ms).await {
+            match self.apply_one(io, intent, orch, pipe, transports, now_ms).await {
                 Ok(()) => { self.consume(io, intent).await?; reports.push(ApplyReport::applied(intent)); }
                 Err(err) => {
                     // Illegal transitions are consumed: redelivery is a duplicate, never a retry loop.
@@ -176,27 +184,6 @@ impl ControlExecutor {
     async fn consume(&mut self, io: &dyn ControlIo, intent: &Intent) -> Result<(), ControlError> {
         self.processed.mark(intent);
         io.store_processed(&self.processed).await
-    }
-
-    #[rustfmt::skip]
-    async fn apply_one(&mut self, intent: &Intent, orch: &mut Orchestrator,
-        pipe: &mut QuestionPipeline, t: &ControlTransports<'_>, now_ms: u64) -> Result<(), PipelineError> {
-        match &intent.kind {
-            IntentKind::SelectPreset { preset } => pipe.select_preset(orch, *preset, t.coding, t.sandbox, now_ms).await.map(|_| ()),
-            IntentKind::SelectOther { text } => pipe.select_other(orch, text, t.generator, t.coding, t.sandbox, now_ms).await.map(|_| ()),
-            IntentKind::Continue => pipe.continue_coding(orch, t.coding, t.sandbox, now_ms).await.map(|_| ()),
-            IntentKind::Redirect { text } => pipe.redirect_coding(orch, text, t.coding, t.sandbox, now_ms).await.map(|_| ()),
-            IntentKind::RequestTests => pipe.request_tests(orch, t.sandbox, now_ms).await.map(|_| ()),
-            IntentKind::Finish => pipe.finish_question(orch, now_ms),
-            IntentKind::Skip => pipe.skip_question(orch, now_ms),
-            IntentKind::RequestReQuestion => orch.request_requestion(now_ms).map_err(PipelineError::from),
-            IntentKind::ChangeApproach => pipe.change_approach(orch, now_ms),
-            IntentKind::ChatRequest { text, .. } => {
-                let reply = pipe.submit_chat(orch, t.chat, &mut self.chat_history, text, now_ms).await?;
-                self.chat_replies.push(reply);
-                Ok(())
-            }
-        }
     }
 }
 

@@ -109,13 +109,13 @@ fn question_layout_per_language() {
     ];
     for (language, file) in cases {
         let (question, solution) = question_layout(0, language).expect("layout");
-        assert_eq!(question.as_str(), "questions/01/question.md");
-        assert_eq!(solution.as_str(), format!("questions/01/{file}"));
+        assert_eq!(question.as_str(), "q1/question.md");
+        assert_eq!(solution.as_str(), format!("q1/{file}"));
     }
     let (_, solution) = question_layout(9, Language::Python).expect("layout");
-    assert_eq!(solution.as_str(), "questions/10/solution.py");
+    assert_eq!(solution.as_str(), "q10/solution.py");
     let (_, solution) = question_layout(98, Language::Python).expect("layout");
-    assert_eq!(solution.as_str(), "questions/99/solution.py");
+    assert_eq!(solution.as_str(), "q99/solution.py");
 }
 
 #[test]

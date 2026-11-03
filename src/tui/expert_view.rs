@@ -44,10 +44,8 @@ pub fn footer(app: &ExpertApp) -> Option<String> {
             "up/down move, left/right page, space choose, tab preview, enter continue, esc quit, ? help"
                 .to_string()
         }
-        AppScreen::Monitor => {
-            "e end the session, c reissue after disconnect, esc quit, ? help".to_string()
-        }
-        AppScreen::Final => "enter close, esc quit".to_string(),
+        AppScreen::Monitor => "e end the session, c reissue after disconnect, esc quit, ? help".to_string(),
+        AppScreen::Final => "enter to exit".to_string(),
     };
     (!text.is_empty()).then_some(text)
 }
@@ -97,12 +95,15 @@ pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
                 "  e  Expert     set up and run a live interview".into(),
                 "  c  Candidate  join a session with a connection string".into(),
                 "".into(),
+                "Candidate: start in an empty folder. That folder is the workspace.".into(),
+                "questions appear there as q1, q2, and so on.".into(),
+                "Expert: any folder is fine.".into(),
+                "".into(),
                 "choose your role to begin.".into(),
             ]),
             S::Preflight => {
                 lines.extend([
-                    "everything PairProof needs on this machine,".into(),
-                    "checked before you invite a candidate.".into(),
+                    "everything PairProof needs on this machine.".into(),
                     "".into(),
                 ]);
                 if app.preflight_lines.is_empty() {
@@ -193,13 +194,16 @@ pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
                 } else {
                     "session live.".into()
                 });
-                lines.push("press e to end the session.".into());
             }
             S::Final => {
                 if app.final_lines.is_empty() {
                     lines.push("session ended.".into());
                 } else {
-                    lines.extend(app.final_lines.iter().cloned());
+                    // The breakdown already opens with this heading.
+                    let body = app.final_lines.iter().skip(usize::from(
+                        app.final_lines.first().is_some_and(|line| line == heading),
+                    ));
+                    lines.extend(body.cloned());
                 }
             }
             S::Exited => lines.push("goodbye.".into()),

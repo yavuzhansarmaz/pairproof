@@ -5,6 +5,15 @@ use super::*;
 
 use crate::tui::shared::pop_last;
 
+/// True when the approach cursor sits on the `other` row.
+fn cursor_on_other(state: &CandidateRunState, option_count: usize) -> bool {
+    option_count > 0
+        && state
+            .staging
+            .current_stage()
+            .is_some_and(|stage| stage.cursor == option_count)
+}
+
 fn apply(status: &mut Option<String>, result: Result<Intent, CandidateRuntimeError>) -> bool {
     match result {
         Ok(_) => {
@@ -17,6 +26,114 @@ fn apply(status: &mut Option<String>, result: Result<Intent, CandidateRuntimeErr
         }
     }
 }
+
+/// Remembers a submitted approach so the status box can say the code
+/// is being written before the expert publishes the selection.
+fn remember_submit(
+    state: &mut CandidateRunState,
+    view: &CandidateView,
+    selection: SnapshotSelection,
+) {
+    let Some(index) = view.question_index else {
+        return;
+    };
+    state.pending_approach =
+        Some(crate::tui::candidate_stage::PendingApproach { index, selection });
+    state.after_code = None;
+}
+
+/// Enter on the `other` row. An empty field opens the editor; text
+/// already typed, or a row already marked, is submitted.
+fn submit_other_row<T: CandidateTransport>(
+    state: &mut CandidateRunState,
+    runtime: &mut CandidateRuntime<T>,
+    status: &mut Option<String>,
+    view: &CandidateView,
+) {
+    let text = state.work.other_text().to_string();
+    let marked_other = state
+        .staging
+        .current_stage()
+        .and_then(|stage| stage.choice.clone())
+        == Some(crate::tui::candidate_stage::StagedChoice::Other);
+    if text.trim().is_empty() && !marked_other {
+        state.staging.mark_cursor(view.options.len());
+        state.focus = CandidateFocus::Other;
+        return;
+    }
+    state.staging.mark_cursor(view.options.len());
+    if apply(
+        status,
+        runtime.send_intent(IntentKind::SelectOther { text: text.clone() }),
+    ) {
+        remember_submit(state, view, SnapshotSelection::Other(text));
+        state.work.set_other_text("");
+        state.staging.save_other_text("");
+    }
+}
+
+/// Drops the local "writing the code" line once the snapshot shows
+/// the approach that was submitted.
+pub(crate) fn settle_pending(state: &mut CandidateRunState, view: &CandidateView) {
+    let landed = state.pending_approach.as_ref().is_some_and(|pending| {
+        view.question_index == Some(pending.index)
+            && view.selected.as_ref() == Some(&pending.selection)
+    });
+    if landed {
+        if let Some(pending) = state.pending_approach.take() {
+            let n = pending.index + 1;
+            state.after_code = Some((
+                pending.index,
+                format!("code written in q{n}. d asks for tests. t runs the file."),
+            ));
+        }
+    }
+}
+/// Syncs the local staging to the snapshot's current question and
+/// returns the live view the key handler acts on.
+pub(crate) fn sync_staging(state: &mut CandidateRunState, view: &CandidateView) {
+    if let Some(index) = view.question_index {
+        let stage = state.staging.switch_to(
+            index,
+            &view.selected,
+            view.options.len(),
+            state.work.other_text(),
+        );
+        if stage.other_text != state.work.other_text() {
+            state.work.set_other_text(&stage.other_text);
+        }
+    }
+}
+
+/// Sends a question switch for `delta` in the navigation list; the
+/// staged choices stay saved per question and are restored when the
+/// new snapshot lands.
+fn navigate<T: CandidateTransport>(
+    state: &mut CandidateRunState,
+    runtime: &mut CandidateRuntime<T>,
+    status: &mut Option<String>,
+    view: &CandidateView,
+    delta: i32,
+) {
+    let (Some(current), false) = (view.question_index, view.nav.is_empty()) else {
+        return;
+    };
+    let Some(pos) = view.nav.iter().position(|entry| entry.index == current) else {
+        return;
+    };
+    let target_pos = pos as i32 + delta;
+    if target_pos < 0 || target_pos >= view.nav.len() as i32 {
+        return;
+    }
+    let target = view.nav[target_pos as usize].index;
+    let outgoing = state.work.other_text().to_string();
+    state.staging.save_other_text(&outgoing);
+    apply(
+        status,
+        runtime.send_intent(IntentKind::Navigate { index: target }),
+    );
+}
+
 pub fn handle_live_key<T: CandidateTransport>(
     state: &mut CandidateRunState,
     runtime: &mut CandidateRuntime<T>,
@@ -34,6 +151,15 @@ pub fn handle_live_key<T: CandidateTransport>(
             return;
         }
         _ => {}
+    }
+    // The expert quit, or the sandbox is gone. Leave the work keys
+    // alone; Enter dismisses the notice. R is handled by the TTY loop
+    // before this, so a fresh string can still reconnect.
+    if runtime.connection_lost() && !runtime.view().is_terminal() {
+        if key.code == K::Enter {
+            state.app.quit();
+        }
+        return;
     }
     if key.code == K::Char('?')
         && !control
@@ -56,17 +182,81 @@ pub fn handle_live_key<T: CandidateTransport>(
         }
         return;
     }
+    let view = runtime.view();
+    sync_staging(state, &view);
     match state.focus {
         CandidateFocus::Work => match key.code {
-            K::Tab => state.focus = next_focus(state.focus),
-            K::Char(c) if !control => match work_key_action(c) {
-                Some(WorkKeyAction::SelectPreset(preset)) => {
-                    apply(
+            K::Tab => {
+                // Tab on the `Other` row (or from anywhere in Work)
+                // opens the own-approach editor.
+                state.staging.cursor_to_other(view.options.len());
+                state.focus = CandidateFocus::Other;
+            }
+            K::Up => state.staging.move_cursor(-1, view.options.len()),
+            K::Down => state.staging.move_cursor(1, view.options.len()),
+            K::Left => navigate(state, runtime, status, &view, -1),
+            K::Right => navigate(state, runtime, status, &view, 1),
+            K::Char(' ') if !control => {
+                state.staging.mark_cursor(view.options.len());
+                // Selecting the other row opens its text field. The
+                // letters that follow belong to the approach, not to
+                // the redirect command.
+                if cursor_on_other(state, view.options.len()) {
+                    state.focus = CandidateFocus::Other;
+                }
+            }
+            K::Enter => {
+                let option_count = view.options.len();
+                if option_count == 0 {
+                    *status = Some("loading".to_string());
+                } else if cursor_on_other(state, option_count) {
+                    submit_other_row(state, runtime, status, &view);
+                } else if let Some(preset) = state
+                    .staging
+                    .current_stage()
+                    .map(|stage| stage.cursor as u8)
+                    .filter(|preset| (*preset as usize) < option_count)
+                {
+                    // Enter submits the highlighted row. Space still
+                    // marks, but the cursor alone is the selection.
+                    state.staging.mark_cursor(option_count);
+                    if apply(
                         status,
                         runtime.send_intent(IntentKind::SelectPreset { preset }),
-                    );
+                    ) {
+                        remember_submit(state, &view, SnapshotSelection::Preset(preset));
+                    }
                 }
-                Some(WorkKeyAction::OpenOther) => state.focus = CandidateFocus::Other,
+            }
+            // The other row is a text field: `d` and the other work
+            // keys are letters of the approach, not commands.
+            K::Char(c) if !control && cursor_on_other(state, view.options.len()) => {
+                state.staging.mark_cursor(view.options.len());
+                state.focus = CandidateFocus::Other;
+                let _ = other_insert(&mut state.work, &c.to_string(), false);
+                state.staging.save_other_text(state.work.other_text());
+            }
+            K::Char(c) if !control => match work_key_action(c) {
+                Some(WorkKeyAction::SelectPreset(preset)) => {
+                    // Number keys only move the mark; Enter submits.
+                    if (preset as usize) < view.options.len() {
+                        state.staging.move_cursor(
+                            preset as i32
+                                - state
+                                    .staging
+                                    .current_stage()
+                                    .map_or(0, |stage| stage.cursor)
+                                    as i32,
+                            view.options.len(),
+                        );
+                        state.staging.mark_cursor(view.options.len());
+                    }
+                }
+                Some(WorkKeyAction::OpenOther) => {
+                    state.staging.cursor_to_other(view.options.len());
+                    state.staging.mark_cursor(view.options.len());
+                    state.focus = CandidateFocus::Other;
+                }
                 Some(WorkKeyAction::Continue) => {
                     apply(status, runtime.send_intent(IntentKind::Continue));
                 }
@@ -98,23 +288,27 @@ pub fn handle_live_key<T: CandidateTransport>(
         CandidateFocus::Other => match key.code {
             K::Tab => state.focus = next_focus(state.focus),
             K::Enter => {
+                // A blank `Other` is a valid submission.
                 let text = state.work.other_text().to_string();
-                if text.trim().is_empty() {
-                    *status = Some("type your own approach first, then press enter.".to_string());
-                } else if apply(
+                if apply(
                     status,
-                    runtime.send_intent(IntentKind::SelectOther { text }),
+                    runtime.send_intent(IntentKind::SelectOther { text: text.clone() }),
                 ) {
+                    remember_submit(state, &view, SnapshotSelection::Other(text));
                     state.work.set_other_text("");
+                    state.staging.save_other_text("");
+                    state.staging.mark_cursor(view.options.len());
                     state.focus = CandidateFocus::Work;
                 }
             }
             K::Backspace => {
                 let text = pop_last(state.work.other_text());
                 state.work.set_other_text(&text);
+                state.staging.save_other_text(state.work.other_text());
             }
             K::Char(c) if !control => {
                 let _ = other_insert(&mut state.work, &c.to_string(), false);
+                state.staging.save_other_text(state.work.other_text());
             }
             _ => {}
         },
@@ -123,7 +317,7 @@ pub fn handle_live_key<T: CandidateTransport>(
             K::Enter => {
                 let text = state.work.redirect_text().to_string();
                 if text.trim().is_empty() {
-                    *status = Some("type a redirect first, then press enter.".to_string());
+                    *status = Some("type additional notes first, then press enter.".to_string());
                 } else if apply(status, runtime.send_intent(IntentKind::Redirect { text })) {
                     state.work.set_redirect_text("");
                     state.focus = CandidateFocus::Work;
@@ -143,6 +337,7 @@ pub fn handle_live_key<T: CandidateTransport>(
                 if text.trim().is_empty() {
                     *status = Some("type a message first, then press enter.".to_string());
                 } else if apply(status, runtime.send_chat(&text)) {
+                    state.chat.remember_sent(&text);
                     state.chat.clear_input();
                 }
             }
