@@ -4,6 +4,7 @@ pub mod args;
 pub mod candidate;
 pub mod candidate_actions;
 pub mod candidate_chat;
+pub mod candidate_connect;
 pub mod candidate_final;
 pub mod candidate_run;
 pub mod candidate_runtime;

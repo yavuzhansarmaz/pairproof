@@ -2,8 +2,10 @@
 //! design language. The question pane gets a bold title line,
 //! navy section headings, a two-column reading padding, a pinned
 //! focus footer, and its own scroll offset; the Coach pane keeps
-//! its existing rendering. Pane focus, the draggable split, and
-//! every key action are unchanged — this module only draws.
+//! its existing rendering with its own independent scroll offset
+//! and a pinned `message:` footer. Pane focus, the draggable
+//! split, and every key action are unchanged — this module only
+//! draws.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -15,6 +17,7 @@ use crate::tui::render::{
     body_line, title_line, FRAME_COLOR, HEADING_COLOR, PAIR_COLOR, PROOF_COLOR, TEXT_COLOR,
 };
 use crate::tui::render_preview::{preview_line_kind, PreviewRowKind};
+use crate::tui::viewport::{clamp_wrapped_scroll, wrapped_rows, wrapped_window};
 
 /// Styles one question-pane line like the expert preview: the
 /// first line is the bold title, section headings are navy bold,
@@ -74,12 +77,38 @@ fn pane_block(title: Line<'static>, focused: bool) -> Block<'static> {
         .border_style(Style::default().fg(border))
 }
 
+/// Visible window of `lines`: `(global_index, line)` pairs from
+/// the window start covering `local_scroll + visible + 1` rows,
+/// plus the local scroll to apply to the Paragraph.
+fn window_lines(
+    lines: &[String],
+    width: usize,
+    scroll: usize,
+    visible: usize,
+) -> (Vec<(usize, &String)>, usize) {
+    let (start, local) = wrapped_window(lines, width, scroll, visible);
+    let need = local + visible + 1;
+    let mut taken = Vec::new();
+    let mut covered = 0usize;
+    for (offset, line) in lines.iter().skip(start).enumerate() {
+        if covered >= need && !taken.is_empty() {
+            break;
+        }
+        covered += wrapped_rows(line, width);
+        taken.push((start + offset, line));
+    }
+    (taken, local)
+}
+
 /// Draws the candidate solving screen as two panes: question and
 /// approaches on the left, the Coach chat on the right, split at
 /// `question_pct` percent (draggable in the TTY loop, 30..=70). The
 /// focused pane's border uses the purple accent, the other the
 /// frame navy. The question pane scrolls by `question_scroll`
-/// wrapped rows; its `focus:` hint line is pinned to the bottom.
+/// and the Coach pane by `coach_scroll`, independently; both are
+/// clamped to the content so overscroll never blanks a pane. The
+/// question pane's `focus:` hint line and the Coach pane's
+/// `message:` line are each pinned to the bottom of their pane.
 pub fn draw_candidate_screen(
     frame: &mut Frame,
     left: &[String],
@@ -87,6 +116,7 @@ pub fn draw_candidate_screen(
     chat_focused: bool,
     question_pct: u16,
     question_scroll: usize,
+    coach_scroll: usize,
 ) {
     let chunks = ratatui::layout::Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
@@ -124,16 +154,20 @@ pub fn draw_candidate_screen(
             .constraints([ratatui::layout::Constraint::Min(0)])
             .split(padded)
     };
-    let content: Vec<Line> = content_lines
+    let q_width = usize::from(rows[0].width);
+    let q_visible = usize::from(rows[0].height);
+    let effective_question =
+        clamp_wrapped_scroll(content_lines, q_width, question_scroll, q_visible);
+    let (q_window, q_local) = window_lines(content_lines, q_width, effective_question, q_visible);
+    let content: Vec<Line> = q_window
         .iter()
-        .enumerate()
-        .map(|(index, line)| question_line(line, index == 0))
+        .map(|(index, line)| question_line(line, *index == 0))
         .collect();
     frame.render_widget(
         Paragraph::new(content)
             .style(Style::default().fg(TEXT_COLOR))
             .wrap(ratatui::widgets::Wrap { trim: true })
-            .scroll((question_scroll.min(u16::MAX as usize) as u16, 0)),
+            .scroll((q_local.min(u16::MAX as usize) as u16, 0)),
         rows[0],
     );
     if let Some(footer) = footer_line {
@@ -164,10 +198,45 @@ pub fn draw_candidate_screen(
         width: inner.width.saturating_sub(4),
         ..inner
     };
+    let (coach_content, coach_footer): (&[String], Option<&str>) =
+        match right.last().map(String::as_str) {
+            Some(last) if last.starts_with("message:") => (&right[..right.len() - 1], Some(last)),
+            _ => (right, None),
+        };
+    let coach_rows = if coach_footer.is_some() {
+        ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                ratatui::layout::Constraint::Min(0),
+                ratatui::layout::Constraint::Length(1),
+            ])
+            .split(padded)
+    } else {
+        ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([ratatui::layout::Constraint::Min(0)])
+            .split(padded)
+    };
+    let c_width = usize::from(coach_rows[0].width);
+    let c_visible = usize::from(coach_rows[0].height);
+    let effective_coach = clamp_wrapped_scroll(coach_content, c_width, coach_scroll, c_visible);
+    let (c_window, c_local) = window_lines(coach_content, c_width, effective_coach, c_visible);
     frame.render_widget(
-        Paragraph::new(right.iter().map(|line| body_line(line)).collect::<Vec<_>>())
-            .style(Style::default().fg(TEXT_COLOR))
-            .wrap(ratatui::widgets::Wrap { trim: true }),
-        padded,
+        Paragraph::new(
+            c_window
+                .iter()
+                .map(|(_, line)| body_line(line))
+                .collect::<Vec<_>>(),
+        )
+        .style(Style::default().fg(TEXT_COLOR))
+        .wrap(ratatui::widgets::Wrap { trim: true })
+        .scroll((c_local.min(u16::MAX as usize) as u16, 0)),
+        coach_rows[0],
     );
+    if let Some(footer) = coach_footer {
+        frame.render_widget(
+            Paragraph::new(body_line(footer)).style(Style::default().fg(TEXT_COLOR)),
+            coach_rows[1],
+        );
+    }
 }

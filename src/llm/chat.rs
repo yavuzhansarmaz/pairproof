@@ -185,6 +185,29 @@ pub fn log_boundary_violation_if_present(
     Ok(true)
 }
 
+/// Runs one score-neutral chat turn on the light model, streaming deltas.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_chat_streaming(
+    client: &MetaClient,
+    session: &mut Session,
+    state: &ChatState,
+    history: &[Message],
+    user_message: &str,
+    at_ms: u64,
+    on_chunk: &mut (dyn FnMut(&str) + Send),
+) -> Result<LlmOutcome<String>, LlmError> {
+    let model = client.light_model.clone();
+    let messages = assemble_chat_messages(state, history, user_message);
+    let outcome = client
+        .chat_stream_each(&model, messages, ChatOptions::low(), on_chunk)
+        .await?;
+    log_boundary_violation_if_present(session, &outcome.content, at_ms)?;
+    Ok(LlmOutcome {
+        value: outcome.content,
+        usage: outcome.usage,
+    })
+}
+
 /// Runs one score-neutral chat turn on the light model.
 pub async fn run_chat(
     client: &MetaClient,

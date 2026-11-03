@@ -330,7 +330,7 @@ pub fn candidate_screen_lines(state: &CandidateRunState) -> Vec<String> {
                 lines.push("pasting is blocked here; type instead.".to_string());
             }
             lines.extend(state.chat.chat_lines());
-            lines.push("focus: work/other/redirect/chat (tab switches)".to_string());
+            lines.push("focus: tab or click a panel to switch question/coach".to_string());
             lines
         }
         CandidateScreen::Final => match state.app.session() {

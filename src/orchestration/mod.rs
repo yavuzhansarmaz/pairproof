@@ -40,9 +40,10 @@ pub use control::{
     build_snapshot, build_snapshot_with_recovery, generate_intent_id, parse_intent_bytes,
     parse_intent_line, parse_snapshot, resolve_control_file, snapshot_service_name,
     CandidateSnapshot, ControlError, Intent, IntentKind, ParsedIntents, ProcessedState,
-    SnapshotFinal, SnapshotOption, SnapshotQuestion, SnapshotRecovery, SnapshotTest, CONTROL_ROOT,
-    INBOX_DIR, INTENT_FILE, INTENT_REL, INTENT_VERSION, MAX_CONTROL_READ_BYTES, MAX_INTENT_BYTES,
-    OUTBOX_DIR, PROCESSED_FILE, SNAPSHOT_FILE, SNAPSHOT_REL, SNAPSHOT_VERSION,
+    SnapshotFinal, SnapshotOption, SnapshotQuestion, SnapshotRecovery, SnapshotSelection,
+    SnapshotTest, CONTROL_ROOT, INBOX_DIR, INTENT_FILE, INTENT_REL, INTENT_VERSION,
+    MAX_CONTROL_READ_BYTES, MAX_INTENT_BYTES, OUTBOX_DIR, PROCESSED_FILE, SNAPSHOT_FILE,
+    SNAPSHOT_REL, SNAPSHOT_VERSION,
 };
 pub use control_client::{CandidateControlClient, SshControlClient};
 pub use control_server::{

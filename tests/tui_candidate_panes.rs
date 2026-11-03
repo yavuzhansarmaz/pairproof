@@ -93,7 +93,7 @@ fn drawn(scroll: usize, width: u16, height: u16) -> ratatui::buffer::Buffer {
     let left = long_left_lines();
     let right = vec!["coach: hello".to_string(), "message: ".to_string()];
     terminal
-        .draw(|frame| draw_candidate_screen(frame, &left, &right, false, 60, scroll))
+        .draw(|frame| draw_candidate_screen(frame, &left, &right, false, 60, scroll, 0))
         .expect("draw");
     terminal.backend().buffer().clone()
 }

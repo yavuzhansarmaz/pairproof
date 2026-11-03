@@ -14,9 +14,10 @@ pub struct CandidateView {
     pub question_index: Option<usize>,
     pub statement: Option<String>,
     pub options: Vec<SnapshotOption>,
-    pub selected: Option<String>,
+    pub selected: Option<SnapshotSelection>,
     pub latest_test: Option<SnapshotTest>,
     pub chat_replies: Vec<String>,
+    pub chat_partial: Option<String>,
     pub final_breakdown: Option<SnapshotFinal>,
     pub recovery: Option<SnapshotRecovery>,
 }
@@ -33,6 +34,7 @@ impl CandidateView {
                 selected: None,
                 latest_test: None,
                 chat_replies: Vec::new(),
+                chat_partial: None,
                 final_breakdown: None,
                 recovery: None,
             };
@@ -51,6 +53,7 @@ impl CandidateView {
             selected: s.selected.clone(),
             latest_test: s.latest_test,
             chat_replies: s.chat_replies.clone(),
+            chat_partial: s.chat_partial.clone(),
             final_breakdown: s.final_breakdown.clone(),
             recovery: s.recovery.clone(),
         }
@@ -77,21 +80,50 @@ impl CandidateView {
             (Some(i), Some(t)) => lines.push(format!("Q{}: {}", i + 1, t)),
             _ => lines.push("no active question.".to_string()),
         }
+        if self.options.is_empty() {
+            lines.push("approaches are not available yet.".to_string());
+        } else {
+            lines.push(format!(
+                "approaches: 1-{} choose, {} other (your own)",
+                self.options.len(),
+                self.options.len() + 1
+            ));
+            let selected_preset = match &self.selected {
+                Some(SnapshotSelection::Preset(n)) => {
+                    Some(*n as usize).filter(|n| *n < self.options.len())
+                }
+                _ => None,
+            };
+            for (i, o) in self.options.iter().enumerate() {
+                let plain = format!("{}: {} - {}", i + 1, o.title, o.summary);
+                if selected_preset == Some(i) {
+                    lines.push(format!("> {plain}"));
+                } else {
+                    lines.push(plain);
+                }
+            }
+            let other_plain = format!(
+                "{}: other - describe your own approach",
+                self.options.len() + 1
+            );
+            let other_selected = matches!(self.selected, Some(SnapshotSelection::Other(_)));
+            if other_selected {
+                lines.push(format!("> {other_plain}"));
+            } else {
+                lines.push(other_plain);
+            }
+        }
         match &self.statement {
             Some(s) => lines.extend(s.lines().map(str::to_string)),
             None => lines.push("statement is not available yet.".to_string()),
         }
-        if self.options.is_empty() {
-            lines.push("approaches are not available yet.".to_string());
-        } else {
-            for (i, o) in self.options.iter().enumerate() {
-                lines.push(format!("{}: {} - {}", i + 1, o.title, o.summary));
-            }
-            lines.push("other: describe your own approach".to_string());
-        }
         lines.push(format!(
             "selected approach: {}",
-            self.selected.as_deref().unwrap_or("none")
+            match &self.selected {
+                Some(SnapshotSelection::Preset(n)) => format!("preset {n}"),
+                Some(SnapshotSelection::Other(text)) => text.clone(),
+                None => "none".to_string(),
+            }
         ));
         match self.latest_test {
             Some(t) => lines.push(format!(
@@ -139,12 +171,13 @@ impl CandidateView {
     }
     /// Right-pane lines: the Coach welcome first, then its replies.
     pub fn chat_lines(&self) -> Vec<String> {
-        let mut lines = vec![format!("coach: {COACH_WELCOME}")];
-        lines.extend(
-            self.chat_replies
-                .iter()
-                .map(|reply| format!("coach: {reply}")),
-        );
+        let mut lines = vec![format!("> {COACH_WELCOME}")];
+        lines.extend(self.chat_replies.iter().map(|reply| format!("> {reply}")));
+        if let Some(partial) = &self.chat_partial {
+            if !sanitize_display(partial).trim().is_empty() {
+                lines.push(format!("> {partial}"));
+            }
+        }
         lines.iter().map(|line| sanitize_display(line)).collect()
     }
     /// Sanitized lines; a rating renders only from a carried breakdown.
@@ -153,7 +186,7 @@ impl CandidateView {
             return vec!["waiting for the expert.".to_string()];
         }
         let mut lines = self.question_lines();
-        if !self.chat_replies.is_empty() {
+        if !self.chat_replies.is_empty() || self.chat_partial.is_some() {
             lines.extend(self.chat_lines());
         }
         lines

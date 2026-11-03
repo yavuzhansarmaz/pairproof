@@ -108,6 +108,7 @@ fn long_statement_does_not_hide_final_summary() {
         selected: None,
         latest_test: None,
         chat_replies: Vec::new(),
+        chat_partial: None,
         final_breakdown: Some(SnapshotFinal {
             rating: 8.25,
             per_question: vec![SnapshotFinalQuestion {

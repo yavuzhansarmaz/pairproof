@@ -54,6 +54,7 @@ pub(crate) struct ExpertLoopState {
     pub(crate) question_preview_tick: usize,
     pub(crate) pending: PendingWork,
     pub(crate) loading_tick: usize,
+    pub(crate) auto_load_attempted: Option<crate::tui::expert_runtime::SelectionScreen>,
 }
 
 impl Default for ExpertLoopState {
@@ -79,6 +80,7 @@ impl Default for ExpertLoopState {
             question_preview_tick: 0,
             pending: PendingWork::default(),
             loading_tick: 0,
+            auto_load_attempted: None,
         }
     }
 }

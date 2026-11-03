@@ -102,6 +102,7 @@ impl ExpertLoopState {
         }
         self.poll_proposal(app);
         self.poll_runtime_build(app);
+        self.maybe_auto_start_selection_fetch(app);
         self.poll_selection_fetch(app);
         self.poll_api_key_check(app);
         self.poll_question_preview();

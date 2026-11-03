@@ -155,6 +155,15 @@ impl ExpertRuntime {
             generator: &*self.generator,
             chat: &*self.chat,
         };
+        let base = build_snapshot_with_recovery(
+            &self.orch,
+            &self.pipeline,
+            self.sync_phase,
+            self.executor.chat_replies(),
+            None,
+            self.snapshot_recovery(),
+        );
+        self.executor.set_snapshot_base(base);
         let reports = self
             .executor
             .drain(
@@ -168,7 +177,7 @@ impl ExpertRuntime {
         if reports.iter().any(|r| r.outcome == ApplyOutcome::Applied) {
             self.last_seen_ms = self.fresh_now(now_ms);
         }
-        let snapshot = build_snapshot_with_recovery(
+        let mut snapshot = build_snapshot_with_recovery(
             &self.orch,
             &self.pipeline,
             self.sync_phase,
@@ -176,6 +185,7 @@ impl ExpertRuntime {
             None,
             self.snapshot_recovery(),
         );
+        snapshot.chat_partial = self.executor.chat_partial().map(str::to_string);
         publish_snapshot(&*self.control_io, &snapshot).await?;
         self.maybe_trigger_load();
         self.check_heartbeat(self.fresh_now(now_ms)).await;

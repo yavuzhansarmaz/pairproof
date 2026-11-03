@@ -35,11 +35,13 @@ mod view;
 pub use self::live::{candidate_loop, default_workspace};
 pub use self::live_keys::handle_live_key;
 pub use self::panes::{
-    connect_submit_shows_loading, divider_hit, screen_centered, split_pct_for_column,
-    DEFAULT_QUESTION_PCT,
+    clamp_scroll, connect_submit_shows_loading, divider_hit, focus_for_pane, max_scroll,
+    pane_click_target, pane_side_for_column, screen_centered, scroll_after_growth,
+    split_pct_for_column, PaneSide, DEFAULT_QUESTION_PCT,
 };
 pub use self::transport::{SshAuthVerifier, SshCandidateTransport};
 pub use self::view::CandidateView;
+pub use crate::orchestration::control::SnapshotSelection;
 /// Builds or reconnects the runtime once a verified string lands
 /// on Rules; failures reset to a fresh Connect state.
 fn establish_runtime_after_rules(

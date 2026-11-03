@@ -97,7 +97,10 @@ fn help_screen_lists_role_specific_keybindings() {
     assert!(wait.contains("waiting for the candidate"), "{wait}");
     let solving = candidate_help_lines(CandidateScreen::Solving).join("\n");
     assert!(solving.contains("1-4 choose an approach"), "{solving}");
-    assert!(solving.contains("tab switch pane"), "{solving}");
+    assert!(
+        solving.contains("tab or click a panel to switch pane"),
+        "{solving}"
+    );
     assert!(solving.contains("esc quit"), "{solving}");
     assert!(!solving.contains("q quit"), "{solving}");
     assert!(role.contains("pairproof update"), "{role}");

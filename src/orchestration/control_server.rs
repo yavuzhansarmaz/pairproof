@@ -76,6 +76,8 @@ pub struct ControlExecutor {
     chat_history: Vec<Message>,
     chat_replies: Vec<String>,
     reconnects_seen: Option<usize>,
+    snapshot_base: Option<CandidateSnapshot>,
+    chat_partial: String,
 }
 impl ControlExecutor {
     /// Creates an executor, reloading any persisted processed ledger.
@@ -86,7 +88,7 @@ impl ControlExecutor {
             Some(_) => return Err(ControlError::WrongSession),
             None => ProcessedState::new(session_id),
         };
-        Ok(Self { session_id: session_id.into(), processed, chat_history: Vec::new(), chat_replies: Vec::new(), reconnects_seen: None })
+        Ok(Self { session_id: session_id.into(), processed, chat_history: Vec::new(), chat_replies: Vec::new(), reconnects_seen: None, snapshot_base: None, chat_partial: String::new() })
     }
     /// Returns the durable processed ledger.
     pub fn processed(&self) -> &ProcessedState {
@@ -96,6 +98,12 @@ impl ControlExecutor {
     pub fn chat_replies(&self) -> &[String] {
         &self.chat_replies
     }
+    /// Sets the base snapshot used for in-progress partial publications.
+    #[rustfmt::skip]
+    pub fn set_snapshot_base(&mut self, snapshot: CandidateSnapshot) { self.snapshot_base = Some(snapshot); }
+    /// Returns the in-progress partial reply, if any.
+    #[rustfmt::skip]
+    pub fn chat_partial(&self) -> Option<&str> { if self.chat_partial.is_empty() { None } else { Some(&self.chat_partial) } }
     /// Returns the session this executor is bound to.
     pub fn session_id(&self) -> &str {
         &self.session_id
@@ -129,7 +137,7 @@ impl ControlExecutor {
                     outcome: ApplyOutcome::Rejected, error: Some(ControlError::SequenceGap { expected, got: intent.seq }.to_string()) });
                 continue;
             }
-            match self.apply_one(intent, orch, pipe, transports, now_ms).await {
+            match self.apply_one(io, intent, orch, pipe, transports, now_ms).await {
                 Ok(()) => { self.consume(io, intent).await?; reports.push(ApplyReport::applied(intent)); }
                 Err(err) => {
                     // Illegal transitions are consumed: redelivery is a duplicate, never a retry loop.
@@ -178,8 +186,8 @@ impl ControlExecutor {
         io.store_processed(&self.processed).await
     }
 
-    #[rustfmt::skip]
-    async fn apply_one(&mut self, intent: &Intent, orch: &mut Orchestrator,
+    #[rustfmt::skip] #[allow(unused_assignments)]
+    async fn apply_one(&mut self, io: &dyn ControlIo, intent: &Intent, orch: &mut Orchestrator,
         pipe: &mut QuestionPipeline, t: &ControlTransports<'_>, now_ms: u64) -> Result<(), PipelineError> {
         match &intent.kind {
             IntentKind::SelectPreset { preset } => pipe.select_preset(orch, *preset, t.coding, t.sandbox, now_ms).await.map(|_| ()),
@@ -192,9 +200,30 @@ impl ControlExecutor {
             IntentKind::RequestReQuestion => orch.request_requestion(now_ms).map_err(PipelineError::from),
             IntentKind::ChangeApproach => pipe.change_approach(orch, now_ms),
             IntentKind::ChatRequest { text, .. } => {
-                let reply = pipe.submit_chat(orch, t.chat, &mut self.chat_history, text, now_ms).await?;
-                self.chat_replies.push(reply);
-                Ok(())
+                // Bounded publication: ~10/s ticker + first-chunk wakeup + completion flush;
+                // memory is bounded by the partial reply text itself — no delta queue.
+                let shared: std::sync::Arc<std::sync::Mutex<String>> = std::sync::Arc::new(std::sync::Mutex::new(String::new())); let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+                let (buf, wake) = (shared.clone(), notify.clone());
+                let mut on_chunk = move |delta: &str| {
+                    let was_empty = { let mut guard = buf.lock().unwrap_or_else(|e| e.into_inner()); let empty = guard.is_empty(); guard.push_str(delta); empty };
+                    if was_empty { wake.notify_one(); }
+                };
+                self.chat_partial.clear(); let mut last_published = String::new();
+                macro_rules! publish_if_changed { () => {{ let current = shared.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                    if !current.is_empty() && current != last_published { if let Some(mut snap) = self.snapshot_base.clone() { snap.chat_replies.clone_from(&self.chat_replies); snap.chat_partial = Some(current.clone()); let _ = publish_snapshot(io, &snap).await; } self.chat_partial.clone_from(&current); last_published = current; } }}; }
+                let submit = pipe.submit_chat_streaming(orch, t.chat, &mut self.chat_history, text, now_ms, &mut on_chunk);
+                tokio::pin!(submit);
+                let mut ticker = tokio::time::interval(Duration::from_millis(100)); ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                // Biased polling checks wakeup/ticker before submit, so a ready stream cannot starve first-chunk publication.
+                let result = loop { tokio::select! { biased;
+                    _ = notify.notified() => publish_if_changed!(),
+                    _ = ticker.tick() => publish_if_changed!(),
+                    res = &mut submit => { publish_if_changed!(); break res; }
+                } };
+                let full = shared.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                self.chat_partial.clear();
+                match result { Ok(reply) => { self.chat_replies.push(reply); Ok(()) } Err(err) => {
+                    if !full.is_empty() { self.chat_replies.push(format!("{full} [response interrupted]")); } Err(err) } }
             }
         }
     }

@@ -51,7 +51,7 @@ fn open_api_key_change(app: &mut app::ExpertApp) {
 /// Starts a background pool fetch for a selection screen: the
 /// runtime moves to a worker thread (the loading screen shows in
 /// the meantime) and comes back through `PendingWork::selection_rx`.
-fn start_selection_fetch(
+pub(crate) fn start_selection_fetch(
     runtime: &mut Option<ExpertRuntime>,
     pending: &mut PendingWork,
     screen: SelectionScreen,

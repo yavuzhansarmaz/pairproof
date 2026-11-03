@@ -139,13 +139,14 @@ fn candidate_view(rec: Option<SnapshotRecovery>) -> CandidateView {
             title: "Hash map".to_string(),
             summary: "One pass lookup".to_string(),
         }],
-        selected: Some("preset 0".to_string()),
+        selected: Some(SnapshotSelection::Preset(0)),
         latest_test: Some(SnapshotTest {
             passed: 3,
             failed: 1,
             at_ms: 10,
         }),
         chat_replies: vec!["Try a hash map.".to_string()],
+        chat_partial: None,
         final_breakdown: None,
         recovery: rec,
     }
@@ -354,7 +355,7 @@ fn recovery_ui_preserves_existing_candidate_progress() {
             title: "Hash map".to_string(),
             summary: "One pass lookup".to_string(),
         }],
-        selected: Some("preset 0".to_string()),
+        selected: Some(SnapshotSelection::Preset(0)),
         latest_test: Some(SnapshotTest {
             passed: 3,
             failed: 1,
@@ -362,6 +363,7 @@ fn recovery_ui_preserves_existing_candidate_progress() {
         }),
         chat_replies: vec!["Try a hash map.".to_string()],
         final_breakdown: None,
+        chat_partial: None,
         recovery: Some(recovery(true, 30_000, false)),
     };
     let view = CandidateView::from_snapshot(Some(&snapshot));

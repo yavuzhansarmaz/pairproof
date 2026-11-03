@@ -27,6 +27,7 @@ fn snapshot(statement: Option<String>) -> CandidateSnapshot {
         latest_test: None,
         chat_replies: vec!["Try sorting first.".to_string()],
         final_breakdown: None,
+        chat_partial: None,
         recovery: None,
     }
 }
@@ -64,14 +65,14 @@ fn missing_statement_is_waiting_and_panes_split() {
     let left = view.question_lines().join("\n");
     assert!(left.contains("Plain statement."), "{left}");
     assert!(left.contains("1: Sort first - Sort then sweep"), "{left}");
-    assert!(!left.contains("coach:"), "{left}");
+    assert!(!left.contains("Talking with me"), "{left}");
     let right = view.chat_lines();
     assert_eq!(
         right[0],
-        "coach: Talking with me won't affect your score. \
+        "> Talking with me won't affect your score. \
          You can ask me anything about the question on the left, in any language you like."
     );
-    assert_eq!(right[1], "coach: Try sorting first.");
+    assert_eq!(right[1], "> Try sorting first.");
 }
 
 #[test]
@@ -88,6 +89,7 @@ fn coach_pane_title_is_coach_not_ai_coach() {
                 &view.chat_lines(),
                 true,
                 60,
+                0,
                 0,
             )
         })
@@ -109,7 +111,7 @@ fn coach_welcome_is_first_even_before_any_reply() {
     let view = CandidateView::from_snapshot(None);
     let lines = view.chat_lines();
     assert_eq!(lines.len(), 1);
-    assert!(lines[0].starts_with("coach: Talking with me"), "{lines:?}");
+    assert!(lines[0].starts_with("> Talking with me"), "{lines:?}");
     assert!(lines[0].contains("won't affect your score"), "{lines:?}");
     assert!(lines[0].contains("in any language you like"), "{lines:?}");
 }

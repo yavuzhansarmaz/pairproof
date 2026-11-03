@@ -310,6 +310,14 @@ impl SnapshotRecovery {
 #[rustfmt::skip]
 pub fn snapshot_service_name(service: ServiceKind) -> &'static str { SnapshotRecovery::service_name(service) }
 
+/// Candidate-visible approach selection with an explicit kind; the
+/// displayed marker must never be inferred from custom text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SnapshotSelection {
+    Preset(u8),
+    Other(String),
+}
+
 /// Versioned, session-bound candidate snapshot. Deliberately has no
 /// field for quality, best index, expected tokens, or grading internals.
 #[rustfmt::skip]
@@ -317,8 +325,9 @@ pub fn snapshot_service_name(service: ServiceKind) -> &'static str { SnapshotRec
 pub struct CandidateSnapshot {
     pub v: u32, pub session_id: String, pub phase: String, pub sync_phase: String,
     pub current: Option<SnapshotQuestion>, pub options: Vec<SnapshotOption>,
-    pub selected: Option<String>, pub latest_test: Option<SnapshotTest>,
+    pub selected: Option<SnapshotSelection>, pub latest_test: Option<SnapshotTest>,
     pub chat_replies: Vec<String>, pub final_breakdown: Option<SnapshotFinal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub chat_partial: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] pub recovery: Option<SnapshotRecovery>,
 }
 
@@ -337,7 +346,7 @@ pub fn build_snapshot_with_recovery(orch: &Orchestrator, pipe: &QuestionPipeline
         index: orch.current_index().unwrap_or_default(), title: q.title.clone(), slug: q.title_slug.clone(),
         statement: pipe.current_statement(orch).map(|f| f.statement) });
     let selected = slot.and_then(|s| s.approach.as_ref()).map(|choice| match choice {
-        ApproachChoice::Preset(n) => format!("preset {n}"), ApproachChoice::Other(text) => text.clone() });
+        ApproachChoice::Preset(n) => SnapshotSelection::Preset(*n), ApproachChoice::Other(text) => SnapshotSelection::Other(text.clone()) });
     let latest_test = slot.and_then(|s| s.latest_test).map(|t| SnapshotTest { passed: t.passed, failed: t.failed, at_ms: t.at_ms });
     let options = pipe.candidate_options().into_iter().map(|o| SnapshotOption { title: o.title, summary: o.summary }).collect();
     let final_breakdown = if final_visible_to_candidate(orch.status()) {
@@ -346,7 +355,7 @@ pub fn build_snapshot_with_recovery(orch: &Orchestrator, pipe: &QuestionPipeline
     } else { None };
     CandidateSnapshot { v: SNAPSHOT_VERSION, session_id: orch.session_id().to_string(),
         phase: format!("{:?}", orch.status()), sync_phase: sync_phase.label().to_string(), current,
-        options, selected, latest_test, chat_replies: chat_replies.to_vec(), final_breakdown, recovery }
+        options, selected, latest_test, chat_replies: chat_replies.to_vec(), final_breakdown, chat_partial: None, recovery }
 }
 
 pub use crate::orchestration::control_codec::{
