@@ -2,22 +2,15 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use pairproof::core::{Language, QuestionRef, Session};
-use pairproof::leetcode::Difficulty;
+use pairproof::core::{Language, Session};
 use pairproof::llm::grading::QuestionScoringInput;
 use pairproof::llm::MetaClient;
 use pairproof::orchestration::consistency::{compare_grade_runs, run_consistency};
 use pairproof::orchestration::finalize::{GradeFuture, MetaQuestionGrader, QuestionGrader};
 use pairproof::scoring::{GradeOutcome, QuestionGrade};
 
-fn q(slug: &str) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.into(),
-        title: slug.into(),
-        difficulty: Difficulty::Easy,
-        acceptance_pct: None,
-    }
-}
+mod common_mod;
+use common_mod::q_easy as q;
 
 fn finished_session() -> Session {
     let easy = (0..5).map(|i| q(&format!("e{i}"))).collect();

@@ -3,8 +3,9 @@
 
 use std::future::Future;
 
-use crate::orchestration::{Clock, SystemClock};
 use crate::tui::{app, expert, expert_runtime, help};
+
+pub use crate::tui::shared::now_ms;
 
 /// Restores the terminal on drop for every exit or panic path.
 pub struct TtyGuard;
@@ -168,10 +169,6 @@ pub fn copy_to_clipboard(text: &str) {
         crate::tui::shared::base64_encode(text)
     );
     let _ = out.flush();
-}
-
-pub fn now_ms() -> u64 {
-    SystemClock.now_ms()
 }
 
 /// Sets a sanitized expert error status with a next step.

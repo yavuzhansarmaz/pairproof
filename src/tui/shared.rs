@@ -1,5 +1,20 @@
 //! Widgets and rendering shared by expert and candidate screens.
 
+use crate::orchestration::{Clock, SystemClock};
+
+/// Current time in milliseconds; the single definition both the
+/// expert and candidate loops delegate to.
+pub fn now_ms() -> u64 {
+    SystemClock.now_ms()
+}
+
+/// Returns `text` without its last character; empty stays empty.
+pub(crate) fn pop_last(text: &str) -> String {
+    let mut owned = text.to_string();
+    owned.pop();
+    owned
+}
+
 /// Role selected at startup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -57,6 +72,89 @@ pub fn base64_encode(data: &str) -> String {
             '='
         });
     }
+    out
+}
+
+/// Converts LeetCode-style HTML to plain text: block tags become
+/// line breaks, list items become `- ` bullets, inline tags vanish,
+/// and the common entities are decoded. The result is meant to be
+/// split into display lines and sanitized by the caller.
+pub fn html_to_text(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(open) = rest.find('<') {
+        out.push_str(&decode_entities(&rest[..open]));
+        let Some(close) = rest[open..].find('>') else {
+            break;
+        };
+        let raw_tag = &rest[open + 1..open + close];
+        let closing = raw_tag.starts_with('/');
+        let tag = raw_tag
+            .trim_start_matches('/')
+            .split(|c: char| c.is_whitespace() || c == '/')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        match tag.as_str() {
+            "br" => out.push('\n'),
+            "li" if closing => out.push('\n'),
+            "li" => out.push_str("\n- "),
+            "p" | "div" | "pre" | "ol" | "ul" | "table" | "tr" | "h1" | "h2" | "h3" | "h4" => {
+                out.push('\n')
+            }
+            _ => {}
+        }
+        rest = &rest[open + close + 1..];
+    }
+    out.push_str(&decode_entities(rest));
+    let mut text = String::with_capacity(out.len());
+    for line in out.lines() {
+        let line = line.trim_end();
+        if line.is_empty() && text.ends_with("\n\n") {
+            continue;
+        }
+        text.push_str(line);
+        text.push('\n');
+    }
+    text.trim().to_string()
+}
+
+fn decode_entities(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        let Some(end) = tail.find(';').filter(|end| *end <= 10) else {
+            out.push('&');
+            rest = &tail[1..];
+            continue;
+        };
+        let entity = &tail[1..end];
+        let decoded = match entity {
+            "quot" => Some("\"".to_string()),
+            "amp" => Some("&".to_string()),
+            "lt" => Some("<".to_string()),
+            "gt" => Some(">".to_string()),
+            "nbsp" => Some(" ".to_string()),
+            "apos" | "#39" => Some("'".to_string()),
+            _ => entity
+                .strip_prefix('#')
+                .and_then(|num| {
+                    num.strip_prefix(['x', 'X'])
+                        .map(|hex| u32::from_str_radix(hex, 16).ok())
+                        .unwrap_or_else(|| num.parse::<u32>().ok())
+                })
+                .and_then(char::from_u32)
+                .map(|c| c.to_string()),
+        };
+        match decoded {
+            Some(text) => out.push_str(&text),
+            None => out.push_str(&tail[..=end]),
+        }
+        rest = &tail[end + 1..];
+    }
+    out.push_str(rest);
     out
 }
 

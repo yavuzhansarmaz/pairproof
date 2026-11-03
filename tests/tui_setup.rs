@@ -315,3 +315,22 @@ fn injected_unsupported_extraction_surfaces_warning() {
     ));
     assert!(controller.language_warning().is_some());
 }
+
+#[test]
+fn backspace_deletes_characters_and_tab_toggles_setup_focus() {
+    let mut pastes = ExpertSetupPastes::new();
+    pastes
+        .apply_focused_paste("Senior Rust role, async systems.")
+        .expect("jd paste");
+    // Tab moves between the two boxes without touching the texts.
+    assert_eq!(pastes.focus(), ExpertSetupFocus::JobDescription);
+    pastes.toggle_focus();
+    assert_eq!(pastes.focus(), ExpertSetupFocus::AdditionalNotes);
+    pastes.toggle_focus();
+    assert_eq!(pastes.focus(), ExpertSetupFocus::JobDescription);
+    // Each Backspace deletes exactly one character.
+    pastes.backspace_focused();
+    assert_eq!(pastes.jd(), "Senior Rust role, async systems");
+    pastes.backspace_focused();
+    assert_eq!(pastes.jd(), "Senior Rust role, async system");
+}

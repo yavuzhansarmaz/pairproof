@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pairproof::connection::{ConnectionString, Endpoint, EphemeralUsername, Secret};
-use pairproof::core::{Language, QuestionRef};
-use pairproof::leetcode::{Difficulty, LeetCodeClient};
+use pairproof::core::Language;
+use pairproof::leetcode::LeetCodeClient;
 use pairproof::llm::MetaClient;
 use pairproof::orchestration::*;
 use pairproof::sandbox::lifecycle::{create_and_provision, destroy, destroy_by_session_id};
@@ -20,10 +20,11 @@ use pairproof::tui::expert_runtime::{
     DockerHelloSource, ExpertRuntime, ExpertRuntimeDeps, ExpertSessionSpec, PollOutcome,
 };
 
+mod common_mod;
+use common_mod::q_easy as q;
 #[rustfmt::skip]
 fn now_ms() -> u64 { u64::try_from(SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)).unwrap_or(u64::MAX) }
-#[rustfmt::skip]
-fn q(s: &str) -> QuestionRef { QuestionRef { title_slug: s.into(), title: s.into(), difficulty: Difficulty::Easy, acceptance_pct: None } }
+
 #[rustfmt::skip]
 fn chk(cond: bool, msg: &str) -> Result<(), String> { if cond { Ok(()) } else { Err(msg.to_string()) } }
 

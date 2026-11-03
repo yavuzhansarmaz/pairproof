@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use pairproof::connection::{Endpoint, EphemeralUsername, Fingerprint};
-use pairproof::core::{EventKind, Language, QuestionRef, Session};
+use pairproof::core::{EventKind, Language, Session};
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::coding::{CodingStepInput, CodingStepOutput};
 use pairproof::llm::Message;
@@ -16,17 +16,14 @@ use pairproof::tui::expert_runtime::{
     LocalHelloSource, PollOutcome,
 };
 
+mod common_mod;
+use common_mod::qs;
+
+fn tmp(name: &str) -> PathBuf {
+    common_mod::tmp("hello-consume", name)
+}
 type PF<'a, T> = PipelineFuture<'a, T>;
 const T0: u64 = 1_730_000_000_000;
-#[rustfmt::skip]
-fn q(s: &str, d: Difficulty) -> QuestionRef { QuestionRef { title_slug: s.into(), title: s.into(), difficulty: d, acceptance_pct: None } }
-#[rustfmt::skip]
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> { (0..n).map(|i| q(&format!("{p}{i}"), d)).collect() }
-#[rustfmt::skip]
-fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("pairproof-hello-consume-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d
-}
 
 struct FakeFetcher;
 #[rustfmt::skip]

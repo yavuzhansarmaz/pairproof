@@ -28,7 +28,7 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
         AppScreen::Preflight => lines.extend(["  m change the Meta API key"]),
         AppScreen::Setup => lines.extend([
             "  paste into the focused box, enter moves on",
-            "  backspace deletes the last character",
+            "  tab switches box, backspace deletes the last character",
             "  up/down scroll, drag a box border to resize",
             "  m change the Meta API key (back on Expert Setup)",
             "  b back a step, keeping your pasted text",
@@ -40,10 +40,20 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
             "  the [COPY] button copies the connection string on click",
             "  b back to the proposal",
         ]),
-        AppScreen::SelectMedium => lines.extend(["  enter load the medium questions"]),
-        AppScreen::SelectHard => lines.extend(["  enter load the hard questions"]),
+        AppScreen::SelectMedium => lines.extend([
+            "  up/down move, left/right change page",
+            "  space choose a question, enter continue with 3 chosen",
+            "  tab preview the question under the cursor (left/right switch question, b returns)",
+            "  r pick at random instead (enter confirms, b returns)",
+        ]),
+        AppScreen::SelectHard => lines.extend([
+            "  up/down move, left/right change page",
+            "  space choose a question, enter finish with 2 chosen",
+            "  tab preview the question under the cursor (left/right switch question, b returns)",
+            "  r pick at random instead (enter confirms, b returns)",
+        ]),
         AppScreen::Monitor => lines.extend([
-            "  R reissue a fresh connection string after a disconnect",
+            "  c reissue a fresh connection string after a disconnect",
             "  e end the session and build the final report",
         ]),
         AppScreen::Final => lines.extend(["  enter close"]),
@@ -81,7 +91,7 @@ pub fn disclosure_lines() -> Vec<String> {
         "asked again. the raw pastes are deleted when",
         "the session ends.",
         "",
-        "esc quit, b back to help.",
+        "b back to help, esc quit.",
     ])
 }
 

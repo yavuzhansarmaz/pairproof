@@ -102,6 +102,33 @@ pub fn monitor_view(
     }
 }
 
+/// Formats a millisecond duration as minutes and seconds
+/// (`2m 05s`), or bare seconds under a minute (`45s`).
+pub fn format_duration_ms(ms: u64) -> String {
+    let total_secs = ms / 1_000;
+    let minutes = total_secs / 60;
+    let seconds = total_secs % 60;
+    if minutes > 0 {
+        format!("{minutes}m {seconds:02}s")
+    } else {
+        format!("{seconds}s")
+    }
+}
+
+fn human_status(label: &str) -> &str {
+    match label {
+        "Setup" => "setup",
+        "WaitingForCandidate" => "waiting for candidate",
+        "InProgress" => "in progress",
+        "WaitingForExpert" => "waiting for expert",
+        "Scoring" => "scoring",
+        "Completed" => "completed",
+        "EndedByExpert" => "ended by expert",
+        "TechnicalFailure" => "technical failure",
+        other => other,
+    }
+}
+
 /// Renders the monitor view as deterministic lines.
 pub fn render_monitor_lines(view: &MonitorView) -> Vec<String> {
     let q = match (&view.current_index, &view.current_question) {
@@ -112,13 +139,13 @@ pub fn render_monitor_lines(view: &MonitorView) -> Vec<String> {
     let t = view.latest_test.as_deref().unwrap_or("no test run yet");
     let pq = view
         .per_question_ms
-        .map_or("n/a".into(), |ms| format!("{ms} ms"));
+        .map_or("n/a".into(), format_duration_ms);
     let mut lines = vec![
-        format!("status: {}", view.status_label),
+        format!("status: {}", human_status(&view.status_label)),
         format!("current: {q}"),
         format!("approach: {a}"),
         format!("latest test: {t}"),
-        format!("elapsed: {} ms", view.elapsed_ms),
+        format!("elapsed: {}", format_duration_ms(view.elapsed_ms)),
         format!("per-question: {pq}"),
         format!("live rating: {:.2}", view.rating),
     ];

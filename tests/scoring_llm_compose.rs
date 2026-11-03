@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use pairproof::core::{ApproachChoice, Language, QuestionRef, Session, SessionStatus};
+use pairproof::core::{ApproachChoice, Language, Session, SessionStatus};
 use pairproof::leetcode::{pick_random, CatalogEntry, Difficulty};
 use pairproof::llm::approaches::{parse_approach_grade, parse_approach_set};
 use pairproof::llm::grading::{
@@ -17,17 +17,11 @@ use pairproof::scoring::{
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
+mod common_mod;
+use common_mod::q;
+
 fn close(actual: f64, expected: f64) {
     assert!((actual - expected).abs() < 1e-9, "{actual} != {expected}");
-}
-
-fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty,
-        acceptance_pct: None,
-    }
 }
 
 fn started_easy() -> Session {

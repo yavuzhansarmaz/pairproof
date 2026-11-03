@@ -200,6 +200,51 @@ pub async fn select_questions_with_fallback(
     })
 }
 
+/// Fetches the full choosable pool for one difficulty, shrinking tags
+/// while the pool holds fewer than `min_count` questions. Unlike
+/// [`select_questions_with_fallback`] nothing is picked: the caller
+/// (the expert) chooses from the returned refs, in catalog order.
+/// When even the widest set holds fewer than `min_count`, the largest
+/// pool found is returned instead of an error (adaptive selection);
+/// only a pool that is empty everywhere errors.
+pub async fn pool_with_fallback(
+    client: &dyn PoolClient,
+    difficulty: Difficulty,
+    topics: &[&str],
+    min_count: usize,
+    exclude: &BTreeSet<String>,
+) -> Result<(Vec<QuestionRef>, FallbackReport), SelectionError> {
+    let mut best: (Vec<QuestionRef>, FallbackReport) = (
+        Vec::new(),
+        FallbackReport {
+            tags_used: Vec::new(),
+            widened: false,
+        },
+    );
+    for tags in fallback_tag_sets(topics) {
+        let entries = pooled_from(client, difficulty, &tags, exclude).await?;
+        let refs = difficulty_filter(&pool_to_refs(&entries), difficulty);
+        let report = FallbackReport {
+            tags_used: tags.iter().map(|tag| tag.to_string()).collect(),
+            widened: tags.len() < topics.len(),
+        };
+        if refs.len() >= min_count {
+            return Ok((refs, report));
+        }
+        if refs.len() > best.0.len() {
+            best = (refs, report);
+        }
+    }
+    if best.0.is_empty() {
+        Err(SelectionError::NotEnoughQuestions {
+            needed: min_count,
+            available: 0,
+        })
+    } else {
+        Ok(best)
+    }
+}
+
 /// Selects `count` questions at random from the topic pool.
 pub async fn select_questions(
     client: &LeetCodeClient,

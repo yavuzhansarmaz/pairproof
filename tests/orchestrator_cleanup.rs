@@ -2,13 +2,16 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use pairproof::core::{read_events, ArtifactLayout, ContextSummary, Language, QuestionRef};
+use pairproof::core::{read_events, ArtifactLayout, ContextSummary, Language};
 use pairproof::leetcode::Difficulty;
 use pairproof::orchestration::cleanup::{assert_artifacts_clean, CleanupCoordinator};
 use pairproof::orchestration::finalize::FinalizeError;
 use pairproof::orchestration::lifecycle::{CleanupReport, CleanupSequence, CleanupStep};
 use pairproof::orchestration::{Orchestrator, PipelineError, PipelineFuture, SandboxIo};
 use pairproof::sandbox::{RunnabilityReport, TestOutcome};
+
+mod common_mod;
+use common_mod::qs;
 
 type Log = Arc<Mutex<Vec<String>>>;
 type Codes = HashMap<usize, String>;
@@ -29,17 +32,7 @@ impl Drop for TempDir {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
-fn q(s: &str, d: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: s.into(),
-        title: s.into(),
-        difficulty: d,
-        acceptance_pct: None,
-    }
-}
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{p}{i}"), d)).collect()
-}
+
 fn started() -> Orchestrator {
     let mut o = Orchestrator::create(
         "s1".into(),

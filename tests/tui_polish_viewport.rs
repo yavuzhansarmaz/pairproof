@@ -547,9 +547,8 @@ fn session_setup_boxes_show_five_and_two_lines() {
     assert!(!rendered.contains("JD line 6"), "{rendered}");
     assert!(rendered.contains("Note line 2"), "{rendered}");
     assert!(!rendered.contains("Note line 3"), "{rendered}");
-    assert!(rendered.contains("paste the job description"), "{rendered}");
     assert!(
-        !rendered.contains("Paste the job description"),
+        rendered.contains("PairProof turns the pasted role into interview topics"),
         "{rendered}"
     );
     // No phantom blank row: with no status, the footer sits
@@ -634,4 +633,120 @@ fn candidate_final_pinned_lines_are_the_completion_summary() {
         candidate_final_pinned_lines(&CandidateFinal::TechnicalFailure),
         Vec::<String>::new()
     );
+}
+
+#[test]
+fn key_hints_colour_space_green_and_directions_navy() {
+    use pairproof::tui::app::AppScreen;
+    use pairproof::tui::help::expert_help_lines;
+    use pairproof::tui::render::{draw_screen, ENTER_KEY_COLOR, PAIR_COLOR};
+    let backend = ratatui::backend::TestBackend::new(100, 40);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = expert_help_lines(AppScreen::SelectMedium);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let green: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == ENTER_KEY_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(green.contains("space"), "{green}");
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PAIR_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(navy.contains("up/down"), "{navy}");
+    assert!(navy.contains("left/right"), "{navy}");
+}
+
+#[test]
+fn key_hints_colour_tab_navy_and_random_r_yellow() {
+    use pairproof::tui::app::AppScreen;
+    use pairproof::tui::help::expert_help_lines;
+    use pairproof::tui::render::{draw_screen, HELP_KEY_COLOR, PAIR_COLOR};
+    let backend = ratatui::backend::TestBackend::new(100, 40);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = expert_help_lines(AppScreen::SelectMedium);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PAIR_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(navy.contains("tab"), "{navy}");
+    let yellow: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == HELP_KEY_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    // `?` help key plus the `r` of `r pick at random`.
+    assert!(yellow.contains('?'), "{yellow}");
+    assert!(yellow.contains('r'), "{yellow}");
+}
+
+#[test]
+fn monitor_screen_renders_as_a_centred_panel() {
+    use pairproof::tui::app::{screen_lines, AppEvent, AppScreen, ExpertApp};
+    use pairproof::tui::render::draw_screen;
+    let mut app = ExpertApp::new();
+    app.set_has_proposal(true);
+    app.set_preflight_passed(true);
+    app.set_disclosure_acknowledged(true);
+    app.set_api_key_ready(true);
+    let _ = app.handle(AppEvent::SelectExpert);
+    let _ = app.handle(AppEvent::PreflightCompleted);
+    let _ = app.handle(AppEvent::ProposalReady);
+    let _ = app.handle(AppEvent::ProposalConfirmed);
+    app.set_connected(true);
+    let _ = app.handle(AppEvent::ConnectionLocked);
+    let _ = app.handle(AppEvent::MediumSelected);
+    let _ = app.handle(AppEvent::ExpertSelectionDone);
+    assert_eq!(app.screen(), AppScreen::Monitor);
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = screen_lines(&app);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    assert_eq!(
+        buffer[(0, 0)].symbol(),
+        " ",
+        "panel must not fill the frame"
+    );
+    let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(text.contains("Live monitor"), "{text}");
+    assert!(text.contains("c reissue after disconnect"), "{text}");
+}
+
+#[test]
+fn monitor_end_and_reissue_keys_are_navy() {
+    use pairproof::tui::app::AppScreen;
+    use pairproof::tui::help::expert_help_lines;
+    use pairproof::tui::render::{draw_screen, PAIR_COLOR};
+    let backend = ratatui::backend::TestBackend::new(100, 40);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    let lines = expert_help_lines(AppScreen::Monitor);
+    terminal
+        .draw(|frame| draw_screen(frame, &lines, true))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let navy: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.fg == PAIR_COLOR)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(navy.contains('c'), "{navy}");
+    assert!(navy.contains('e'), "{navy}");
 }

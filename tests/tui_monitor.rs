@@ -356,3 +356,16 @@ fn monitor_sanitizes_titles_and_approach_text() {
         Some("preset 2")
     );
 }
+
+#[test]
+fn monitor_durations_render_as_minutes_and_seconds() {
+    assert_eq!(format_duration_ms(0), "0s");
+    assert_eq!(format_duration_ms(45_000), "45s");
+    assert_eq!(format_duration_ms(60_000), "1m 00s");
+    assert_eq!(format_duration_ms(125_400), "2m 05s");
+    let view = monitor_view(&started(), &BTreeMap::new(), 3_725_000);
+    let rendered = render_monitor_lines(&view).join("\n");
+    assert!(rendered.contains("elapsed: 62m 04s"), "{rendered}");
+    assert!(rendered.contains("status: in progress"), "{rendered}");
+    assert!(!rendered.contains(" ms"), "{rendered}");
+}

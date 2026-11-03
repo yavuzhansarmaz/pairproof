@@ -1,4 +1,4 @@
-use pairproof::core::{ApproachChoice, EventKind, Language, QuestionRef, Session};
+use pairproof::core::{ApproachChoice, EventKind, Language, Session};
 use pairproof::leetcode::{CodeSnippet, Difficulty, Question};
 use pairproof::llm::approaches::{parse_approach_grade, parse_approach_set};
 use pairproof::llm::coding::{parse_coding_step, CodingStepInput, CodingStepOutput};
@@ -11,18 +11,11 @@ use pairproof::scoring::{ApproachGrade, ApproachSet};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use std::sync::Mutex;
+
+mod common_mod;
+use common_mod::qs;
 type PF<'a, T> = PipelineFuture<'a, T>;
-fn q(slug: &str, d: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.into(),
-        title: slug.into(),
-        difficulty: d,
-        acceptance_pct: None,
-    }
-}
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{p}{i}"), d)).collect()
-}
+
 fn started(lang: Language) -> Orchestrator {
     let mut o = Orchestrator::create("s1".into(), lang, qs("e", 5, Difficulty::Easy), 0).unwrap();
     o.mark_waiting_for_candidate(1).unwrap();

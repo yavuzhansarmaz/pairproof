@@ -1,4 +1,4 @@
-use pairproof::core::{EventKind, Language, QuestionRef, Session};
+use pairproof::core::{EventKind, Language, Session};
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::coding::{CodingStepInput, CodingStepOutput};
 use pairproof::llm::Message;
@@ -10,21 +10,21 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+
+mod common_mod;
+use common_mod::qs;
+
+fn tmp(name: &str) -> PathBuf {
+    common_mod::tmp("ctrl", name)
+}
 type PF<'a, T> = PipelineFuture<'a, T>;
-#[rustfmt::skip]
-fn q(s: &str, d: Difficulty) -> QuestionRef { QuestionRef { title_slug: s.into(), title: s.into(), difficulty: d, acceptance_pct: None } }
-#[rustfmt::skip]
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> { (0..n).map(|i| q(&format!("{p}{i}"), d)).collect() }
+
 #[rustfmt::skip]
 fn started() -> Orchestrator {
     let mut o = Orchestrator::create("s1".into(), Language::Python, qs("e", 5, Difficulty::Easy), 0).unwrap();
     o.mark_waiting_for_candidate(1).unwrap(); o.attach_candidate(2).unwrap(); o.start(3).unwrap(); o
 }
-#[rustfmt::skip]
-fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("pairproof-ctrl-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d
-}
+
 #[rustfmt::skip]
 fn count(orch: &Orchestrator, pred: impl Fn(&EventKind) -> bool) -> usize { orch.session().events().iter().filter(|e| pred(&e.kind)).count() }
 #[rustfmt::skip]

@@ -22,6 +22,12 @@ pub const TEXT_COLOR: Color = Color::Rgb(237, 242, 255);
 pub const HEADING_COLOR: Color = Color::Rgb(120, 165, 230);
 pub use crate::tui::setup_panel::{draw_setup_screen, setup_box_areas, SetupPanel};
 
+pub use crate::tui::render_candidate::draw_candidate_screen;
+pub use crate::tui::render_preview::{
+    draw_question_preview_screen, preview_body_rows, preview_metrics, PreviewMetrics, PreviewRow,
+    PreviewRowKind, QuestionPreviewData,
+};
+
 /// Pastel yellow used for the `?` help key on every screen.
 pub const HELP_KEY_COLOR: Color = Color::Rgb(250, 221, 141);
 /// Pastel red used for the `esc` quit key on every screen.
@@ -78,8 +84,11 @@ pub fn panel_area(area: Rect, lines: &[String], centered: bool) -> Rect {
 }
 
 /// Splits a line into spans, colouring standalone key tokens:
-/// `enter`, `[PASS]` and the disclosure `d` pastel green,
-/// `b` and `m` pastel navy,
+/// `enter`, `space` (in `space choose`/`space select` hints),
+/// `[PASS]` and the disclosure `d` pastel green,
+/// `b`, `m`, `up/down`, `left/right`, `tab`, and the monitor
+/// `e` (end) / `c` (reissue) keys pastel navy,
+/// the `r` of `r random`/`r pick` pastel yellow,
 /// `?` pastel yellow, and `esc` pastel red. Keys inside words
 /// stay white.
 pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
@@ -102,6 +111,19 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
         let is_back = bytes[i] == b'b' && prev_ok(i) && next_ok(i + 1);
         let is_disclosure = text[i..].starts_with("d read the disclosure") && prev_ok(i);
         let is_meta = bytes[i] == b'm' && prev_ok(i) && next_ok(i + 1);
+        // `space` is an action key only in its hint phrases, so a
+        // statement mentioning space complexity is never coloured.
+        let is_space = (text[i..].starts_with("space choose")
+            || text[i..].starts_with("space select"))
+            && prev_ok(i);
+        let is_up_down = text[i..].starts_with("up/down") && prev_ok(i) && next_ok(i + 7);
+        let is_left_right = text[i..].starts_with("left/right") && prev_ok(i) && next_ok(i + 10);
+        let is_tab = text[i..].starts_with("tab") && prev_ok(i) && next_ok(i + 3);
+        let is_random =
+            (text[i..].starts_with("r random") || text[i..].starts_with("r pick")) && prev_ok(i);
+        let is_end_key =
+            (text[i..].starts_with("e end") || text[i..].starts_with("e to end")) && prev_ok(i);
+        let is_reissue_key = text[i..].starts_with("c reissue") && prev_ok(i);
         let is_help = bytes[i] == b'?'
             && i > 0
             && bytes[i - 1] == b' '
@@ -114,6 +136,13 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
             || is_back
             || is_meta
             || is_disclosure
+            || is_space
+            || is_up_down
+            || is_left_right
+            || is_tab
+            || is_random
+            || is_end_key
+            || is_reissue_key
             || is_help
         {
             if raw_start < i {
@@ -133,6 +162,20 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
                 ("m", PAIR_COLOR, 1)
             } else if is_disclosure {
                 ("d", ENTER_KEY_COLOR, 1)
+            } else if is_space {
+                ("space", ENTER_KEY_COLOR, 5)
+            } else if is_up_down {
+                ("up/down", PAIR_COLOR, 7)
+            } else if is_left_right {
+                ("left/right", PAIR_COLOR, 10)
+            } else if is_tab {
+                ("tab", PAIR_COLOR, 3)
+            } else if is_random {
+                ("r", HELP_KEY_COLOR, 1)
+            } else if is_end_key {
+                ("e", PAIR_COLOR, 1)
+            } else if is_reissue_key {
+                ("c", PAIR_COLOR, 1)
             } else {
                 ("?", HELP_KEY_COLOR, 1)
             };
@@ -164,7 +207,7 @@ fn plain_line(line: &str) -> Line<'static> {
     Line::from(help_key_spans(line))
 }
 
-fn key_span(key: &str, color: Color) -> Span<'static> {
+pub(crate) fn key_span(key: &str, color: Color) -> Span<'static> {
     Span::styled(
         key.to_string(),
         Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -173,7 +216,7 @@ fn key_span(key: &str, color: Color) -> Span<'static> {
 
 /// Styles one body line: role keys keep the brand colours (`e` is
 /// purple like `Proof`, `c` is navy like `Pair`), the rest stays white.
-fn body_line(line: &str) -> Line<'static> {
+pub(crate) fn body_line(line: &str) -> Line<'static> {
     if let Some(rest) = line.strip_prefix("  e  ") {
         return Line::from(vec![
             Span::raw("  "),

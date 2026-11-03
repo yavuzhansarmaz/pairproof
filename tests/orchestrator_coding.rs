@@ -1,4 +1,4 @@
-use pairproof::core::{CoreError, EventKind, Language, QuestionRef, Session};
+use pairproof::core::{CoreError, EventKind, Language, Session};
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::approaches::parse_approach_set;
 use pairproof::llm::coding::{apply_usage, parse_coding_step, CodingStepInput, CodingStepOutput};
@@ -13,18 +13,11 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+
+mod common_mod;
+use common_mod::qs;
 type PF<'a, T> = PipelineFuture<'a, T>;
-fn q(slug: &str, d: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.into(),
-        title: slug.into(),
-        difficulty: d,
-        acceptance_pct: None,
-    }
-}
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{p}{i}"), d)).collect()
-}
+
 fn started() -> Orchestrator {
     let easy = qs("e", 5, Difficulty::Easy);
     let mut o = Orchestrator::create("s1".into(), Language::Python, easy, 0).unwrap();

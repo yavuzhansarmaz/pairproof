@@ -24,6 +24,9 @@ use pairproof::tui::expert_runtime::{
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
+mod common_mod;
+use common_mod::q;
+
 const T0: u64 = 1_730_000_000_000;
 
 /// Scripted pool source: tag set key -> slugs served for any difficulty.
@@ -296,8 +299,7 @@ async fn setup_auto_easy_falls_back_on_narrow_topics() {
 }
 
 type PF<'a, T> = PipelineFuture<'a, T>;
-#[rustfmt::skip]
-fn q(s: &str, d: Difficulty) -> QuestionRef { QuestionRef { title_slug: s.into(), title: s.into(), difficulty: d, acceptance_pct: None } }
+
 #[rustfmt::skip]
 fn tmp(name: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("pairproof-sel-pool-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
 
@@ -375,12 +377,14 @@ async fn selection_backoff_suppresses_hot_loop() {
 async fn fetch_medium_caches_pending_without_refetch() {
     let pool = Arc::new(FakePool::new(&[(&["array"], &["m0", "m1", "m2", "m3"])]));
     let mut runtime = make_runtime("medium-cache", vec!["array".into()], pool.clone()).await;
-    assert_eq!(runtime.fetch_medium(T0).await.expect("medium fetch"), 3);
+    // The fetch now offers the whole pool (4) for the expert to pick
+    // 3 from, instead of auto-picking 3.
+    assert_eq!(runtime.fetch_medium(T0).await.expect("medium fetch"), 4);
     assert_eq!(pool.recorded().len(), 1);
     assert!(
         runtime.selection_note().is_none(),
         "happy path sets no note"
     );
-    assert_eq!(runtime.fetch_medium(T0 + 1_000).await.expect("cached"), 3);
+    assert_eq!(runtime.fetch_medium(T0 + 1_000).await.expect("cached"), 4);
     assert_eq!(pool.recorded().len(), 1, "cached fetch makes no pool call");
 }

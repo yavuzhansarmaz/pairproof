@@ -16,6 +16,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+
+mod common_mod;
+use common_mod::qs;
 type PF<'a, T> = PipelineFuture<'a, T>;
 type QMap = BTreeMap<usize, Vec<ApproachQuality>>;
 type Scripted = (
@@ -38,17 +41,7 @@ const CODE: &str = r#"{"code":"def solve():\n    return 42","ready":true,"summar
 const HEADS: &str = "# PairProof Session Report|## Final breakdown|## Per-question grades|## Follow-up suggestions|## Notes";
 const WANTS: &str =
     "SessionCreated|CandidateConnected|ApproachSelected|TestsRequested|QuestionFinished";
-fn q(s: &str, d: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: s.into(),
-        title: s.into(),
-        difficulty: d,
-        acceptance_pct: None,
-    }
-}
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{p}{i}"), d)).collect()
-}
+
 fn opt(t: &str, s: &str, quality: ApproachQuality, tok: u64) -> ApproachOption {
     ApproachOption {
         title: t.into(),

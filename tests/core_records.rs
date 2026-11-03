@@ -1,20 +1,10 @@
 use pairproof::core::{
-    ApproachChoice, CoreError, EventKind, Language, QuestionRef, Session, SessionEvent, TestSummary,
+    ApproachChoice, CoreError, EventKind, Language, Session, SessionEvent, TestSummary,
 };
 use pairproof::leetcode::Difficulty;
 
-fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty,
-        acceptance_pct: None,
-    }
-}
-
-fn qs(prefix: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{prefix}{i}"), d)).collect()
-}
+mod common_mod;
+use common_mod::{q, qs};
 
 fn new_session() -> Session {
     Session::new(

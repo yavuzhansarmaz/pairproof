@@ -11,8 +11,11 @@ pub mod candidate_sync;
 pub mod candidate_work;
 pub mod config;
 pub mod expert;
+pub mod expert_frame;
 pub mod expert_keys;
 pub mod expert_loop;
+pub mod expert_mouse;
+pub mod expert_poll;
 pub mod expert_runtime;
 pub mod expert_session;
 pub mod expert_tty;
@@ -20,18 +23,22 @@ pub mod expert_view;
 pub mod help;
 pub mod monitor;
 pub mod render;
+pub mod render_candidate;
+pub mod render_preview;
 pub mod setup;
 pub mod setup_panel;
+pub mod setup_pastes;
 pub mod shared;
+pub mod statement_text;
 pub mod viewport;
 
 use std::io::IsTerminal;
 
 use clap::Parser;
 
-use expert_keys::handle_paste;
+use expert_frame::FrameKind;
 use expert_loop::ExpertLoopState;
-use expert_tty::{block_on, now_ms, run_preflight_check, TtyGuard};
+use expert_tty::{run_preflight_check, TtyGuard};
 
 pub use setup::{apply_expert_setup_paste, ExpertSetupPastes};
 
@@ -105,10 +112,11 @@ fn run_candidate_interactive() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) use expert_loop::tick_runtime;
+pub(crate) use expert_poll::tick_runtime;
 
-/// TTY adapter: draws app lines plus live runtime data, polls the
-/// runtime in bounded steps, and maps keys to real operations.
+/// TTY shell around [`ExpertLoopState`]: owns the terminal and the
+/// event poll only. Tick, frame decisions, event routing, and exit
+/// cleanup live on the state, where they can be tested without a TTY.
 fn interactive_loop(
     app: &mut app::ExpertApp,
     preflight_done: &mut bool,
@@ -121,108 +129,44 @@ fn interactive_loop(
     let mut terminal = ratatui::Terminal::new(backend)?;
     let mut state = ExpertLoopState::default();
     while app.screen() != app::AppScreen::Exited {
-        if app.screen() == app::AppScreen::Preflight && !*preflight_done {
-            *preflight_done = true;
-            run_preflight_check(app);
-        }
-        state.poll_proposal(app);
-        state.poll_runtime_build(app);
-        tick_runtime(app, &mut state.runtime, &mut state.tokio_rt);
-        let lines = if state.is_loading() {
-            state.loading_lines()
-        } else {
-            state.build_lines(app)
-        };
-        let height = terminal.size().map(|s| s.height as usize).unwrap_or(24);
-        let visible = viewport::visible_with_pinned(&lines, height.saturating_sub(2));
-        let centered = matches!(
-            app.screen(),
-            app::AppScreen::RoleSelect
-                | app::AppScreen::Preflight
-                | app::AppScreen::Proposal
-                | app::AppScreen::ConnectionWait
-        ) || state.show_help
-            || state.show_disclosure
-            || state.is_loading();
-        let show_setup = app.screen() == app::AppScreen::Setup
-            && !state.show_help
-            && !state.show_disclosure
-            && !state.is_loading();
-        let _ = terminal.draw(|frame| {
-            if state.is_loading() {
-                render::draw_loading_screen(frame, &visible);
-            } else if show_setup {
-                render::draw_setup_screen(
-                    frame,
-                    &render::SetupPanel {
-                        job_description: state.pastes.jd(),
-                        additional_notes: state.pastes.notes(),
-                        job_focused: state.pastes.focus()
-                            == setup::ExpertSetupFocus::JobDescription,
-                        job_scroll: state.pastes.jd_scroll(),
-                        notes_scroll: state.pastes.notes_scroll(),
-                        job_height: state.setup_jd_height,
-                        notes_height: state.setup_notes_height,
-                    },
-                );
-            } else {
-                render::draw_screen(frame, &visible, centered);
+        state.tick(app, preflight_done);
+        let size = terminal.size().unwrap_or_default();
+        let plan = state.frame_plan(app, size.width as usize, size.height as usize);
+        let _ = terminal.draw(|frame| match plan.kind {
+            FrameKind::Loading => render::draw_loading_screen(frame, &plan.visible),
+            FrameKind::Setup => {
+                render::draw_setup_screen(frame, &state.setup_panel());
             }
-        });
-        if crossterm::event::poll(std::time::Duration::from_millis(250)).unwrap_or(false) {
-            match crossterm::event::read() {
-                Ok(crossterm::event::Event::Key(key)) => state.handle_key_event(app, key),
-                Ok(crossterm::event::Event::Paste(text)) => {
-                    if !state.is_loading() {
-                        handle_paste(app, &mut state.pastes, &mut state.api_key_input, &text)
-                    }
-                }
-                Ok(crossterm::event::Event::Mouse(mouse))
-                    if app.screen() == app::AppScreen::Setup
-                        && !state.show_help
-                        && !state.is_loading() =>
-                {
-                    let size = terminal.size().unwrap_or_default();
-                    state.handle_setup_mouse(
-                        ratatui::layout::Rect::new(0, 0, size.width, size.height),
-                        mouse,
+            FrameKind::Preview => {
+                if let Some(preview) = &plan.preview {
+                    render::draw_question_preview_screen(
+                        frame,
+                        preview,
+                        plan.preview_scroll,
+                        plan.preview_tick,
                     );
                 }
-                Ok(crossterm::event::Event::Mouse(mouse))
-                    if matches!(
-                        app.screen(),
-                        app::AppScreen::ConnectionWait | app::AppScreen::Monitor
-                    ) && !state.show_help
-                        && matches!(
-                            mouse.kind,
-                            crossterm::event::MouseEventKind::Down(
-                                crossterm::event::MouseButton::Left
-                            )
-                        ) =>
-                {
-                    let size = terminal.size().unwrap_or_default();
-                    if render::is_copy_button_at(
-                        &visible,
-                        ratatui::layout::Rect::new(0, 0, size.width, size.height),
-                        mouse.column,
-                        mouse.row,
-                    ) {
-                        if let Some(token) = state.copy_token(app.screen()) {
-                            expert_tty::copy_to_clipboard(&token);
-                        }
-                    }
+            }
+            FrameKind::Screen => render::draw_screen(frame, &plan.visible, plan.centered),
+        });
+        if crossterm::event::poll(std::time::Duration::from_millis(250)).unwrap_or(false) {
+            // Drain every queued event before the next tick/draw: a
+            // tick does blocking runtime work, so one event per tick
+            // makes fast key repeats (space, arrows) feel laggy.
+            while let Ok(event) = crossterm::event::read() {
+                let size = terminal.size().unwrap_or_default();
+                let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                if let Some(token) = state.handle_event(app, event, area, &plan.visible) {
+                    expert_tty::copy_to_clipboard(&token);
                 }
-                _ => {}
+                if app.screen() == app::AppScreen::Exited
+                    || !crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false)
+                {
+                    break;
+                }
             }
         }
     }
-    // Quitting with a built runtime still ends the session (without
-    // waiting for the final ack) so sandbox cleanup always runs.
-    if let Some(active) = state.runtime.as_mut() {
-        let _ = block_on(
-            &mut state.tokio_rt,
-            active.end_session_with_ack_deadline(now_ms(), 0),
-        );
-    }
+    state.finish();
     Ok(())
 }

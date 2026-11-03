@@ -320,7 +320,7 @@ mod tests {
         let mut s = new_session();
         assert!(s
             .set_expert_questions(
-                qs("m", 2, Difficulty::Medium),
+                qs("m", 4, Difficulty::Medium),
                 qs("h", 2, Difficulty::Hard),
                 1
             )

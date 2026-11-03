@@ -36,18 +36,46 @@ pub fn footer(app: &ExpertApp) -> Option<String> {
         // Proposal carries its keys on the wait line; no footer.
         AppScreen::Proposal => String::new(),
         AppScreen::ConnectionWait => "b back, esc quit, ? help".to_string(),
-        AppScreen::SelectMedium => "enter load medium questions, esc quit, ? help".to_string(),
-        AppScreen::SelectHard => "enter load hard questions, esc quit, ? help".to_string(),
+        AppScreen::SelectMedium => {
+            "up/down move, left/right page, space choose, tab preview, enter continue, esc quit, ? help"
+                .to_string()
+        }
+        AppScreen::SelectHard => {
+            "up/down move, left/right page, space choose, tab preview, enter continue, esc quit, ? help"
+                .to_string()
+        }
         AppScreen::Monitor => {
-            "e end the session, R reissue after disconnect, esc quit, ? help".to_string()
+            "e end the session, c reissue after disconnect, esc quit, ? help".to_string()
         }
         AppScreen::Final => "enter close, esc quit".to_string(),
     };
     (!text.is_empty()).then_some(text)
 }
 
-/// Builds deterministic sanitized lines for rendering one screen.
-pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
+/// Runtime-aware selection footer: `r` is offered only once the
+/// question list has actually loaded, because it draws from it.
+pub fn selection_footer(app: &ExpertApp, options_loaded: bool) -> Option<String> {
+    if !matches!(
+        app.screen(),
+        AppScreen::SelectMedium | AppScreen::SelectHard
+    ) {
+        return footer(app);
+    }
+    if options_loaded {
+        Some(
+            "up/down move, left/right page, space choose, tab preview, r random, enter continue, esc quit, ? help"
+                .to_string(),
+        )
+    } else {
+        footer(app)
+    }
+}
+
+/// Builds the screen's content lines and its footer separately, so
+/// callers that splice extra lines in never have to guess which line
+/// is the footer. Re-appending the footer (when present) reproduces
+/// [`screen_lines`] exactly.
+pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
     use AppScreen as S;
     let screen = app.screen();
     let heading = if screen == S::RoleSelect {
@@ -153,10 +181,12 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
                     lines.push("candidate connected.".into());
                 }
             }
-            S::SelectMedium => lines.push("press enter to load 3 medium questions.".into()),
-            S::SelectHard => {
-                lines.push("press enter to load 2 hard questions and open the monitor.".into())
-            }
+            S::SelectMedium => lines
+                .push("3 medium questions matched to the proposed topics will be loaded.".into()),
+            S::SelectHard => lines.push(
+                "choose 2 hard questions from the topic-matched list; the monitor opens next."
+                    .into(),
+            ),
             S::Monitor => {
                 lines.push(if app.disconnected {
                     "candidate disconnected. session is still live.".into()
@@ -178,8 +208,16 @@ pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
     if let Some(message) = app.status_message() {
         lines.push(format!("status: {message}"));
     }
-    if let Some(foot) = footer(app) {
+    let content = lines.iter().map(|line| sanitize_display(line)).collect();
+    let foot = footer(app).map(|line| sanitize_display(&line));
+    (content, foot)
+}
+
+/// Builds deterministic sanitized lines for rendering one screen.
+pub fn screen_lines(app: &ExpertApp) -> Vec<String> {
+    let (mut lines, foot) = screen_parts(app);
+    if let Some(foot) = foot {
         lines.push(foot);
     }
-    lines.iter().map(|line| sanitize_display(line)).collect()
+    lines
 }

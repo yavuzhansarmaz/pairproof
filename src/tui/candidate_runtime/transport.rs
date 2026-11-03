@@ -60,26 +60,38 @@ impl std::fmt::Debug for SshCandidateTransport {
 fn sync_name(session_id: &str) -> Result<String, CandidateRuntimeError> {
     crate::sync::sync_session_name(session_id).map_err(|_| CandidateRuntimeError::SyncFailed)
 }
+/// Single SSH auth sequence shared by the verifier and the transport:
+/// verifies the host key into `key_line` when it is not already
+/// populated (a verified line is cached in the slot even when the
+/// probe then fails, so a retry does not rescan), then probes with
+/// the ssh `true` command. Failures map to generic rejection only.
+fn authenticate_ssh(
+    connection: &ConnectionString,
+    key_line: &mut Option<String>,
+) -> Result<(), CandidateConnectError> {
+    if key_line.is_none() {
+        let line = verify_and_key_line(connection.endpoint(), connection.fingerprint())
+            .map_err(|e| candidate_connect_error_for_ssh(&e))?;
+        *key_line = Some(line);
+    }
+    let Some(line) = key_line.as_deref() else {
+        return Err(CandidateConnectError::Rejected);
+    };
+    run_ssh_command(
+        connection.endpoint(),
+        connection.username(),
+        connection.secret(),
+        line,
+        &["true"],
+        SSH_TIMEOUT,
+    )
+    .map_err(|e| candidate_connect_error_for_ssh(&e))?;
+    Ok(())
+}
 impl CandidateTransport for SshCandidateTransport {
     fn authenticate(&mut self, connection: &ConnectionString) -> Result<(), CandidateRuntimeError> {
         self.connection = Some(connection.clone());
-        if self.key_line.is_none() {
-            let line = verify_and_key_line(connection.endpoint(), connection.fingerprint())
-                .map_err(|e| CandidateRuntimeError::Auth(candidate_connect_error_for_ssh(&e)))?;
-            self.key_line = Some(line);
-        }
-        let (conn, key_line) = self.stored()?;
-        let key_line = key_line.to_string();
-        run_ssh_command(
-            conn.endpoint(),
-            conn.username(),
-            conn.secret(),
-            &key_line,
-            &["true"],
-            SSH_TIMEOUT,
-        )
-        .map_err(|e| CandidateRuntimeError::Auth(candidate_connect_error_for_ssh(&e)))?;
-        Ok(())
+        authenticate_ssh(connection, &mut self.key_line).map_err(CandidateRuntimeError::Auth)
     }
     fn discover_session_id(&mut self) -> Result<String, CandidateRuntimeError> {
         let (conn, key_line) = self.stored()?;
@@ -287,18 +299,9 @@ impl Default for SshAuthVerifier {
 }
 impl ConnectionVerifier for SshAuthVerifier {
     fn verify(&self, c: &ConnectionString, _now_ms: u64) -> Result<(), CandidateConnectError> {
-        let line = verify_and_key_line(c.endpoint(), c.fingerprint())
-            .map_err(|e| candidate_connect_error_for_ssh(&e))?;
-        run_ssh_command(
-            c.endpoint(),
-            c.username(),
-            c.secret(),
-            &line,
-            &["true"],
-            SSH_TIMEOUT,
-        )
-        .map_err(|e| candidate_connect_error_for_ssh(&e))?;
-        if let Ok(mut slot) = self.stash.lock() {
+        let mut key_line = None;
+        authenticate_ssh(c, &mut key_line)?;
+        if let (Ok(mut slot), Some(line)) = (self.stash.lock(), key_line) {
             *slot = Some((c.clone(), line));
         }
         Ok(())

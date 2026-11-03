@@ -1,11 +1,27 @@
 //! Expert TTY loop state: frame building, key/mouse routing, and
 //! the bounded per-tick runtime step.
 
-use crate::tui::expert_keys::handle_key;
-use crate::tui::expert_runtime::{ExpertRuntime, PollOutcome};
-use crate::tui::expert_tty::{block_on, now_ms, set_error};
+use crate::tui::expert_keys::selection_screen;
+use crate::tui::expert_runtime::ExpertRuntime;
+use crate::tui::expert_tty::now_ms;
 use crate::tui::setup::ExpertSetupPastes;
-use crate::tui::{app, help, monitor, render, setup};
+use crate::tui::{app, help, monitor, setup};
+
+/// One finished background pool fetch: the runtime handed back,
+/// which selection screen it belongs to, and the offered count.
+pub(crate) type SelectionFetchReceiver = std::sync::mpsc::Receiver<(
+    ExpertRuntime,
+    crate::tui::expert_runtime::SelectionScreen,
+    Result<usize, String>,
+)>;
+
+/// One finished question-preview fetch: screen, slug, plain-text
+/// statement (already converted from HTML by the worker).
+pub(crate) type QuestionPreviewReceiver = std::sync::mpsc::Receiver<(
+    crate::tui::expert_runtime::SelectionScreen,
+    String,
+    Result<String, String>,
+)>;
 
 /// Background work the TTY loop waits on: a proposal request and
 /// a deferred runtime build, both surfaced as the loading screen.
@@ -14,6 +30,9 @@ pub(crate) struct PendingWork {
     pub(crate) proposal_rx:
         Option<std::sync::mpsc::Receiver<Result<crate::ingest::ProposedContext, String>>>,
     pub(crate) runtime_rx: Option<std::sync::mpsc::Receiver<Result<ExpertRuntime, String>>>,
+    pub(crate) selection_rx: Option<SelectionFetchReceiver>,
+    pub(crate) api_key_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    pub(crate) preview_rx: Option<QuestionPreviewReceiver>,
 }
 
 /// Mutable state owned by the expert TTY loop.
@@ -27,6 +46,12 @@ pub(crate) struct ExpertLoopState {
     pub(crate) setup_drag: Option<setup::ExpertSetupFocus>,
     pub(crate) show_help: bool,
     pub(crate) show_disclosure: bool,
+    pub(crate) show_question_preview: bool,
+    pub(crate) show_random_confirm: bool,
+    pub(crate) question_preview_scroll: usize,
+    pub(crate) question_preview_max_scroll: usize,
+    pub(crate) question_preview_page: usize,
+    pub(crate) question_preview_tick: usize,
     pub(crate) pending: PendingWork,
     pub(crate) loading_tick: usize,
 }
@@ -43,6 +68,15 @@ impl Default for ExpertLoopState {
             setup_drag: None,
             show_help: false,
             show_disclosure: false,
+            show_question_preview: false,
+            show_random_confirm: false,
+            question_preview_scroll: 0,
+            // Until the first preview frame measures the real range,
+            // scrolling is unbounded here; `frame_plan` clamps it to
+            // the wrapped content before anything is drawn.
+            question_preview_max_scroll: usize::MAX,
+            question_preview_page: 10,
+            question_preview_tick: 0,
             pending: PendingWork::default(),
             loading_tick: 0,
         }
@@ -53,15 +87,12 @@ impl ExpertLoopState {
     /// Builds the lines for one frame: app lines, live runtime lines,
     /// the masked API-key entry, then help/disclosure replacement.
     pub(crate) fn build_lines(&mut self, app: &app::ExpertApp) -> Vec<String> {
-        let mut lines = app::screen_lines(app);
-        // Pull the footer off so runtime lines can be added above
-        // it; it is re-appended last, on every screen.
-        let footer = app::footer(app);
-        let held_footer = if !self.show_help && !self.show_disclosure {
-            match lines.last() {
-                Some(last) if Some(last.as_str()) == footer.as_deref() => lines.pop(),
-                _ => None,
-            }
+        // Content and footer arrive separately, so runtime lines are
+        // spliced into the content and the footer is re-appended last
+        // by construction, on every screen.
+        let (mut lines, footer) = app::screen_parts(app);
+        let mut held_footer = if !self.show_help && !self.show_disclosure {
+            footer
         } else {
             None
         };
@@ -79,6 +110,16 @@ impl ExpertLoopState {
                         ));
                     }
                 }
+                app::AppScreen::SelectMedium => {
+                    lines.extend(
+                        active.selection_lines(crate::tui::expert_runtime::SelectionScreen::Medium),
+                    );
+                }
+                app::AppScreen::SelectHard => {
+                    lines.extend(
+                        active.selection_lines(crate::tui::expert_runtime::SelectionScreen::Hard),
+                    );
+                }
                 app::AppScreen::Monitor => {
                     lines.extend(monitor::render_monitor_lines(&active.monitor_view(now)));
                     lines.extend(active.recovery_lines());
@@ -90,9 +131,8 @@ impl ExpertLoopState {
                         ));
                     }
                     if active.is_disconnected() {
-                        lines.push("press R to reissue a fresh connection string.".to_string());
+                        lines.push("press c to reissue a fresh connection string.".to_string());
                     }
-                    lines.push("press e to end the session.".to_string());
                 }
                 _ => {}
             }
@@ -103,8 +143,17 @@ impl ExpertLoopState {
                 "\u{2022}".repeat(self.api_key_input.chars().count()),
                 self.api_key_input.chars().count()
             );
-            let at = lines.len().saturating_sub(1);
-            lines.insert(at, masked);
+            // Last content line; the held footer is appended after it.
+            lines.push(masked);
+        }
+        if !self.show_help && !self.show_disclosure {
+            if let Some(screen) = selection_screen(app) {
+                let loaded = self
+                    .runtime
+                    .as_ref()
+                    .is_some_and(|active| active.has_options(screen));
+                held_footer = app::selection_footer(app, loaded);
+            }
         }
         if let Some(foot) = held_footer {
             lines.push(foot);
@@ -113,82 +162,46 @@ impl ExpertLoopState {
             lines = help::disclosure_lines();
         } else if self.show_help {
             lines = help::expert_help_lines(app.screen());
+            if let Some(screen) = selection_screen(app) {
+                let loaded = self
+                    .runtime
+                    .as_ref()
+                    .is_some_and(|active| active.has_options(screen));
+                if !loaded {
+                    lines.retain(|line| !line.contains("r pick at random"));
+                }
+            }
+        }
+        if self.show_random_confirm {
+            if let (Some(active), Some(screen)) = (self.runtime.as_ref(), selection_screen(app)) {
+                let (label, need) = match screen {
+                    crate::tui::expert_runtime::SelectionScreen::Medium => ("medium", 3),
+                    crate::tui::expert_runtime::SelectionScreen::Hard => ("hard", 2),
+                };
+                let need = need.min(active.option_count(screen));
+                lines = vec![
+                    "Random selection".to_string(),
+                    String::new(),
+                    format!(
+                        "{need} {label} questions will be picked at random from the {} in this list.",
+                        active.option_count(screen)
+                    ),
+                    "your current picks will be replaced.".to_string(),
+                    String::new(),
+                    "enter pick at random, b back to the list".to_string(),
+                ];
+            }
         }
         lines
-    }
-
-    fn dispatch_key(&mut self, app: &mut app::ExpertApp, code: crossterm::event::KeyCode) {
-        handle_key(
-            app,
-            &mut self.runtime,
-            &mut self.tokio_rt,
-            &mut self.pastes,
-            &mut self.pending,
-            &mut self.api_key_input,
-            code,
-        );
     }
 
     /// True while a background request (proposal or runtime build)
     /// runs.
     pub(crate) fn is_loading(&self) -> bool {
-        self.pending.proposal_rx.is_some() || self.pending.runtime_rx.is_some()
-    }
-
-    /// Animated centred loading lines for one frame.
-    pub(crate) fn loading_lines(&mut self) -> Vec<String> {
-        self.loading_tick += 1;
-        render::loading_lines(self.loading_tick)
-    }
-
-    /// Applies a finished background proposal request, if one landed.
-    pub(crate) fn poll_proposal(&mut self, app: &mut app::ExpertApp) {
-        let Some(rx) = &self.pending.proposal_rx else {
-            return;
-        };
-        match rx.try_recv() {
-            Ok(Ok(proposed)) => {
-                self.pending.proposal_rx = None;
-                self.pastes.apply_proposal(proposed);
-                app.set_proposal_lines(self.pastes.proposal_lines());
-                app.set_has_proposal(true);
-                app.clear_status_message();
-                let _ = app.handle(app::AppEvent::ProposalReady);
-            }
-            Ok(Err(err)) => {
-                self.pending.proposal_rx = None;
-                set_error(app, "proposal failed", &err);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.pending.proposal_rx = None;
-                set_error(app, "proposal failed", "request stopped unexpectedly");
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-        }
-    }
-
-    /// Applies a finished background runtime build, if one landed:
-    /// storing it confirms the proposal and waits for the candidate.
-    pub(crate) fn poll_runtime_build(&mut self, app: &mut app::ExpertApp) {
-        let Some(rx) = &self.pending.runtime_rx else {
-            return;
-        };
-        match rx.try_recv() {
-            Ok(Ok(built)) => {
-                self.pending.runtime_rx = None;
-                self.runtime = Some(built);
-                let _ = app.handle(app::AppEvent::ProposalConfirmed);
-            }
-            Ok(Err(err)) => {
-                self.pending.runtime_rx = None;
-                set_error(app, "session setup failed", &err);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.pending.runtime_rx = None;
-                set_error(app, "session setup failed", "runtime unavailable");
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-        }
+        self.pending.proposal_rx.is_some()
+            || self.pending.runtime_rx.is_some()
+            || self.pending.selection_rx.is_some()
+            || self.pending.api_key_rx.is_some()
     }
 
     /// Routes one key event through API-key entry and help overlays.
@@ -225,6 +238,119 @@ impl ExpertLoopState {
             self.dispatch_key(app, key.code);
             return;
         }
+        if self.show_question_preview && selection_screen(app).is_none() {
+            self.show_question_preview = false;
+        }
+        if self.show_question_preview {
+            // Question preview: `b` returns to the list at the
+            // question being previewed; left/right step to the
+            // neighbouring question; up/down scroll the statement;
+            // quit keys still quit; the rest is swallowed so picks
+            // cannot drift behind it.
+            match key.code {
+                crossterm::event::KeyCode::Char('b') => {
+                    self.show_question_preview = false;
+                    self.question_preview_scroll = 0;
+                }
+                crossterm::event::KeyCode::Char(' ') => {
+                    if let (Some(active), Some(screen)) =
+                        (self.runtime.as_mut(), selection_screen(app))
+                    {
+                        active.toggle_selection_pick(screen);
+                    }
+                }
+                crossterm::event::KeyCode::Left => self.step_preview_question(app, -1),
+                crossterm::event::KeyCode::Right => self.step_preview_question(app, 1),
+                crossterm::event::KeyCode::Up => self.scroll_preview_by(-1),
+                crossterm::event::KeyCode::Down => self.scroll_preview_by(1),
+                crossterm::event::KeyCode::PageUp => {
+                    self.scroll_preview_by(-(self.question_preview_page as i32))
+                }
+                crossterm::event::KeyCode::PageDown => {
+                    self.scroll_preview_by(self.question_preview_page as i32)
+                }
+                crossterm::event::KeyCode::Home => self.question_preview_scroll = 0,
+                crossterm::event::KeyCode::End => {
+                    self.question_preview_scroll = self.question_preview_max_scroll
+                }
+                crossterm::event::KeyCode::Esc => {
+                    let _ = app.handle(app::AppEvent::Quit);
+                }
+                crossterm::event::KeyCode::Char('c')
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
+                    let _ = app.handle(app::AppEvent::Quit);
+                }
+                _ => {}
+            }
+            return;
+        }
+        if self.show_random_confirm && selection_screen(app).is_none() {
+            self.show_random_confirm = false;
+        }
+        if self.show_random_confirm {
+            // Random-pick confirmation: Enter draws the picks and
+            // immediately acts as the list Enter, so Medium moves to
+            // Hard and Hard commits to the Monitor; `b` returns
+            // without touching the current picks; quit keys quit.
+            match key.code {
+                crossterm::event::KeyCode::Enter => {
+                    let should_advance = if let (Some(active), Some(screen)) =
+                        (self.runtime.as_mut(), selection_screen(app))
+                    {
+                        active.randomize_picks(screen);
+                        true
+                    } else {
+                        false
+                    };
+                    self.show_random_confirm = false;
+                    if should_advance {
+                        self.dispatch_key(app, crossterm::event::KeyCode::Enter);
+                    }
+                }
+                crossterm::event::KeyCode::Char('b') => self.show_random_confirm = false,
+                crossterm::event::KeyCode::Esc => {
+                    let _ = app.handle(app::AppEvent::Quit);
+                }
+                crossterm::event::KeyCode::Char('c')
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
+                    let _ = app.handle(app::AppEvent::Quit);
+                }
+                _ => {}
+            }
+            return;
+        }
+        if key.code == crossterm::event::KeyCode::Char('r')
+            && !self.show_help
+            && !self.show_disclosure
+            && !self.show_question_preview
+        {
+            if let (Some(screen), Some(active)) = (selection_screen(app), self.runtime.as_ref()) {
+                if active.has_options(screen) {
+                    self.show_random_confirm = true;
+                    return;
+                }
+            }
+        }
+        if key.code == crossterm::event::KeyCode::Tab && !self.show_help && !self.show_disclosure {
+            if let (Some(screen), Some(active)) = (selection_screen(app), self.runtime.as_ref()) {
+                if active.has_options(screen) {
+                    self.show_question_preview = true;
+                    self.question_preview_scroll = 0;
+                    // Reopening the preview retries a failed load.
+                    if let Some(active) = self.runtime.as_mut() {
+                        active.clear_preview_error(screen);
+                    }
+                    self.start_question_preview_fetch(screen);
+                    return;
+                }
+            }
+        }
         match if self.show_disclosure {
             help::expert_disclosure_action(key)
         } else {
@@ -246,135 +372,5 @@ impl ExpertLoopState {
             }
             help::ExpertKeyAction::Dispatch => self.dispatch_key(app, key.code),
         }
-    }
-
-    /// Returns the string a `[COPY]` button click should copy on
-    /// `screen`: the current connection string while waiting, the
-    /// reissued one on the monitor.
-    pub(crate) fn copy_token(&mut self, screen: app::AppScreen) -> Option<String> {
-        let active = self.runtime.as_mut()?;
-        match screen {
-            app::AppScreen::ConnectionWait => active
-                .current_string(now_ms())
-                .ok()
-                .map(|current| current.encode()),
-            app::AppScreen::Monitor => active.reissue_string().map(|fresh| fresh.encode()),
-            _ => None,
-        }
-    }
-
-    /// Setup-screen mouse: focus, drag-resize, and scroll the two boxes.
-    pub(crate) fn handle_setup_mouse(
-        &mut self,
-        terminal_size: ratatui::layout::Rect,
-        mouse: crossterm::event::MouseEvent,
-    ) {
-        use crossterm::event::{MouseButton, MouseEventKind};
-        let (jd_box, notes_box) =
-            render::setup_box_areas(terminal_size, self.setup_jd_height, self.setup_notes_height);
-        let in_box = |rect: ratatui::layout::Rect| {
-            mouse.column >= rect.x
-                && mouse.column < rect.x + rect.width
-                && mouse.row >= rect.y
-                && mouse.row < rect.y + rect.height
-        };
-        match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                if in_box(jd_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::JobDescription);
-                    if mouse.row == jd_box.y + jd_box.height - 1 {
-                        self.setup_drag = Some(setup::ExpertSetupFocus::JobDescription);
-                    }
-                } else if in_box(notes_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::AdditionalNotes);
-                    if mouse.row == notes_box.y + notes_box.height - 1 {
-                        self.setup_drag = Some(setup::ExpertSetupFocus::AdditionalNotes);
-                    }
-                }
-            }
-            MouseEventKind::Drag(MouseButton::Left) => match self.setup_drag {
-                Some(setup::ExpertSetupFocus::JobDescription) => {
-                    self.setup_jd_height = mouse.row.saturating_sub(jd_box.y + 1).clamp(5, 20)
-                }
-                Some(setup::ExpertSetupFocus::AdditionalNotes) => {
-                    self.setup_notes_height = mouse.row.saturating_sub(notes_box.y + 1).clamp(2, 12)
-                }
-                None => {}
-            },
-            MouseEventKind::Up(MouseButton::Left) => self.setup_drag = None,
-            MouseEventKind::ScrollDown => {
-                if in_box(jd_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::JobDescription);
-                } else if in_box(notes_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::AdditionalNotes);
-                }
-                if in_box(jd_box) || in_box(notes_box) {
-                    self.pastes.scroll_focused(1);
-                }
-            }
-            MouseEventKind::ScrollUp => {
-                if in_box(jd_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::JobDescription);
-                } else if in_box(notes_box) {
-                    self.pastes
-                        .set_focus(setup::ExpertSetupFocus::AdditionalNotes);
-                }
-                if in_box(jd_box) || in_box(notes_box) {
-                    self.pastes.scroll_focused(-1);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Bounded per-tick runtime step: poll for the candidate hello on
-/// the connection screen, drain intents once the session is live.
-pub(crate) fn tick_runtime(
-    app: &mut app::ExpertApp,
-    runtime: &mut Option<ExpertRuntime>,
-    tokio_rt: &mut Option<tokio::runtime::Runtime>,
-) {
-    use app::{AppEvent, AppScreen};
-    let Some(active) = runtime.as_mut() else {
-        return;
-    };
-    match app.screen() {
-        AppScreen::ConnectionWait => {
-            let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
-            let _ = block_on(tokio_rt, active.poll_recovery(now_ms()));
-            match block_on(tokio_rt, active.poll_candidate(now_ms())) {
-                Some(PollOutcome::Connected) => {
-                    app.set_connected(true);
-                    let _ = app.handle(AppEvent::ConnectionLocked);
-                }
-                Some(PollOutcome::VersionMismatch) => {
-                    if let Some((c, e)) = active.version_mismatch() {
-                        app.set_status_message(format!("Version mismatch: candidate {c}, you {e}. Candidate must update/restart PairProof; session not started."));
-                    }
-                }
-                _ => {}
-            }
-        }
-        AppScreen::SelectMedium | AppScreen::SelectHard | AppScreen::Monitor => {
-            let _ = block_on(tokio_rt, active.refresh_pre_lock_secret(now_ms()));
-            let outcome = block_on(tokio_rt, active.poll_candidate(now_ms()));
-            let _ = block_on(tokio_rt, active.poll_recovery(now_ms()));
-            let _ = block_on(tokio_rt, active.drain_intents(now_ms()));
-            let _ = block_on(tokio_rt, active.check_heartbeat(now_ms()));
-            if active.is_disconnected() {
-                let _ = app.handle(AppEvent::AccidentalDisconnect);
-            }
-            if outcome == Some(PollOutcome::Connected) && app.is_disconnected() {
-                let _ = app.handle(AppEvent::CandidateReconnected);
-                app.clear_status_message();
-            }
-        }
-        _ => {}
     }
 }

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use pairproof::connection::{Endpoint, EphemeralUsername, Fingerprint, Secret};
-use pairproof::core::{Language, QuestionRef, Session};
+use pairproof::core::{Language, Session};
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::coding::{CodingStepInput, CodingStepOutput};
 use pairproof::llm::Message;
@@ -18,17 +18,14 @@ use pairproof::tui::expert_runtime::{
     ExpertRuntime, ExpertRuntimeDeps, ExpertSessionSpec, LocalHelloSource, PollOutcome,
 };
 
+mod common_mod;
+use common_mod::qs;
+
+fn tmp(name: &str) -> PathBuf {
+    common_mod::tmp("secret-refresh", name)
+}
 type PF<'a, T> = PipelineFuture<'a, T>;
 const T0: u64 = 1_730_000_000_000;
-#[rustfmt::skip]
-fn q(s: &str, d: Difficulty) -> QuestionRef { QuestionRef { title_slug: s.into(), title: s.into(), difficulty: d, acceptance_pct: None } }
-#[rustfmt::skip]
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> { (0..n).map(|i| q(&format!("{p}{i}"), d)).collect() }
-#[rustfmt::skip]
-fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("pairproof-secret-refresh-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d
-}
 
 /// Deterministic pusher: records pushes, fails the first `failures_left` pushes.
 struct FakePusher {

@@ -1,4 +1,4 @@
-use pairproof::core::{Language, QuestionRef, Session};
+use pairproof::core::{Language, Session};
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::approaches::{
     build_approach_messages, build_other_grade_messages, generate_approaches, grade_other_approach,
@@ -11,6 +11,9 @@ use pairproof::llm::{ChatOptions, LlmError, Message, MetaApiError, MetaClient, U
 use pairproof::scoring::ApproachQuality;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+
+mod common_mod;
+use common_mod::q;
 
 fn approach_json(title: &str, quality: &str, tokens: &str) -> String {
     format!(
@@ -234,15 +237,6 @@ fn build_coding_messages_tests_flag_changes_prompt() {
         messages[1].content
     );
     assert!(!messages[1].content.contains("Keep it simple."));
-}
-
-fn q(slug: &str, difficulty: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.to_string(),
-        title: slug.to_string(),
-        difficulty,
-        acceptance_pct: None,
-    }
 }
 
 fn new_session() -> Session {

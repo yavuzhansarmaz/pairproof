@@ -28,11 +28,69 @@ const SSH_TIMEOUT: Duration = Duration::from_secs(20);
 const HEARTBEAT_THROTTLE_MS: u64 = 5_000;
 pub const CONNECTION_LOST: &str = "connection lost \u{2014} retrying";
 mod live;
+mod live_keys;
+mod panes;
 mod transport;
 mod view;
-pub use self::live::{candidate_loop, default_workspace, handle_live_key};
+pub use self::live::{candidate_loop, default_workspace};
+pub use self::live_keys::handle_live_key;
+pub use self::panes::{
+    connect_submit_shows_loading, divider_hit, screen_centered, split_pct_for_column,
+    DEFAULT_QUESTION_PCT,
+};
 pub use self::transport::{SshAuthVerifier, SshCandidateTransport};
 pub use self::view::CandidateView;
+/// Builds or reconnects the runtime once a verified string lands
+/// on Rules; failures reset to a fresh Connect state.
+fn establish_runtime_after_rules(
+    state: &mut CandidateRunState,
+    runtime: &mut Option<CandidateRuntime<SshCandidateTransport>>,
+    stash: &mut std::sync::Arc<std::sync::Mutex<Option<(ConnectionString, String)>>>,
+    status: &mut Option<String>,
+) {
+    let material = stash.lock().ok().and_then(|slot| slot.clone());
+    match material {
+        Some((conn, key_line)) => {
+            if let Some(existing) = runtime.as_mut() {
+                match existing.reconnect(&conn) {
+                    Ok(()) => {
+                        *status = None;
+                    }
+                    Err(err) => {
+                        *status = Some(crate::tui::help::candidate_error_message(&err).to_string());
+                        *state = CandidateRunState::new();
+                        *stash = self::live::fresh_verifier(state);
+                    }
+                }
+            } else {
+                let mut built = CandidateRuntime::new_discovering(
+                    default_workspace(),
+                    SshCandidateTransport::from_verified(&conn, key_line),
+                );
+                match built.connect(&conn) {
+                    Ok(()) => {
+                        *runtime = Some(built);
+                        *status = None;
+                    }
+                    Err(err) => {
+                        *status = Some(crate::tui::help::candidate_error_message(&err).to_string());
+                        *state = CandidateRunState::new();
+                        *stash = self::live::fresh_verifier(state);
+                    }
+                }
+            }
+        }
+        None => {
+            *status = Some(
+                crate::tui::help::candidate_error_message(&CandidateRuntimeError::Transport)
+                    .to_string(),
+            );
+            *state = CandidateRunState::new();
+            *stash = self::live::fresh_verifier(state);
+        }
+    }
+}
+
 /// Explicit runtime phase; work is reachable only when Connected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CandidateRuntimePhase {

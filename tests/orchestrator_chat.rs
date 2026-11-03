@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use pairproof::core::{ApproachChoice, CoreError, Language, QuestionRef, Session};
+use pairproof::core::{ApproachChoice, CoreError, Language, Session};
 use pairproof::leetcode::Difficulty;
 use pairproof::llm::approaches::parse_approach_set;
 use pairproof::llm::chat::{assemble_chat_messages, ChatState};
@@ -13,17 +13,9 @@ use pairproof::scoring::{ApproachGrade, ApproachSet};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-fn q(slug: &str, d: Difficulty) -> QuestionRef {
-    QuestionRef {
-        title_slug: slug.into(),
-        title: slug.into(),
-        difficulty: d,
-        acceptance_pct: None,
-    }
-}
-fn qs(p: &str, n: usize, d: Difficulty) -> Vec<QuestionRef> {
-    (0..n).map(|i| q(&format!("{p}{i}"), d)).collect()
-}
+mod common_mod;
+use common_mod::qs;
+
 fn started() -> Orchestrator {
     let mut o = Orchestrator::create(
         "s1".into(),
