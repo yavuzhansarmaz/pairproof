@@ -6,7 +6,8 @@ use crate::core::{QuestionStatus, Session};
 use crate::orchestration::evidence::{
     per_question_evidence, render_evidence, score_line_evidence, summary_evidence,
 };
-use crate::scoring::{FinalBreakdown, GradeOutcome, PerQuestionFinal};
+use crate::scoring::shadow::{DecisionStanding, ShadowStatus};
+use crate::scoring::{FinalBreakdown, GradeOutcome, PerQuestionFinal, ShadowReport};
 
 /// One caller-supplied chat excerpt that may be quoted in the report.
 /// Callers pass only permitted excerpts; the default is none.
@@ -235,5 +236,62 @@ pub fn generate_report(
     }
     out.push('\n');
     out.push_str(limitations_footer());
+    out
+}
+
+/// Renders expert-side shadow evaluation diagnostics. This section is
+/// never included in candidate-facing output, states failures
+/// honestly, and does not affect the final rating above.
+pub fn render_shadow_section(reports: &[ShadowReport]) -> String {
+    let mut out = String::from("## Shadow evaluation (diagnostic only)\n\n");
+    if reports.is_empty() {
+        out.push_str("- No shadow evaluation was run.\n");
+        return out;
+    }
+    for report in reports {
+        match &report.status {
+            ShadowStatus::Failed { reason } => out.push_str(&format!(
+                "- Q{} shadow evaluation failed: {reason}\n",
+                report.slot_index + 1
+            )),
+            ShadowStatus::Partial { missing } => out.push_str(&format!(
+                "- Q{} shadow evaluation partial; missing options {missing:?}\n",
+                report.slot_index + 1
+            )),
+            ShadowStatus::NotEvaluated => out.push_str(&format!(
+                "- Q{} shadow evaluation not run.\n",
+                report.slot_index + 1
+            )),
+            ShadowStatus::Complete => {
+                let set_part = report
+                    .set_evaluation
+                    .as_ref()
+                    .map(|s| format!("set {:?}: {}", s.verdict, s.rationale))
+                    .unwrap_or_else(|| "set not evaluated".to_string());
+                let decision_part = match &report.decision {
+                    Some(d) if d.standing == DecisionStanding::InsufficientEvidence => {
+                        format!("decision: insufficient evidence ({})", d.rationale)
+                    }
+                    Some(d) => format!("decision {:?}: {}", d.standing, d.rationale),
+                    None => "decision: not assessed".to_string(),
+                };
+                out.push_str(&format!(
+                    "- Q{} rubric {} model {} — {set_part}; {decision_part}\n",
+                    report.slot_index + 1,
+                    report.rubric_version,
+                    report.evaluator_model
+                ));
+                for option in &report.options {
+                    out.push_str(&format!(
+                        "  - option {} {:?} ({:?}): {}\n",
+                        option.option_index + 1,
+                        option.verdict,
+                        option.confidence,
+                        option.rationale
+                    ));
+                }
+            }
+        }
+    }
     out
 }

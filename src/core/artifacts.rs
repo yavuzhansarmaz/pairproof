@@ -79,6 +79,7 @@ pub struct ArtifactLayout {
     report_path: PathBuf,
     tokens_path: PathBuf,
     context_path: PathBuf,
+    shadow_path: PathBuf,
     language: Language,
 }
 
@@ -103,6 +104,7 @@ impl ArtifactLayout {
             report_path: session_dir.join("report.md"),
             tokens_path: session_dir.join("tokens.json"),
             context_path: session_dir.join("context.json"),
+            shadow_path: session_dir.join("shadow_evaluations.json"),
             session_dir,
             solutions_dir,
             raw_dir,
@@ -133,6 +135,22 @@ impl ArtifactLayout {
     /// Returns the context.json path.
     pub fn context_path(&self) -> &Path {
         &self.context_path
+    }
+
+    /// Returns the shadow_evaluations.json path.
+    pub fn shadow_path(&self) -> &Path {
+        &self.shadow_path
+    }
+
+    /// Writes shadow evaluation reports as pretty JSON. Shadow data
+    /// is expert-side evidence only and is never candidate-facing.
+    pub fn write_shadow_evaluations(
+        &self,
+        reports: &[crate::scoring::ShadowReport],
+    ) -> Result<(), ArtifactError> {
+        let json = serde_json::to_string_pretty(reports)
+            .map_err(|e| ArtifactError::Serialize(e.to_string()))?;
+        write_atomic(&self.shadow_path, json.as_bytes())
     }
 
     /// Returns the solutions directory path.

@@ -174,6 +174,12 @@ impl ExpertRuntime {
                 now_ms,
             )
             .await?;
+        for (slot, grade) in self.pipeline.other_grades() {
+            self.shadow.record_other(slot, grade);
+        }
+        let session_id = self.orch.session_id().to_string();
+        self.shadow
+            .poll(&session_id, self.orch.session(), &self.layout);
         if reports.iter().any(|r| r.outcome == ApplyOutcome::Applied) {
             self.last_seen_ms = self.fresh_now(now_ms);
         }

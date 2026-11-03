@@ -7,6 +7,7 @@ pub mod coding;
 pub mod common;
 pub mod extraction;
 pub mod grading;
+pub mod shadow_eval;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.meta.ai/v1";
 pub const STRONG_MODEL: &str = "muse-wonder-1.0";

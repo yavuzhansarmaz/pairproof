@@ -209,11 +209,15 @@ impl QuestionPipeline {
     ) -> Result<CodingStepOutcome, PipelineError> {
         let statement = self.statement_text(orch)?;
         let grade = generator.grade_other(&statement, text).await?;
+        let index = orch.current_index();
         orch.select_approach(
             ApproachChoice::Other(text.to_string()),
             grade.expected_tokens,
             now_ms,
         )?;
+        if let Some(index) = index {
+            self.other_grades.insert(index, grade);
+        }
         self.run_one_coding_step(orch, coding, sandbox, None).await
     }
 

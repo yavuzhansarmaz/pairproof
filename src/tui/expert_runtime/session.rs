@@ -48,6 +48,9 @@ impl ExpertRuntime {
         if self.is_recovery_active() {
             self.cancel_recovery();
         }
+        let sid = self.orch.session_id().to_string();
+        self.shadow.poll(&sid, self.orch.session(), &self.layout);
+        self.shadow.shutdown();
         let kill = self.supervisor.kill_switch().await;
         self.last_kill = Some(kill);
         if self.gate.phase() != GatePhase::Ended {
@@ -92,7 +95,13 @@ impl ExpertRuntime {
                 Some(&breakdown),
                 self.snapshot_recovery(),
             );
-            let md = generate_report(self.orch.session(), &breakdown, &grades, &[]);
+            let mut md = generate_report(self.orch.session(), &breakdown, &grades, &[]);
+            let shadow_reports: Vec<_> = self.shadow.reports().values().cloned().collect();
+            if !shadow_reports.is_empty() {
+                md.push_str(&crate::orchestration::report::render_shadow_section(
+                    &shadow_reports,
+                ));
+            }
             (grades, snap, md)
         };
         self.final_grades = final_grades;

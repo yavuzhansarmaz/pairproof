@@ -124,6 +124,7 @@ async fn flow(
         topics: Vec::new(),
         level: "live".into(),
         sync_phase: SessionSyncPhase::NotStarted,
+        shadow_evaluator: None,
     };
     let mut expert = ExpertRuntime::new(spec, deps, now_ms())
         .await

@@ -192,6 +192,7 @@ pub struct QuestionPipeline {
     pub(crate) test_records: Vec<TestRunRecord>,
     pub(crate) chat_busy: AtomicBool,
     pub(crate) selected_qualities: BTreeMap<usize, Vec<ApproachQuality>>,
+    pub(crate) other_grades: BTreeMap<usize, ApproachGrade>,
 }
 
 impl Default for QuestionPipeline {
@@ -211,6 +212,7 @@ impl QuestionPipeline {
             test_records: Vec::new(),
             chat_busy: AtomicBool::new(false),
             selected_qualities: BTreeMap::new(),
+            other_grades: BTreeMap::new(),
         }
     }
 
@@ -265,6 +267,31 @@ impl QuestionPipeline {
         self.approaches = Some(set);
         self.approaches_index = Some(index);
         Ok(views)
+    }
+
+    /// Snapshot of the stored approach set with its slot index. The
+    /// clone stays valid after the live set is cleared, so a shadow
+    /// evaluation triggered from it is never tied to the live set.
+    pub fn approaches_snapshot(&self) -> Option<(usize, ApproachSet)> {
+        Some((self.approaches_index?, self.approaches.clone()?))
+    }
+
+    /// Cloned `Other` grade stashed for `index` at selection, if any.
+    pub fn other_grade(&self, index: usize) -> Option<ApproachGrade> {
+        self.other_grades.get(&index).cloned()
+    }
+
+    /// Takes the `Other` grade stashed for `index`, if any.
+    pub fn take_other_grade(&mut self, index: usize) -> Option<ApproachGrade> {
+        self.other_grades.remove(&index)
+    }
+
+    /// Every stashed `Other` grade as `(slot, grade)` pairs.
+    pub fn other_grades(&self) -> Vec<(usize, ApproachGrade)> {
+        self.other_grades
+            .iter()
+            .map(|(index, grade)| (*index, grade.clone()))
+            .collect()
     }
 
     /// Returns candidate-visible approach options only, hiding quality,

@@ -367,6 +367,7 @@ impl ExpertRuntime {
         }
         match outcome.result {
             Ok(Ok((fetched, set))) => {
+                let shadow_statement = fetched.statement.clone();
                 let fetcher = CannedFetcher(fetched);
                 if self
                     .pipeline
@@ -384,6 +385,22 @@ impl ExpertRuntime {
                     .is_ok()
                 {
                     self.loaded_index = Some(outcome.index);
+                    if let (Some(evaluator), Some((slot, snapshot))) = (
+                        self.shadow_evaluator.clone(),
+                        self.pipeline.approaches_snapshot(),
+                    ) {
+                        let token = self.supervisor.token();
+                        let session_id = self.orch.session_id().to_string();
+                        self.shadow.trigger(
+                            &mut self.supervisor,
+                            evaluator,
+                            token,
+                            session_id,
+                            slot,
+                            shadow_statement,
+                            snapshot,
+                        );
+                    }
                 }
             }
             Ok(Err(err)) => {

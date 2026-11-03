@@ -339,7 +339,7 @@ async fn make_runtime(name: &str, topics: Vec<String>, pool: Arc<FakePool>) -> E
     let root = tmp(name); let control = root.join("control"); let artifacts = root.join("artifacts");
     let io = LocalControlIo::new(control.clone()); io.setup_dirs("pp-testuser").await.unwrap();
     let spec = ExpertSessionSpec { session_id: "s1".into(), language: Language::Python, easy: (0..5).map(|i| q(&format!("e{i}"), Difficulty::Easy)).collect(), endpoint: Endpoint::new("203.0.113.10", 22022).unwrap(), username: EphemeralUsername::parse("pp-a1b2c3d4").unwrap(), fingerprint: Fingerprint::parse(&"a".repeat(64)).unwrap() };
-    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher: Arc::new(FakeFetcher), generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts.clone(), topics, level: String::new(), sync_phase: SessionSyncPhase::NotStarted };
+    let deps = ExpertRuntimeDeps { control_io: Box::new(io), hello: Box::new(LocalHelloSource::new(control.clone())), fetcher: Arc::new(FakeFetcher), generator: Arc::new(FakeGenerator), coding: Arc::new(FakeCoding), sandbox_io: Arc::new(FakeSandbox), chat: Arc::new(FakeChat), grader: Arc::new(FakeGrader), leetcode: None, sandbox_handle: None, artifact_root: artifacts.clone(), topics, level: String::new(), sync_phase: SessionSyncPhase::NotStarted, shadow_evaluator: None };
     let mut runtime = ExpertRuntime::new(spec, deps, T0).await.unwrap(); runtime.set_pool(pool as Arc<dyn PoolClient>); runtime
 }
 

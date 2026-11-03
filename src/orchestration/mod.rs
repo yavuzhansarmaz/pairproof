@@ -21,6 +21,7 @@ pub mod recovery;
 pub mod report;
 pub mod secret_push;
 pub mod session;
+pub mod shadow_runtime;
 pub mod ssh_auth;
 pub mod sync_gate;
 
@@ -84,6 +85,7 @@ pub use recovery::{
 };
 pub use report::{generate_report, limitations_footer, ChatExcerpt};
 pub use session::Orchestrator;
+pub use shadow_runtime::{MetaShadowEvaluator, ShadowEvaluator, ShadowRuntime, SHADOW_TIMEOUT};
 pub use ssh_auth::{
     helper_script, run_ssh_command, run_ssh_command_with_stdin, ssh_invocation,
     verify_and_key_line, AskpassSession, FeederHandle, SshAuthError, SshInvocation,

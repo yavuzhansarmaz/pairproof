@@ -25,7 +25,7 @@ use crate::orchestration::{
     FetchedStatement, GatePhase, HealthGate, KillReport, LeetCodeProbe, LifecycleError, MetaProbe,
     Orchestrator, OrchestratorError, PauseClock, PipelineError, QuestionGrader, QuestionPipeline,
     RecoveryController, RecoveryOutcome, RequestSupervisor, SandboxIo, SessionSyncPhase,
-    StatementFetcher,
+    ShadowEvaluator, ShadowRuntime, StatementFetcher,
 };
 use crate::sandbox::SandboxHandle;
 use crate::scoring::{ApproachSet, GradeOutcome};
@@ -114,6 +114,7 @@ pub struct ExpertRuntimeDeps {
     pub topics: Vec<String>,
     pub level: String,
     pub sync_phase: SessionSyncPhase,
+    pub shadow_evaluator: Option<Arc<dyn ShadowEvaluator>>,
 }
 
 struct LoadOutcome {
@@ -207,6 +208,8 @@ pub struct ExpertRuntime {
     meta_probe: Option<Arc<dyn MetaProbe>>,
     recovery_timed_out: bool,
     port_mapping: Option<crate::sandbox::nat::PortMapping>,
+    shadow: ShadowRuntime,
+    shadow_evaluator: Option<Arc<dyn ShadowEvaluator>>,
 }
 
 impl ExpertRuntime {
@@ -240,6 +243,11 @@ impl ExpertRuntime {
             });
         let layout = ArtifactLayout::create(&deps.artifact_root, &spec.session_id, spec.language)
             .map_err(|e| ExpertRuntimeError::Message(e.to_string()))?;
+        let seeded_shadow = {
+            let mut runtime = ShadowRuntime::new();
+            runtime.seed_persisted(&layout);
+            runtime
+        };
         Ok(Self {
             orch,
             gate,
@@ -289,6 +297,8 @@ impl ExpertRuntime {
             recovery_timed_out: false,
             final_grades: Vec::new(),
             port_mapping: None,
+            shadow: seeded_shadow,
+            shadow_evaluator: deps.shadow_evaluator,
         })
     }
 
@@ -321,6 +331,14 @@ impl ExpertRuntime {
     /// Returns the session artifact layout for the raw-data lifecycle.
     pub fn layout(&self) -> &ArtifactLayout {
         &self.layout
+    }
+    /// Shadow runtime holding evidence-only evaluations.
+    pub fn shadow(&self) -> &ShadowRuntime {
+        &self.shadow
+    }
+    /// Replaces the shadow evaluator (used by the production build).
+    pub fn set_shadow_evaluator(&mut self, evaluator: Arc<dyn ShadowEvaluator>) {
+        self.shadow_evaluator = Some(evaluator);
     }
     /// Expert-owned sync phase published in snapshots. The Mutagen
     /// session is candidate-started (`CandidateRuntime` transport), so
