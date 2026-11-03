@@ -53,7 +53,7 @@ pub fn expert_help_lines(screen: AppScreen) -> Vec<String> {
             "  r pick at random instead (enter confirms, b returns)",
         ]),
         AppScreen::Monitor => lines.extend([
-            "  R reissue a fresh connection string after a disconnect",
+            "  c reissue a fresh connection string after a disconnect",
             "  e end the session and build the final report",
         ]),
         AppScreen::Final => lines.extend(["  enter close"]),

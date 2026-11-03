@@ -131,9 +131,8 @@ impl ExpertLoopState {
                         ));
                     }
                     if active.is_disconnected() {
-                        lines.push("press R to reissue a fresh connection string.".to_string());
+                        lines.push("press c to reissue a fresh connection string.".to_string());
                     }
-                    lines.push("press e to end the session.".to_string());
                 }
                 _ => {}
             }

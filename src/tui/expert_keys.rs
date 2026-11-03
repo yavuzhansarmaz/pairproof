@@ -182,7 +182,7 @@ pub(crate) fn handle_key(
                 }
             }
         }
-        K::Char('R') if app.screen() == AppScreen::Monitor => {
+        K::Char('c') if app.screen() == AppScreen::Monitor => {
             if let Some(active) = runtime.as_mut() {
                 match block_on(tokio_rt, active.reissue(now_ms())) {
                     Some(Ok(_fresh)) => app.set_status_message("fresh string ready."),

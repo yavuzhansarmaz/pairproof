@@ -91,7 +91,7 @@ fn help_screen_lists_role_specific_keybindings() {
     assert!(role.contains("esc quit"), "{role}");
     assert!(!role.contains("q quit"), "{role}");
     let monitor = expert_help_lines(AppScreen::Monitor).join("\n");
-    assert!(monitor.contains("R reissue"), "{monitor}");
+    assert!(monitor.contains("c reissue"), "{monitor}");
     assert!(monitor.contains("e end the session"), "{monitor}");
     let wait = expert_help_lines(AppScreen::ConnectionWait).join("\n");
     assert!(wait.contains("waiting for the candidate"), "{wait}");

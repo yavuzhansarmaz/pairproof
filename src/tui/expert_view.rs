@@ -45,7 +45,7 @@ pub fn footer(app: &ExpertApp) -> Option<String> {
                 .to_string()
         }
         AppScreen::Monitor => {
-            "e end the session, R reissue after disconnect, esc quit, ? help".to_string()
+            "e end the session, c reissue after disconnect, esc quit, ? help".to_string()
         }
         AppScreen::Final => "enter close, esc quit".to_string(),
     };

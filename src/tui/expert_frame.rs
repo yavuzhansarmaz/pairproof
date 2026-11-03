@@ -50,6 +50,7 @@ fn frame_centered(
             | app::AppScreen::ConnectionWait
             | app::AppScreen::SelectMedium
             | app::AppScreen::SelectHard
+            | app::AppScreen::Monitor
     ) && !list_open
 }
 
