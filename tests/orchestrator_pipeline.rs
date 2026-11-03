@@ -315,7 +315,7 @@ async fn hidden_best_approach_and_expected_tokens_never_reach_candidate() {
     assert!(sandbox.files.lock().unwrap().is_empty());
 }
 #[tokio::test]
-async fn approach_selection_locks_tokens_once() {
+async fn approach_selection_locks_tokens_and_resubmission_relocks() {
     let mut orch = started(Language::Python);
     let (mut pipe, generator) = loaded_pipe(&orch).await;
     let views = pipe
@@ -345,11 +345,14 @@ async fn approach_selection_locks_tokens_once() {
         .count();
     assert_eq!(selected, 1);
     assert_eq!(*coding.calls.lock().unwrap(), 1);
+    // Submitting again over an existing selection is a change of
+    // approach: the old lock is freed and the new choice locks again.
     let again = pipe
         .select_preset(&mut orch, preset, &coding, &sandbox, 11)
         .await;
-    assert!(again.is_err());
-    assert_eq!(orch.session().token_locks(0), vec![222]);
+    assert!(again.is_ok(), "{again:?}");
+    assert_eq!(orch.session().token_locks(0), vec![222, 222]);
+    assert_eq!(*coding.calls.lock().unwrap(), 2);
 }
 #[tokio::test]
 async fn select_other_grades_first_and_locks_grade_tokens() {

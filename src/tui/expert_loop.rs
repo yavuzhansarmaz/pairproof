@@ -132,9 +132,6 @@ impl ExpertLoopState {
                             active.countdown_secs(now)
                         ));
                     }
-                    if active.is_disconnected() {
-                        lines.push("press c to reissue a fresh connection string.".to_string());
-                    }
                 }
                 _ => {}
             }

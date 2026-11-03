@@ -80,6 +80,8 @@ pub struct CandidateRunState {
     /// Set when the candidate backs out of Connect with an empty
     /// Enter; the caller returns to the main menu instead of exiting.
     pub back_to_menu: bool,
+    /// Staged approach selection per question (live solving screen).
+    pub staging: crate::tui::candidate_stage::ApproachStaging,
 }
 
 impl CandidateRunState {
@@ -102,6 +104,7 @@ impl CandidateRunState {
             paste_notice: false,
             show_help: false,
             back_to_menu: false,
+            staging: crate::tui::candidate_stage::ApproachStaging::default(),
         }
     }
 

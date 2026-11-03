@@ -22,7 +22,7 @@ pub const TEXT_COLOR: Color = Color::Rgb(237, 242, 255);
 pub const HEADING_COLOR: Color = Color::Rgb(120, 165, 230);
 pub use crate::tui::setup_panel::{draw_setup_screen, setup_box_areas, SetupPanel};
 
-pub use crate::tui::render_candidate::draw_candidate_screen;
+pub use crate::tui::render_candidate::{draw_candidate_screen, draw_candidate_screen_with_status};
 pub use crate::tui::render_preview::{
     draw_question_preview_screen, preview_body_rows, preview_metrics, PreviewMetrics, PreviewRow,
     PreviewRowKind, QuestionPreviewData,

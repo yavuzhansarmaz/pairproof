@@ -24,6 +24,28 @@ use crate::tui::viewport::{clamp_wrapped_scroll, wrapped_rows, wrapped_window};
 /// bullets get a navy marker, and `selected approach:` /
 /// `latest test:` lines get a navy label.
 fn question_line(line: &str, first: bool) -> Line<'static> {
+    if line == "Approaches" {
+        return Line::from(Span::styled(
+            line.to_string(),
+            Style::default()
+                .fg(HEADING_COLOR)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    if let Some(rest) = line.strip_prefix("> ") {
+        return Line::from(vec![
+            Span::styled(
+                "> ".to_string(),
+                Style::default()
+                    .fg(PROOF_COLOR)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                rest.to_string(),
+                Style::default().fg(TEXT_COLOR).add_modifier(Modifier::BOLD),
+            ),
+        ]);
+    }
     if first {
         return Line::from(Span::styled(
             line.to_string(),
@@ -51,18 +73,16 @@ fn question_line(line: &str, first: bool) -> Line<'static> {
             }
         }
         _ => {
-            for label in ["selected approach:", "latest test:", "phase:"] {
-                if let Some(rest) = line.strip_prefix(label) {
-                    return Line::from(vec![
-                        Span::styled(
-                            label.to_string(),
-                            Style::default()
-                                .fg(HEADING_COLOR)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw(rest.to_string()),
-                    ]);
-                }
+            if let Some(rest) = line.strip_prefix("status:") {
+                return Line::from(vec![
+                    Span::styled(
+                        "status:".to_string(),
+                        Style::default()
+                            .fg(HEADING_COLOR)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(rest.to_string()),
+                ]);
             }
             body_line(line)
         }
@@ -112,6 +132,32 @@ fn window_lines(
 pub fn draw_candidate_screen(
     frame: &mut Frame,
     left: &[String],
+    right: &[String],
+    chat_focused: bool,
+    question_pct: u16,
+    question_scroll: usize,
+    coach_scroll: usize,
+) {
+    draw_candidate_screen_with_status(
+        frame,
+        left,
+        &[],
+        right,
+        chat_focused,
+        question_pct,
+        question_scroll,
+        coach_scroll,
+    )
+}
+
+/// Like [`draw_candidate_screen`], with a fixed status box above the
+/// Coach pane: always `status lines + border` tall, never resizable,
+/// showing the submitted approach, latest test, phase, and sync.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_candidate_screen_with_status(
+    frame: &mut Frame,
+    left: &[String],
+    status: &[String],
     right: &[String],
     chat_focused: bool,
     question_pct: u16,
@@ -181,6 +227,52 @@ pub fn draw_candidate_screen(
         );
     }
 
+    // Right column: a fixed-height status box (never resizable) on
+    // top, the Coach pane filling the rest below it.
+    let right_rows = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Length(if status.is_empty() {
+                0
+            } else {
+                status.len() as u16 + 2
+            }),
+            ratatui::layout::Constraint::Min(0),
+        ])
+        .split(chunks[1]);
+    if !status.is_empty() {
+        let status_block = Block::default()
+            .title(Line::from(Span::styled(
+                "Status",
+                Style::default()
+                    .fg(HEADING_COLOR)
+                    .add_modifier(Modifier::BOLD),
+            )))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(FRAME_COLOR));
+        let status_inner = status_block.inner(right_rows[0]);
+        frame.render_widget(status_block, right_rows[0]);
+        let status_lines: Vec<Line> = status
+            .iter()
+            .map(|line| match line.split_once(':') {
+                Some((label, rest)) => Line::from(vec![
+                    Span::styled(
+                        format!("{label}:"),
+                        Style::default()
+                            .fg(HEADING_COLOR)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(rest.to_string()),
+                ]),
+                None => body_line(line),
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(status_lines).style(Style::default().fg(TEXT_COLOR)),
+            status_inner,
+        );
+    }
+
     // Coach pane: same padding, existing line styling and wrap.
     let block = pane_block(
         Line::from(Span::styled(
@@ -191,8 +283,8 @@ pub fn draw_candidate_screen(
         )),
         chat_focused,
     );
-    let inner = block.inner(chunks[1]);
-    frame.render_widget(block, chunks[1]);
+    let inner = block.inner(right_rows[1]);
+    frame.render_widget(block, right_rows[1]);
     let padded = Rect {
         x: inner.x.saturating_add(2),
         width: inner.width.saturating_sub(4),

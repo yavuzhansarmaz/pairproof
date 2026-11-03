@@ -8,6 +8,7 @@ pub mod candidate_connect;
 pub mod candidate_final;
 pub mod candidate_run;
 pub mod candidate_runtime;
+pub mod candidate_stage;
 pub mod candidate_sync;
 pub mod candidate_work;
 pub mod config;

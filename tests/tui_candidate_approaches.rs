@@ -42,6 +42,7 @@ fn view(options: Vec<(&str, &str)>, selected: Option<SnapshotSelection>, stateme
                 summary: summary.to_string(),
             })
             .collect(),
+        nav: Vec::new(),
         selected,
         latest_test: None,
         chat_replies: Vec::new(),
@@ -162,10 +163,10 @@ fn solving_state(session: Session) -> CandidateRunState {
 }
 
 #[test] #[rustfmt::skip]
-fn candidate_question_displays_all_four_generated_approaches() { let value = view(four_options(), Some(SnapshotSelection::Preset(1)), "A long statement body."); let lines = value.question_lines(); assert_eq!(lines[0], "Q1: Two Sum"); assert_eq!(lines[1], "approaches: 1-4 choose, 5 other (your own)"); assert_eq!(lines[2], "1: Alpha - first plan"); assert_eq!(lines[3], "> 2: Beta - second plan"); assert_eq!(lines[4], "3: Gamma - third plan"); assert_eq!(lines[5], "4: Delta - fourth plan"); assert_eq!(lines[6], "5: other - describe your own approach"); assert_eq!(lines[7], "A long statement body."); assert!(lines.iter().any(|line| line == "selected approach: preset 1")); }
+fn candidate_question_displays_all_four_generated_approaches() { let value = view(four_options(), Some(SnapshotSelection::Preset(1)), "A long statement body."); let lines = value.question_lines(); assert_eq!(lines[0], "Q1: Two Sum"); assert_eq!(lines[2], "A long statement body."); assert_eq!(lines[4], "Approaches"); assert_eq!(lines[5], "  [ ] 1: Alpha - first plan"); assert_eq!(lines[6], "> [x] 2: Beta - second plan"); assert_eq!(lines[7], "  [ ] 3: Gamma - third plan"); assert_eq!(lines[8], "  [ ] 4: Delta - fourth plan"); assert_eq!(lines[9], "  [ ] 5: other - describe your own approach"); assert!(value.status_lines().iter().any(|line| line == "selected approach: preset 2")); assert!(!lines.iter().any(|line| line.starts_with("selected approach:"))); }
 
 #[test] #[rustfmt::skip]
-fn candidate_question_displays_other_option() { let plain = view(four_options(), None, "Statement.").question_lines(); assert!(plain.iter().any(|line| line == "5: other - describe your own approach")); let chosen = view(four_options(), Some(SnapshotSelection::Other("my own plan".to_string())), "Statement.").question_lines(); assert!(chosen.iter().any(|line| line == "> 5: other - describe your own approach")); assert!(chosen.iter().any(|line| line == "selected approach: my own plan")); }
+fn candidate_question_displays_other_option() { let plain = view(four_options(), None, "Statement.").question_lines(); assert!(plain.iter().any(|line| line == "  [ ] 5: other - describe your own approach")); let chosen_value = view(four_options(), Some(SnapshotSelection::Other("my own plan".to_string())), "Statement."); let chosen = chosen_value.question_lines(); assert!(chosen.iter().any(|line| line == "> [x] 5: other - describe your own approach")); assert!(chosen_value.status_lines().iter().any(|line| line == "selected approach: other: my own plan")); }
 
 #[test]
 fn candidate_can_navigate_all_approach_options() {
@@ -296,19 +297,17 @@ fn candidate_approach_selection_preserves_token_lock_semantics() {
 }
 
 #[test] #[rustfmt::skip]
-fn candidate_question_layout_keeps_options_accessible_on_short_terminal() { let statement = "long statement wording ".repeat(30); let value = view(four_options(), None, statement.trim()); let mut left = value.question_lines(); left.push("focus: work/other/redirect/chat (tab switches)".to_string()); let right = vec!["coach: hello".to_string(), "message: ".to_string()]; let backend = ratatui::backend::TestBackend::new(64, 12); let mut terminal = ratatui::Terminal::new(backend).expect("terminal"); terminal.draw(|frame| draw_candidate_screen(frame, &left, &right, false, 60, 0, 0)).expect("draw"); let buffer = terminal.backend().buffer().clone(); let area = *buffer.area(); let text = (0..area.height).map(|y| (0..area.width).map(|x| buffer[(x, y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("
-"); for title in ["Alpha", "Beta", "Gamma", "Delta", "other"] { assert!(text.contains(title), "missing {title}: {text}"); } }
+fn candidate_question_layout_shows_question_first_on_short_terminal() { let statement = "long statement wording ".repeat(30); let value = view(four_options(), None, statement.trim()); let mut left = value.question_lines(); left.push("focus: up/down move, space select, enter submit".to_string()); let right = vec!["coach: hello".to_string(), "message: ".to_string()]; let backend = ratatui::backend::TestBackend::new(64, 12); let mut terminal = ratatui::Terminal::new(backend).expect("terminal"); terminal.draw(|frame| draw_candidate_screen(frame, &left, &right, false, 60, 0, 0)).expect("draw"); let buffer = terminal.backend().buffer().clone(); let area = *buffer.area(); let text = (0..area.height).map(|y| (0..area.width).map(|x| buffer[(x, y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n"); assert!(text.contains("Two Sum"), "{text}"); assert!(text.contains("long statement wording"), "{text}"); let mut scrolled = ratatui::Terminal::new(ratatui::backend::TestBackend::new(64, 12)).expect("terminal"); scrolled.draw(|frame| draw_candidate_screen(frame, &left, &right, false, 60, 40, 0)).expect("draw scrolled"); let buffer = scrolled.backend().buffer().clone(); let area = *buffer.area(); let text = (0..area.height).map(|y| (0..area.width).map(|x| buffer[(x, y)].symbol()).collect::<String>()).collect::<Vec<_>>().join("\n"); for title in ["Alpha", "Beta", "Gamma", "Delta", "other"] { assert!(text.contains(title), "missing {title}: {text}"); } }
 
 #[test] #[rustfmt::skip]
-fn candidate_question_displays_only_existing_options_when_fewer_than_four() { let lines = view(vec![("Alpha", "first plan"), ("Beta", "second plan")], None, "Statement.").question_lines(); assert!(lines.iter().any(|line| line == "1: Alpha - first plan")); assert!(lines.iter().any(|line| line == "2: Beta - second plan")); assert!(lines.iter().any(|line| line == "3: other - describe your own approach")); assert!(!lines.iter().any(|line| line.contains("Gamma"))); assert!(!lines.iter().any(|line| line.starts_with("4:"))); assert!(!lines.iter().any(|line| line.starts_with("5:"))); }
+fn candidate_question_displays_only_existing_options_when_fewer_than_four() { let lines = view(vec![("Alpha", "first plan"), ("Beta", "second plan")], None, "Statement.").question_lines(); assert!(lines.iter().any(|line| line == "> [ ] 1: Alpha - first plan")); assert!(lines.iter().any(|line| line == "  [ ] 2: Beta - second plan")); assert!(lines.iter().any(|line| line == "  [ ] 3: other - describe your own approach")); assert!(!lines.iter().any(|line| line.contains("Gamma"))); assert!(!lines.iter().any(|line| line.contains("4:"))); assert!(!lines.iter().any(|line| line.contains("5:"))); }
 
 #[test]
 fn fewer_options_number_other_as_next_choice() {
     let lines = view(vec![("Alpha", "a"), ("Beta", "b")], None, "S.").question_lines();
-    assert!(lines.iter().any(|l| l.contains("1-2 choose, 3 other")));
     assert!(lines
         .iter()
-        .any(|l| l == "3: other - describe your own approach"));
+        .any(|l| l == "  [ ] 3: other - describe your own approach"));
 }
 
 #[test]
@@ -328,19 +327,19 @@ fn other_selection_marker_survives_preset_like_text() {
 }
 
 #[test] #[rustfmt::skip]
-fn other_text_starting_with_preset_1_marks_other_not_preset() { let lines = view(four_options(), Some(SnapshotSelection::Other("preset 1".to_string())), "S.").question_lines(); assert!(lines[2..6].iter().all(|l| !l.starts_with("> ")), "{lines:?}"); assert!(lines[6].starts_with("> "), "{lines:?}"); assert!(lines.iter().any(|l| l == "selected approach: preset 1"), "{lines:?}"); }
+fn other_text_starting_with_preset_1_marks_other_not_preset() { let value = view(four_options(), Some(SnapshotSelection::Other("preset 1".to_string())), "S."); let lines = value.question_lines(); assert!(lines[5..9].iter().all(|l| !l.contains("[x]")), "{lines:?}"); assert!(lines[9].starts_with("> [x] "), "{lines:?}"); assert!(value.status_lines().iter().any(|l| l == "selected approach: other: preset 1"), "{lines:?}"); }
 
 #[test] #[rustfmt::skip]
-fn other_text_starting_with_preset_2_marks_other_not_preset() { let lines = view(four_options(), Some(SnapshotSelection::Other("preset 2".to_string())), "S.").question_lines(); assert!(lines[2..6].iter().all(|l| !l.starts_with("> ")), "{lines:?}"); assert!(lines[6].starts_with("> "), "{lines:?}"); assert!(lines.iter().any(|l| l == "selected approach: preset 2"), "{lines:?}"); }
+fn other_text_starting_with_preset_2_marks_other_not_preset() { let value = view(four_options(), Some(SnapshotSelection::Other("preset 2".to_string())), "S."); let lines = value.question_lines(); assert!(lines[5..9].iter().all(|l| !l.contains("[x]")), "{lines:?}"); assert!(lines[9].starts_with("> [x] "), "{lines:?}"); assert!(value.status_lines().iter().any(|l| l == "selected approach: other: preset 2"), "{lines:?}"); }
 
 #[test] #[rustfmt::skip]
-fn other_text_with_any_in_range_preset_label_marks_other() { for n in 0..4 { let text = format!("preset {n}"); let lines = view(four_options(), Some(SnapshotSelection::Other(text.clone())), "S.").question_lines(); assert!(lines[2..6].iter().all(|l| !l.starts_with("> ")), "{text}: {lines:?}"); assert!(lines[6].starts_with("> "), "{text}: {lines:?}"); } }
+fn other_text_with_any_in_range_preset_label_marks_other() { for n in 0..4 { let text = format!("preset {n}"); let lines = view(four_options(), Some(SnapshotSelection::Other(text.clone())), "S.").question_lines(); assert!(lines[5..9].iter().all(|l| !l.contains("[x]")), "{text}: {lines:?}"); assert!(lines[9].starts_with("> [x] "), "{text}: {lines:?}"); } }
 
 #[test] #[rustfmt::skip]
-fn actual_preset_selection_still_marks_the_preset_row() { let lines = view(four_options(), Some(SnapshotSelection::Preset(2)), "S.").question_lines(); assert!(lines[4].starts_with("> "), "{lines:?}"); assert!(!lines[6].starts_with("> "), "{lines:?}"); }
+fn actual_preset_selection_still_marks_the_preset_row() { let lines = view(four_options(), Some(SnapshotSelection::Preset(2)), "S.").question_lines(); assert!(lines[7].starts_with("> [x] "), "{lines:?}"); assert!(!lines[9].starts_with("> "), "{lines:?}"); }
 
 #[rustfmt::skip]
-fn snap_with(selected: Option<SnapshotSelection>) -> CandidateSnapshot { CandidateSnapshot { v: 1, session_id: "s1".to_string(), phase: "InProgress".to_string(), sync_phase: "Sync: active".to_string(), current: Some(SnapshotQuestion { index: 0, title: "Two Sum".to_string(), slug: "two-sum".to_string(), statement: Some("S.".to_string()) }), options: Vec::new(), selected, latest_test: None, chat_replies: Vec::new(), final_breakdown: None, chat_partial: None, recovery: None } }
+fn snap_with(selected: Option<SnapshotSelection>) -> CandidateSnapshot { CandidateSnapshot { v: 1, session_id: "s1".to_string(), phase: "InProgress".to_string(), sync_phase: "Sync: active".to_string(), current: Some(SnapshotQuestion { index: 0, title: "Two Sum".to_string(), slug: "two-sum".to_string(), statement: Some("S.".to_string()) }), options: Vec::new(), nav: Vec::new(), selected, latest_test: None, chat_replies: Vec::new(), final_breakdown: None, chat_partial: None, recovery: None } }
 
 #[test] #[rustfmt::skip]
 fn snapshot_selection_discriminator_survives_serialization() { let back: CandidateSnapshot = serde_json::from_str(&serde_json::to_string(&snap_with(Some(SnapshotSelection::Other("preset 2".to_string())))).expect("ser")).expect("de"); assert_eq!(back.selected, Some(SnapshotSelection::Other("preset 2".to_string()))); let back: CandidateSnapshot = serde_json::from_str(&serde_json::to_string(&snap_with(Some(SnapshotSelection::Preset(1)))).expect("ser")).expect("de"); assert_eq!(back.selected, Some(SnapshotSelection::Preset(1))); }
@@ -348,8 +347,6 @@ fn snapshot_selection_discriminator_survives_serialization() { let back: Candida
 #[test]
 fn candidate_question_shows_unavailable_when_no_approaches() {
     let lines = view(Vec::new(), None, "Statement.").question_lines();
-    assert_eq!(lines[1], "approaches are not available yet.");
-    assert!(!lines
-        .iter()
-        .any(|line| line == "approaches: 1-4 choose, 5 other (your own)"));
+    assert_eq!(lines[2], "Statement.");
+    assert_eq!(lines[5], "approaches are not available yet.");
 }

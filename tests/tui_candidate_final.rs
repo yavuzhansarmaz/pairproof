@@ -224,10 +224,10 @@ fn other_grading_unavailable_records_no_selection() {
     work.set_other_text("   ");
     let mut grader = UnavailableOtherGrader;
     let mut runner = UnavailableCodingRunner;
-    let error = work
-        .select_other_graded(&mut session, &mut grader, &mut runner, 10)
-        .expect_err("blank other");
-    assert!(format!("{error}").contains("empty other text"), "{error}");
+    // A blank Other is a valid submission now; with the grader
+    // unavailable it records no selection, like any other text.
+    work.select_other_graded(&mut session, &mut grader, &mut runner, 10)
+        .expect("blank other is not an error");
     assert_eq!(session.current_slot().expect("slot").approach, None);
     work.set_other_text("my own plan");
     work.select_other_graded(&mut session, &mut grader, &mut runner, 11)

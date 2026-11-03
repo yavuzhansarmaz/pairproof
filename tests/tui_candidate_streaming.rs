@@ -87,6 +87,7 @@ fn coach_stream_does_not_block_question_navigation() {
                 summary: "Converge from ends".to_string(),
             },
         ],
+        nav: Vec::new(),
         selected: None,
         latest_test: None,
         chat_replies: Vec::new(),

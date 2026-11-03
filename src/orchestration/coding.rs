@@ -192,6 +192,15 @@ impl QuestionPipeline {
             .and_then(|set| set.options.get(preset as usize))
             .map(|option| option.expected_tokens)
             .ok_or(PipelineError::InvalidPreset)?;
+        // Submitting over an existing selection is a change of
+        // approach: free the slot first so the new choice can lock.
+        if orch
+            .session()
+            .current_slot()
+            .is_some_and(|slot| slot.approach.is_some())
+        {
+            orch.change_approach(now_ms)?;
+        }
         orch.select_approach(ApproachChoice::Preset(preset), expected, now_ms)?;
         self.run_one_coding_step(orch, coding, sandbox, None).await
     }
@@ -210,6 +219,13 @@ impl QuestionPipeline {
         let statement = self.statement_text(orch)?;
         let grade = generator.grade_other(&statement, text).await?;
         let index = orch.current_index();
+        if orch
+            .session()
+            .current_slot()
+            .is_some_and(|slot| slot.approach.is_some())
+        {
+            orch.change_approach(now_ms)?;
+        }
         orch.select_approach(
             ApproachChoice::Other(text.to_string()),
             grade.expected_tokens,

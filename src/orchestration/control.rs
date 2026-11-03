@@ -10,13 +10,11 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::core::ApproachChoice;
-use crate::orchestration::finalize::final_visible_to_candidate;
-use crate::orchestration::health::ServiceKind;
-use crate::orchestration::pipeline::QuestionPipeline;
-use crate::orchestration::session::Orchestrator;
-use crate::orchestration::sync_gate::SessionSyncPhase;
-use crate::scoring::FinalBreakdown;
+pub use crate::orchestration::control_snapshot::{
+    build_snapshot, build_snapshot_with_recovery, snapshot_service_name, CandidateSnapshot,
+    SnapshotFinal, SnapshotFinalQuestion, SnapshotNav, SnapshotOption, SnapshotQuestion,
+    SnapshotRecovery, SnapshotSelection, SnapshotTest,
+};
 
 /// Control root outside the `/workspace` Mutagen sync root.
 pub const CONTROL_ROOT: &str = "/pairproof-control";
@@ -110,6 +108,8 @@ pub enum IntentKind {
     Skip,
     RequestReQuestion,
     ChangeApproach,
+    Navigate { index: usize },
+    Disconnect,
     ChatRequest { chat_id: String, text: String },
 }
 #[rustfmt::skip]
@@ -120,7 +120,7 @@ impl IntentKind {
             Self::SelectPreset { .. } => "SelectPreset", Self::SelectOther { .. } => "SelectOther",
             Self::Continue => "Continue", Self::Redirect { .. } => "Redirect",
             Self::RequestTests => "RequestTests", Self::Finish => "Finish", Self::Skip => "Skip",
-            Self::RequestReQuestion => "RequestRequestion", Self::ChangeApproach => "ChangeApproach", Self::ChatRequest { .. } => "ChatRequest",
+            Self::RequestReQuestion => "RequestRequestion", Self::ChangeApproach => "ChangeApproach", Self::Navigate { .. } => "Navigate", Self::Disconnect => "Disconnect", Self::ChatRequest { .. } => "ChatRequest",
         }
     }
 }
@@ -178,6 +178,8 @@ fn kind_payload(kind: &IntentKind) -> (&'static str, Value) {
         IntentKind::Skip => ("Skip", serde_json::json!({})),
         IntentKind::RequestReQuestion => ("RequestRequestion", serde_json::json!({})),
         IntentKind::ChangeApproach => ("ChangeApproach", serde_json::json!({})),
+        IntentKind::Navigate { index } => ("Navigate", serde_json::json!({"index": index})),
+        IntentKind::Disconnect => ("Disconnect", serde_json::json!({})),
         IntentKind::ChatRequest { chat_id, text } => ("ChatRequest", serde_json::json!({"chat_id": chat_id, "text": text})),
     }
 }
@@ -188,7 +190,9 @@ fn check_text(text: &str, field: &str) -> Result<(), ControlError> { if text.tri
 fn validate_kind(kind: &IntentKind) -> Result<(), ControlError> {
     match kind {
         IntentKind::SelectPreset { preset } if *preset > 3 => Err(ControlError::InvalidPayload("preset out of range".into())),
-        IntentKind::SelectOther { text } | IntentKind::Redirect { text } => check_text(text, "text"),
+        // A blank `Other` submission is deliberate; only its size is bounded.
+        IntentKind::SelectOther { text } => { if text.len() > MAX_TEXT_BYTES { return Err(ControlError::InvalidPayload("bad text".into())); } Ok(()) },
+        IntentKind::Redirect { text } => check_text(text, "text"),
         IntentKind::ChatRequest { chat_id, text } => {
             if chat_id.is_empty() || chat_id.len() > 128 { return Err(ControlError::InvalidPayload("bad chat_id".into())); }
             check_text(text, "text")
@@ -219,6 +223,8 @@ fn parse_kind(name: &str, payload: &Value) -> Result<IntentKind, ControlError> {
         "Skip" => IntentKind::Skip,
         "RequestRequestion" | "RequestReQuestion" => IntentKind::RequestReQuestion,
         "ChangeApproach" => IntentKind::ChangeApproach,
+        "Disconnect" => IntentKind::Disconnect,
+        "Navigate" => { let raw = payload.get("index").and_then(Value::as_u64).ok_or_else(|| ControlError::InvalidPayload("missing index".into()))?; IntentKind::Navigate { index: usize::try_from(raw).map_err(|_| ControlError::InvalidPayload("bad index".into()))? } },
         "ChatRequest" => IntentKind::ChatRequest { chat_id: payload_text(payload, "chat_id")?, text: payload_text(payload, "text")? },
         other => return Err(ControlError::ForbiddenKind(other.to_string())),
     };
@@ -275,87 +281,6 @@ pub struct ProcessedState { pub session_id: String, pub ids: BTreeSet<String>, p
 impl ProcessedState {
     pub fn new(session_id: &str) -> Self { Self { session_id: session_id.into(), ids: BTreeSet::new(), chat_ids: BTreeSet::new(), last_seq: 0 } }
     pub fn mark(&mut self, intent: &Intent) { self.ids.insert(intent.id.clone()); if let IntentKind::ChatRequest { chat_id, .. } = &intent.kind { self.chat_ids.insert(chat_id.clone()); } self.last_seq = intent.seq; }
-}
-
-/// Candidate-visible question projection.
-#[rustfmt::skip]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SnapshotQuestion { pub index: usize, pub title: String, pub slug: String, pub statement: Option<String> }
-/// Candidate-visible approach option: title and summary only.
-#[rustfmt::skip]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SnapshotOption { pub title: String, pub summary: String }
-/// Candidate-visible latest test summary.
-#[rustfmt::skip]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SnapshotTest { pub passed: u32, pub failed: u32, pub at_ms: u64 }
-/// Final per-question result, present only inside a final snapshot.
-#[rustfmt::skip]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SnapshotFinalQuestion { pub slot_index: usize, pub grade: Option<f64>, pub rationale: Option<String> }
-/// Candidate-visible final breakdown projection (rating and grades only).
-#[rustfmt::skip]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SnapshotFinal { pub rating: f64, pub per_question: Vec<SnapshotFinalQuestion> }
-
-/// Candidate-safe recovery projection; no reason/body/status strings.
-#[rustfmt::skip]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SnapshotRecovery { pub active: bool, pub service: Option<String>, pub remaining_ms: u64, pub generation: u64, pub technical_failure: bool }
-#[rustfmt::skip]
-impl SnapshotRecovery {
-    pub fn service_name(service: ServiceKind) -> &'static str { match service { ServiceKind::Meta => "Meta", ServiceKind::LeetCode => "LeetCode" } }
-    pub fn from_service(active: bool, service: Option<ServiceKind>, remaining_ms: u64, generation: u64, technical_failure: bool) -> Self { Self { active, service: service.map(|s| Self::service_name(s).to_string()), remaining_ms, generation, technical_failure } }
-}
-#[rustfmt::skip]
-pub fn snapshot_service_name(service: ServiceKind) -> &'static str { SnapshotRecovery::service_name(service) }
-
-/// Candidate-visible approach selection with an explicit kind; the
-/// displayed marker must never be inferred from custom text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SnapshotSelection {
-    Preset(u8),
-    Other(String),
-}
-
-/// Versioned, session-bound candidate snapshot. Deliberately has no
-/// field for quality, best index, expected tokens, or grading internals.
-#[rustfmt::skip]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CandidateSnapshot {
-    pub v: u32, pub session_id: String, pub phase: String, pub sync_phase: String,
-    pub current: Option<SnapshotQuestion>, pub options: Vec<SnapshotOption>,
-    pub selected: Option<SnapshotSelection>, pub latest_test: Option<SnapshotTest>,
-    pub chat_replies: Vec<String>, pub final_breakdown: Option<SnapshotFinal>,
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub chat_partial: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")] pub recovery: Option<SnapshotRecovery>,
-}
-
-/// Builds a snapshot only from candidate-safe projections. The final
-/// breakdown is included only in Completed/EndedByExpert sessions.
-#[rustfmt::skip]
-pub fn build_snapshot(orch: &Orchestrator, pipe: &QuestionPipeline, sync_phase: SessionSyncPhase,
-    chat_replies: &[String], breakdown: Option<&FinalBreakdown>) -> CandidateSnapshot {
-    build_snapshot_with_recovery(orch, pipe, sync_phase, chat_replies, breakdown, None)
-}
-#[rustfmt::skip]
-pub fn build_snapshot_with_recovery(orch: &Orchestrator, pipe: &QuestionPipeline, sync_phase: SessionSyncPhase,
-    chat_replies: &[String], breakdown: Option<&FinalBreakdown>, recovery: Option<SnapshotRecovery>) -> CandidateSnapshot {
-    let slot = orch.session().current_slot();
-    let current = orch.current_question().map(|q| SnapshotQuestion {
-        index: orch.current_index().unwrap_or_default(), title: q.title.clone(), slug: q.title_slug.clone(),
-        statement: pipe.current_statement(orch).map(|f| f.statement) });
-    let selected = slot.and_then(|s| s.approach.as_ref()).map(|choice| match choice {
-        ApproachChoice::Preset(n) => SnapshotSelection::Preset(*n), ApproachChoice::Other(text) => SnapshotSelection::Other(text.clone()) });
-    let latest_test = slot.and_then(|s| s.latest_test).map(|t| SnapshotTest { passed: t.passed, failed: t.failed, at_ms: t.at_ms });
-    let options = pipe.candidate_options().into_iter().map(|o| SnapshotOption { title: o.title, summary: o.summary }).collect();
-    let final_breakdown = if final_visible_to_candidate(orch.status()) {
-        breakdown.map(|b| SnapshotFinal { rating: b.rating, per_question: b.per_question.iter()
-            .map(|q| SnapshotFinalQuestion { slot_index: q.slot_index, grade: q.grade, rationale: q.rationale.clone() }).collect() })
-    } else { None };
-    CandidateSnapshot { v: SNAPSHOT_VERSION, session_id: orch.session_id().to_string(),
-        phase: format!("{:?}", orch.status()), sync_phase: sync_phase.label().to_string(), current,
-        options, selected, latest_test, chat_replies: chat_replies.to_vec(), final_breakdown, chat_partial: None, recovery }
 }
 
 pub use crate::orchestration::control_codec::{

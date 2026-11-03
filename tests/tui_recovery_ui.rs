@@ -139,6 +139,7 @@ fn candidate_view(rec: Option<SnapshotRecovery>) -> CandidateView {
             title: "Hash map".to_string(),
             summary: "One pass lookup".to_string(),
         }],
+        nav: Vec::new(),
         selected: Some(SnapshotSelection::Preset(0)),
         latest_test: Some(SnapshotTest {
             passed: 3,
@@ -355,6 +356,7 @@ fn recovery_ui_preserves_existing_candidate_progress() {
             title: "Hash map".to_string(),
             summary: "One pass lookup".to_string(),
         }],
+        nav: Vec::new(),
         selected: Some(SnapshotSelection::Preset(0)),
         latest_test: Some(SnapshotTest {
             passed: 3,
@@ -375,7 +377,7 @@ fn recovery_ui_preserves_existing_candidate_progress() {
         "{joined}"
     );
     assert!(joined.contains("Hash map"), "{joined}");
-    assert!(joined.contains("selected approach: preset 0"), "{joined}");
+    assert!(joined.contains("selected approach: preset 1"), "{joined}");
     assert!(
         joined.contains("technical problem - service temporarily unavailable."),
         "{joined}"

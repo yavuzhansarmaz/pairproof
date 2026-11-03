@@ -105,6 +105,7 @@ fn long_statement_does_not_hide_final_summary() {
         question_index: Some(0),
         statement: Some(statement),
         options: Vec::new(),
+        nav: Vec::new(),
         selected: None,
         latest_test: None,
         chat_replies: Vec::new(),
@@ -113,6 +114,8 @@ fn long_statement_does_not_hide_final_summary() {
             rating: 8.25,
             per_question: vec![SnapshotFinalQuestion {
                 slot_index: 0,
+                title: String::new(),
+                state: String::new(),
                 grade: Some(8.0),
                 rationale: Some("Solid".to_string()),
             }],

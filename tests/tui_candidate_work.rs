@@ -140,41 +140,28 @@ fn candidate_approach_list_preserves_four_plus_other() {
 }
 
 #[test]
-fn other_approach_rejects_blank_input() {
+fn other_approach_accepts_blank_input() {
     let mut session = started();
     let mut work = CandidateWork::new();
     work.set_other_text("   ");
     let mut runner = OkCodingRunner::default();
-    let error = work
-        .select_other(&mut session, grade(), &mut runner, 10)
-        .expect_err("blank other");
-    assert!(matches!(
-        error,
-        CandidateWorkError::Core(CoreError::InvalidApproach(_))
-    ));
-    assert_eq!(runner.calls, 0);
-    assert_eq!(session.current_slot().expect("slot").approach, None);
-    assert!(!has_event(
+    // A blank Other is a deliberate submission: it selects, records
+    // the event, and runs a coding step like any other choice.
+    work.select_other(&mut session, grade(), &mut runner, 10)
+        .expect("blank other selects");
+    assert_eq!(runner.calls, 1);
+    assert_eq!(
+        session.current_slot().expect("slot").approach,
+        Some(ApproachChoice::Other(String::new()))
+    );
+    assert!(has_event(
         &session,
         EventKind::ApproachSelected {
             index: 0,
             choice: ApproachChoice::Other(String::new())
         }
     ));
-    work.set_other_text("  sliding window  ");
-    work.select_other(&mut session, grade(), &mut runner, 11)
-        .expect("select other");
-    assert_eq!(
-        session.current_slot().expect("slot").approach,
-        Some(ApproachChoice::Other("sliding window".into()))
-    );
     assert_eq!(work.other_text(), "");
-    assert_eq!(runner.calls, 1);
-    assert_eq!(
-        runner.last_input.expect("coding input").approach_text,
-        "sliding window"
-    );
-    assert_eq!(work.current_code(), "print('fixed')");
 }
 
 #[test]

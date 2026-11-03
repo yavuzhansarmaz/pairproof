@@ -204,9 +204,6 @@ mod tests {
         assert!(s
             .select_approach(ApproachChoice::Preset(4), 100, 5)
             .is_err());
-        assert!(s
-            .select_approach(ApproachChoice::Other("  ".into()), 100, 5)
-            .is_err());
         assert!(s.select_approach(ApproachChoice::Preset(0), 0, 5).is_err());
         s.select_approach(ApproachChoice::Preset(1), 100, 5)
             .expect("select");

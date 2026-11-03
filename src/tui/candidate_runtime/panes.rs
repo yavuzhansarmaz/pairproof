@@ -156,14 +156,7 @@ pub(crate) fn live_panes(
     connection_lost: bool,
     status: &Option<String>,
 ) -> (Vec<String>, Vec<String>) {
-    let mut left = view.question_lines();
-    if state.focus == CandidateFocus::Other {
-        for line in &mut left {
-            if line.ends_with("other - describe your own approach") && !line.starts_with("> ") {
-                *line = format!("> {line}");
-            }
-        }
-    }
+    let mut left = view.question_lines_staged(state.staging.current_stage());
     if connection_lost {
         left.push(CONNECTION_LOST.to_string());
         left.push("press R to reconnect with a fresh string.".to_string());
@@ -178,7 +171,10 @@ pub(crate) fn live_panes(
     if let Some(text) = status {
         left.push(sanitize_display(text));
     }
-    left.push("focus: tab or click a panel to switch question/coach".to_string());
+    left.push(
+        "focus: up/down move, space select, enter submit, left/right question, tab panel"
+            .to_string(),
+    );
     let mut right = view.chat_lines();
     right.push(sanitize_display(&format!(
         "message: {}",

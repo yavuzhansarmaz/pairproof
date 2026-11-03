@@ -44,10 +44,8 @@ pub fn footer(app: &ExpertApp) -> Option<String> {
             "up/down move, left/right page, space choose, tab preview, enter continue, esc quit, ? help"
                 .to_string()
         }
-        AppScreen::Monitor => {
-            "e end the session, c reissue after disconnect, esc quit, ? help".to_string()
-        }
-        AppScreen::Final => "enter close, esc quit".to_string(),
+        AppScreen::Monitor => "e end the session, c reissue after disconnect, esc quit, ? help".to_string(),
+        AppScreen::Final => "enter close".to_string(),
     };
     (!text.is_empty()).then_some(text)
 }
@@ -101,8 +99,7 @@ pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
             ]),
             S::Preflight => {
                 lines.extend([
-                    "everything PairProof needs on this machine,".into(),
-                    "checked before you invite a candidate.".into(),
+                    "everything PairProof needs on this machine.".into(),
                     "".into(),
                 ]);
                 if app.preflight_lines.is_empty() {
@@ -193,7 +190,6 @@ pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
                 } else {
                     "session live.".into()
                 });
-                lines.push("press e to end the session.".into());
             }
             S::Final => {
                 if app.final_lines.is_empty() {

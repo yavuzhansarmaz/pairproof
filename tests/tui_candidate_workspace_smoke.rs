@@ -87,6 +87,7 @@ fn snapshot4() -> CandidateSnapshot {
     CandidateSnapshot { v: 1, session_id: "s1".to_string(), phase: "InProgress".to_string(), sync_phase: "Sync: active".to_string(),
         current: Some(SnapshotQuestion { index: 0, title: "Two Sum".to_string(), slug: "two-sum".to_string(), statement: Some("Find two numbers that sum to target.".to_string()) }),
         options: TITLES.iter().zip(summaries).map(|(t, s)| SnapshotOption { title: t.to_string(), summary: s.to_string() }).collect(),
+        nav: Vec::new(),
         selected: None, latest_test: None, chat_replies: vec![], final_breakdown: None, chat_partial: None, recovery: None }
 }
 
@@ -228,6 +229,8 @@ fn smoke_candidate_sees_approaches_and_selects_preset() {
     let mut state = CandidateRunState::new();
     let mut status = None;
     press(&mut state, &mut runtime, K::Char('1'), &mut status);
+    assert!(runtime.transport().sent.is_empty(), "number key only marks");
+    press(&mut state, &mut runtime, K::Enter, &mut status);
     let sent = &runtime.transport().sent;
     assert_eq!(sent.len(), 1, "{sent:?}");
     assert_eq!(sent[0].kind, IntentKind::SelectPreset { preset: 0 });
@@ -361,11 +364,14 @@ fn smoke_candidate_navigates_by_keyboard_and_mouse_and_resizes() {
     );
     let view = runtime.view();
     let (left, right) = pane_lines(&view);
+    // The question itself is what a short terminal shows first.
     let small = buffer_text(&drawn(&left, &right, false, 60, 12, 0, 0));
+    assert!(small.contains("Two Sum"), "{small}");
+    let roomy = buffer_text(&drawn(&left, &right, false, 80, 24, 0, 0));
     for title in TITLES {
-        assert!(small.contains(title), "{small}");
+        assert!(roomy.contains(title), "{roomy}");
     }
-    assert!(small.contains("other"), "{small}");
+    assert!(roomy.contains("other"), "{roomy}");
     // Focus border follows chat_focused at the large size, without panic.
     let divider = 72u16; // 60% of 120
     let unfocused = drawn(&left, &right, false, 120, 40, 0, 0);

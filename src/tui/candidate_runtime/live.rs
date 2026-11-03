@@ -40,7 +40,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut live = false;
     let mut status: Option<String> = None;
     let mut loading_tick = 0usize;
-    let mut connect_pending = false;
+    let mut connect_rx: Option<std::sync::mpsc::Receiver<ConnectOutcome>> = None;
     let mut question_pct = DEFAULT_QUESTION_PCT;
     let mut dragging_split = false;
     let mut question_scroll = 0usize;
@@ -48,6 +48,36 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut coach_following = true;
     let mut scrolled_question: Option<usize> = None;
     while state.app.screen() != CandidateScreen::Exited {
+        // Apply a finished background connection, if one landed; while
+        // it runs the loop keeps drawing the animated loading screen.
+        match connect_rx.as_ref().map(|rx| rx.try_recv()) {
+            Some(Ok(ConnectOutcome::SubmitFailed(err))) => {
+                connect_rx = None;
+                state.app.record_connect_error(err);
+            }
+            Some(Ok(ConnectOutcome::Failed(err))) => {
+                connect_rx = None;
+                runtime = None;
+                super::reset_after_connect_failure(state, &mut stash, &mut status, &err);
+            }
+            Some(Ok(ConnectOutcome::Connected(built))) => {
+                connect_rx = None;
+                state.app.mark_connection_verified();
+                runtime = Some(*built);
+                status = None;
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                connect_rx = None;
+                runtime = None;
+                super::reset_after_connect_failure(
+                    state,
+                    &mut stash,
+                    &mut status,
+                    &CandidateRuntimeError::Transport,
+                );
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Empty)) | None => {}
+        }
         if live {
             if let Some(active) = runtime.as_mut() {
                 if let Err(err) = active.poll_snapshot() {
@@ -62,6 +92,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             .unwrap_or(false);
         if live {
             if let Some(view) = &tick_view {
+                super::live_keys::sync_staging(state, view);
                 // A new question starts at the top of the pane.
                 let current = view.question_index;
                 if current != scrolled_question {
@@ -76,9 +107,9 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             .unwrap_or((0, 24));
         // While the statement is still arriving, the shared loading
         // screen replaces the placeholder solving screen entirely.
-        // A deferred connection submit shows the same loading screen
-        // before its blocking verification runs.
-        let waiting = connect_pending
+        // A background connection submit shows the same loading
+        // screen, animated, until its result lands.
+        let waiting = connect_rx.is_some()
             || (live
                 && !state.show_help
                 && tick_view
@@ -127,10 +158,15 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             let visible = crate::tui::render::loading_lines(loading_tick);
             let _ = terminal.draw(|frame| crate::tui::render::draw_loading_screen(frame, &visible));
         } else if let Some((left, right, chat_focused)) = &panes {
+            let status_lines = tick_view
+                .as_ref()
+                .map(|view| view.status_lines())
+                .unwrap_or_default();
             let _ = terminal.draw(|frame| {
-                crate::tui::render::draw_candidate_screen(
+                crate::tui::render::draw_candidate_screen_with_status(
                     frame,
                     left,
+                    &status_lines,
                     right,
                     *chat_focused,
                     question_pct,
@@ -147,6 +183,8 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                                 CandidateScreen::Solving,
                                 state.focus,
                             )
+                        } else if view.is_terminal() {
+                            view.final_screen_lines()
                         } else {
                             live_lines(state, view, connection_lost, &status)
                         }
@@ -162,21 +200,10 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             };
             let visible =
                 crate::tui::viewport::visible_with_pinned(&lines, height.saturating_sub(2));
-            let centered = screen_centered(state.show_help, live, state.app.screen());
+            let centered = screen_centered(state.show_help, live, state.app.screen())
+                || tick_view.as_ref().is_some_and(|view| view.is_terminal());
             let _ =
                 terminal.draw(|frame| crate::tui::render::draw_screen(frame, &visible, centered));
-        }
-        if connect_pending {
-            // The loading frame is on screen; now run the blocking
-            // connection submit and runtime build behind it.
-            connect_pending = false;
-            handle_candidate_key(state, KeyEvent::new(K::Enter, KeyModifiers::NONE));
-            if state.app.screen() == CandidateScreen::Rules {
-                establish_runtime_after_rules(state, &mut runtime, &mut stash, &mut status);
-            }
-            if runtime.is_some() && state.app.rules_accepted() {
-                live = true;
-            }
         }
         if crossterm::event::poll(Duration::from_millis(250)).unwrap_or(false) {
             // Drain every queued event before the next snapshot/draw:
@@ -185,14 +212,32 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             while let Ok(event) = crossterm::event::read() {
                 match event {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
+                        if connect_rx.is_some() {
+                            // Connecting in the background: only quit
+                            // keys are live; the rest is ignored so
+                            // the attempt cannot be re-entered.
+                            if key.code == K::Esc
+                                || (key.code == K::Char('c')
+                                    && key.modifiers.contains(KeyModifiers::CONTROL))
+                            {
+                                state.app.quit();
+                            }
+                        }
                         // Arrow/page keys scroll the question pane
                         // while the two panes are up; they were
                         // no-ops in the live key handler, so no
                         // candidate action changes.
-                        let scrolls_pane = live
+                        let scrolls_pane = connect_rx.is_none()
+                            && live
                             && panes.is_some()
-                            && matches!(key.code, K::Up | K::Down | K::PageUp | K::PageDown);
-                        if scrolls_pane {
+                            && match key.code {
+                                K::Up | K::Down => state.focus == CandidateFocus::Chat,
+                                K::PageUp | K::PageDown => true,
+                                _ => false,
+                            };
+                        if connect_rx.is_some() {
+                            // Already handled above; swallow the key.
+                        } else if scrolls_pane {
                             if state.focus == CandidateFocus::Chat {
                                 match key.code {
                                     K::Up => coach_scroll = coach_scroll.saturating_sub(1),
@@ -244,27 +289,41 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                                 state.show_help,
                             ) && connect_enter
                             {
-                                // Show the loading frame first; the
-                                // submit runs right after that draw.
-                                connect_pending = true;
+                                // Start the blocking connection on a
+                                // worker thread; the loop keeps drawing
+                                // the animated loading screen and polls
+                                // the result at the top of each tick.
+                                let input = state.app.connect_input();
+                                let worker_stash = Arc::clone(&stash);
+                                let existing = runtime.take();
+                                connect_rx = Some(spawn_connect_work(move || {
+                                    run_connect_work(input, now_ms(), worker_stash, existing)
+                                }));
                                 break;
                             }
                             handle_candidate_key(state, key);
                             if connect_enter && state.app.screen() == CandidateScreen::Rules {
-                                establish_runtime_after_rules(
-                                    state,
-                                    &mut runtime,
-                                    &mut stash,
-                                    &mut status,
-                                );
+                                // The submit already verified on this
+                                // thread (the path above was not taken);
+                                // still build the runtime in the
+                                // background behind the loading screen.
+                                let worker_stash = Arc::clone(&stash);
+                                let existing = runtime.take();
+                                connect_rx = Some(spawn_connect_work(move || {
+                                    run_runtime_build(existing, worker_stash)
+                                }));
                             }
                             if runtime.is_some() && state.app.rules_accepted() {
                                 live = true;
                             }
                         }
                     }
-                    Event::Paste(text) => handle_candidate_paste(state, &text),
-                    Event::Mouse(mouse) => {
+                    Event::Paste(text) => {
+                        if connect_rx.is_none() {
+                            handle_candidate_paste(state, &text)
+                        }
+                    }
+                    Event::Mouse(mouse) if connect_rx.is_none() => {
                         // Dragging the pane divider resizes the solving
                         // panes; both keep at least 30% of the width.
                         use crossterm::event::{MouseButton, MouseEventKind};
@@ -324,6 +383,12 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
         }
     }
     if let Some(active) = runtime.as_mut() {
+        // Leaving a live session (Esc/Ctrl-C): signal the expert
+        // before tearing sync down, so its monitor reflects the
+        // disconnect immediately rather than at heartbeat timeout.
+        if live && !active.view().is_terminal() {
+            let _ = active.disconnect();
+        }
         let _ = active.end();
     }
     Ok(())

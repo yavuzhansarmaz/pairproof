@@ -54,6 +54,11 @@ pub enum EventKind {
     QuestionSkipped {
         index: usize,
     },
+    /// Candidate switched the active question; a finished or skipped
+    /// target reopens, and every slot keeps its recorded approach.
+    QuestionReopened {
+        index: usize,
+    },
     TestRunCompleted {
         index: usize,
         passed: u32,

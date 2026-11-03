@@ -174,6 +174,16 @@ impl ExpertRuntime {
                 now_ms,
             )
             .await?;
+        // A Disconnect intent lands here within one drain tick; sync
+        // the gate so the monitor shows the disconnect (and the
+        // reissue action) immediately, not at the heartbeat timeout.
+        if self.started
+            && !self.ended
+            && !self.orch.is_connected()
+            && self.gate.phase() == GatePhase::Locked
+        {
+            let _ = self.gate.handle_disconnect(&mut self.orch, now_ms);
+        }
         for (slot, grade) in self.pipeline.other_grades() {
             self.shadow.record_other(slot, grade);
         }

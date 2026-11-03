@@ -211,6 +211,13 @@ impl Orchestrator {
         Ok(())
     }
 
+    /// Switches the active question (free navigation; a finished or
+    /// skipped target reopens with its recorded approach intact).
+    pub fn navigate_to(&mut self, index: usize, now_ms: u64) -> Result {
+        self.session.navigate_to(index, now_ms)?;
+        Ok(())
+    }
+
     /// Requests a replacement for the active expert question.
     pub fn request_requestion(&mut self, now_ms: u64) -> Result {
         self.session.request_requestion(now_ms)?;

@@ -58,6 +58,7 @@ fn base_view() -> CandidateView {
         question_index: Some(0),
         statement: Some("distinctive statement line".to_string()),
         options: Vec::new(),
+        nav: Vec::new(),
         selected: None,
         latest_test: None,
         chat_replies: vec!["distinctive coach reply".to_string()],

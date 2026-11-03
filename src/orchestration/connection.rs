@@ -273,7 +273,9 @@ impl ConnectionGate {
         orchestrator: &mut Orchestrator,
         now_ms: u64,
     ) -> Result<(), ConnectionGateError> {
-        orchestrator.disconnect_candidate(now_ms)?;
+        if orchestrator.is_connected() {
+            orchestrator.disconnect_candidate(now_ms)?;
+        }
         self.phase = GatePhase::ReissueNeeded;
         Ok(())
     }

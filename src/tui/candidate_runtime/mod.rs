@@ -3,7 +3,7 @@
 use crate::connection::ConnectionString;
 use crate::orchestration::control::{
     final_ack_bytes, heartbeat_bytes, hello_bytes, parse_session_binding_full, CandidateSnapshot,
-    Intent, IntentKind, SnapshotFinal, SnapshotOption, SnapshotRecovery, SnapshotTest,
+    Intent, IntentKind, SnapshotFinal, SnapshotNav, SnapshotOption, SnapshotRecovery, SnapshotTest,
     FINAL_ACK_PATH, HEARTBEAT_PATH, SESSION_PATH,
 };
 use crate::orchestration::control_client::{CandidateControlClient, SshControlClient};
@@ -27,11 +27,14 @@ const HELLO_PATH: &str = "/pairproof-control/inbox/hello.json";
 const SSH_TIMEOUT: Duration = Duration::from_secs(20);
 const HEARTBEAT_THROTTLE_MS: u64 = 5_000;
 pub const CONNECTION_LOST: &str = "connection lost \u{2014} retrying";
+mod connect_work;
 mod live;
 mod live_keys;
 mod panes;
 mod transport;
 mod view;
+pub(crate) use self::connect_work::{run_connect_work, run_runtime_build};
+pub use self::connect_work::{spawn_connect_work, ConnectOutcome};
 pub use self::live::{candidate_loop, default_workspace};
 pub use self::live_keys::handle_live_key;
 pub use self::panes::{
@@ -42,55 +45,43 @@ pub use self::panes::{
 pub use self::transport::{SshAuthVerifier, SshCandidateTransport};
 pub use self::view::CandidateView;
 pub use crate::orchestration::control::SnapshotSelection;
-/// Builds or reconnects the runtime once a verified string lands
-/// on Rules; failures reset to a fresh Connect state.
-fn establish_runtime_after_rules(
-    state: &mut CandidateRunState,
-    runtime: &mut Option<CandidateRuntime<SshCandidateTransport>>,
-    stash: &mut std::sync::Arc<std::sync::Mutex<Option<(ConnectionString, String)>>>,
-    status: &mut Option<String>,
-) {
-    let material = stash.lock().ok().and_then(|slot| slot.clone());
-    match material {
-        Some((conn, key_line)) => {
-            if let Some(existing) = runtime.as_mut() {
-                match existing.reconnect(&conn) {
-                    Ok(()) => {
-                        *status = None;
-                    }
-                    Err(err) => {
-                        *status = Some(crate::tui::help::candidate_error_message(&err).to_string());
-                        *state = CandidateRunState::new();
-                        *stash = self::live::fresh_verifier(state);
-                    }
-                }
-            } else {
-                let mut built = CandidateRuntime::new_discovering(
-                    default_workspace(),
-                    SshCandidateTransport::from_verified(&conn, key_line),
-                );
-                match built.connect(&conn) {
-                    Ok(()) => {
-                        *runtime = Some(built);
-                        *status = None;
-                    }
-                    Err(err) => {
-                        *status = Some(crate::tui::help::candidate_error_message(&err).to_string());
-                        *state = CandidateRunState::new();
-                        *stash = self::live::fresh_verifier(state);
-                    }
-                }
-            }
+/// Builds a fresh runtime from verified material, or reconnects an
+/// existing one; the blocking SSH/Mutagen work in `connect` is why
+/// callers on the TTY thread run this on a worker thread.
+fn build_or_reconnect_runtime(
+    existing: Option<CandidateRuntime<SshCandidateTransport>>,
+    material: Option<(ConnectionString, String)>,
+) -> Result<CandidateRuntime<SshCandidateTransport>, CandidateRuntimeError> {
+    let Some((conn, key_line)) = material else {
+        return Err(CandidateRuntimeError::Transport);
+    };
+    match existing {
+        Some(mut active) => {
+            active.reconnect(&conn)?;
+            Ok(active)
         }
         None => {
-            *status = Some(
-                crate::tui::help::candidate_error_message(&CandidateRuntimeError::Transport)
-                    .to_string(),
+            let mut built = CandidateRuntime::new_discovering(
+                default_workspace(),
+                SshCandidateTransport::from_verified(&conn, key_line),
             );
-            *state = CandidateRunState::new();
-            *stash = self::live::fresh_verifier(state);
+            built.connect(&conn)?;
+            Ok(built)
         }
     }
+}
+
+/// Applies a failed runtime build/reconnect: back to a fresh
+/// Connect state with a candidate-safe status line.
+fn reset_after_connect_failure(
+    state: &mut CandidateRunState,
+    stash: &mut Arc<Mutex<Option<(ConnectionString, String)>>>,
+    status: &mut Option<String>,
+    err: &CandidateRuntimeError,
+) {
+    *status = Some(crate::tui::help::candidate_error_message(err).to_string());
+    *state = CandidateRunState::new();
+    *stash = self::live::fresh_verifier(state);
 }
 
 /// Explicit runtime phase; work is reachable only when Connected.
@@ -358,6 +349,15 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
         self.phase = CandidateRuntimePhase::Disconnected;
         self.lost = false;
         self.connect(connection)
+    }
+    /// Tells the expert the candidate is leaving, so its monitor
+    /// shows the disconnect at once instead of waiting for the
+    /// heartbeat timeout. Best effort: a dead transport ignores it.
+    pub fn disconnect(&mut self) -> Result<(), CandidateRuntimeError> {
+        if self.phase != CandidateRuntimePhase::Connected {
+            return Ok(());
+        }
+        self.send_intent(IntentKind::Disconnect).map(|_| ())
     }
     pub fn flush(&mut self) -> Result<(), CandidateRuntimeError> {
         if self.phase != CandidateRuntimePhase::Connected {

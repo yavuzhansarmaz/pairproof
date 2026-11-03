@@ -23,6 +23,7 @@ fn snapshot(statement: Option<String>) -> CandidateSnapshot {
             title: "Sort first".to_string(),
             summary: "Sort then sweep".to_string(),
         }],
+        nav: Vec::new(),
         selected: None,
         latest_test: None,
         chat_replies: vec!["Try sorting first.".to_string()],
