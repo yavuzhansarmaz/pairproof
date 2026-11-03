@@ -18,7 +18,7 @@ use pairproof::tui::expert_runtime::{
     ExpertRuntime, ExpertRuntimeDeps, ExpertSessionSpec, LocalHelloSource, PollOutcome,
 };
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 
 fn tmp(name: &str) -> PathBuf {

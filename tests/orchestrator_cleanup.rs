@@ -10,7 +10,7 @@ use pairproof::orchestration::lifecycle::{CleanupReport, CleanupSequence, Cleanu
 use pairproof::orchestration::{Orchestrator, PipelineError, PipelineFuture, SandboxIo};
 use pairproof::sandbox::{RunnabilityReport, TestOutcome};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 
 type Log = Arc<Mutex<Vec<String>>>;

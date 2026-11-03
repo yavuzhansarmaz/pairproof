@@ -6,7 +6,7 @@ use pairproof::llm::chat::{
 };
 use pairproof::llm::{LlmError, Message, MetaClient};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q_easy as q;
 
 fn started() -> Session {

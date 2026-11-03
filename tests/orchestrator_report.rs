@@ -6,7 +6,7 @@ use pairproof::orchestration::report::{generate_report, limitations_footer, Chat
 use pairproof::orchestration::Orchestrator;
 use pairproof::scoring::{final_rating, GradeOutcome, QuestionGrade};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 
 fn graded(slot: usize, grade: f64, correction: f64) -> GradeOutcome {

@@ -1,6 +1,6 @@
 //! Live Phase 4 LLM wrapper smoke checks. Ignored by default.
 //!
-//! Run with: MODEL_API_KEY=... cargo test --test llm_live_smoke -- --ignored
+//! Run with: MODEL_API_KEY=... cargo test llm_live_smoke -- --ignored
 
 use std::collections::BTreeSet;
 
@@ -17,7 +17,7 @@ use pairproof::scoring::ApproachQuality;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q_easy as q;
 
 const QUESTION: &str = "Given nums and target, return indices of two numbers summing to target.";

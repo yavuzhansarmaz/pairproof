@@ -9,7 +9,7 @@ use pairproof::orchestration::consistency::{compare_grade_runs, run_consistency}
 use pairproof::orchestration::finalize::{GradeFuture, MetaQuestionGrader, QuestionGrader};
 use pairproof::scoring::{GradeOutcome, QuestionGrade};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q_easy as q;
 
 fn finished_session() -> Session {

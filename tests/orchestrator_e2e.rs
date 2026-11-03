@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 type PF<'a, T> = PipelineFuture<'a, T>;
 type QMap = BTreeMap<usize, Vec<ApproachQuality>>;

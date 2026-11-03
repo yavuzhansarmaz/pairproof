@@ -16,7 +16,7 @@ use pairproof::orchestration::health::{
 use pairproof::orchestration::{Clock, ManualClock, Orchestrator, OrchestratorError};
 use pairproof::scoring::{live_rating, ApproachQuality};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::easy_five as easy;
 
 fn next_fail(failures: &AtomicUsize) -> bool {

@@ -1,6 +1,6 @@
 //! Live LeetCode spike checks. Networked and ignored by default.
 //!
-//! Run with: cargo test --test leetcode_live -- --ignored
+//! Run with: cargo test leetcode_live -- --ignored
 
 use std::collections::BTreeSet;
 

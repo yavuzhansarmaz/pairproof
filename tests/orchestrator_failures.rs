@@ -12,7 +12,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 const T0: u64 = 1_730_000_000_000;
 

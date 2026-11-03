@@ -4,10 +4,16 @@ version = "0.1.0"
 edition = "2021"
 description = "AI-native technical interviewing: expert/candidate CLI that evolves LeetCode-style interviews"
 license = "Apache-2.0"
+# Each tests/*.rs file would otherwise be its own crate. That rebuild is most of CI.
+autotests = false
 
 [[bin]]
 name = "pairproof"
 path = "src/main.rs"
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [dependencies]
 anyhow = "1"

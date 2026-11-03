@@ -10,7 +10,7 @@ use pairproof::sandbox::process::{run_bounded, CommandSpec, DEFAULT_MAX_OUTPUT};
 use pairproof::sync::command::sync_create;
 use pairproof::sync::{SyncError, SyncSessionInfo};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::endpoint;
 
 fn user() -> EphemeralUsername {

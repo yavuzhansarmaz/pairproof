@@ -11,7 +11,7 @@ use pairproof::orchestration::finalize::{
 use pairproof::orchestration::Orchestrator;
 use pairproof::scoring::{final_rating, ApproachQuality, GradeOutcome, QuestionGrade};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 
 fn created(at: u64) -> Orchestrator {

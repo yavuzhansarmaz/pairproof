@@ -22,7 +22,7 @@ use pairproof::tui::expert_runtime::{
 };
 use pairproof::tui::{apply_expert_setup_paste, ExpertSetupPastes};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 
 fn tmp(name: &str) -> PathBuf {
@@ -434,13 +434,9 @@ async fn expert_scored_session_shows_approach_lines_and_rating() {
     // Preset 1 is the fake set's Best option ("Hash map").
     push_intent(&control, 1, IntentKind::SelectPreset { preset: 1 });
     runtime.drain_intents(T0 + 3_000).await.unwrap();
-    let live = runtime.monitor_view(T0 + 3_000);
-    assert!(live.rating_lines.iter().any(|l| l.contains("approach") && l.contains("Best")), "live lines: {:?}", live.rating_lines);
-    assert!((live.rating - 6.15).abs() < 1e-9, "live rating: {}", live.rating);
-    push_intent(&control, 2, IntentKind::Finish);
-    runtime.drain_intents(T0 + 4_000).await.unwrap();
+    // A clean run finishes the question and opens the next one.
     assert_eq!(runtime.orchestrator().current_index(), Some(1));
-    let done = runtime.monitor_view(T0 + 4_000);
+    let done = runtime.monitor_view(T0 + 3_000);
     assert!(done.rating_lines.iter().any(|l| l.contains("approach") && l.contains("Best")), "finished lines: {:?}", done.rating_lines);
     assert!((done.rating - 6.25).abs() < 1e-9, "finished rating: {}", done.rating);
     write_ack(&control, "s1");

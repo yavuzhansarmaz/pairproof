@@ -13,7 +13,7 @@ use pairproof::scoring::{ApproachGrade, ApproachSet};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 
 fn started() -> Orchestrator {

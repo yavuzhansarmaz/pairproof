@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 
 fn tmp(name: &str) -> PathBuf {
@@ -71,6 +71,7 @@ impl CodingTransport for FakeCoding {
 #[derive(Default)]
 struct FakeSandbox {
     test_calls: AtomicU32,
+    fail_tests: bool,
 }
 #[rustfmt::skip]
 impl SandboxIo for FakeSandbox {
@@ -80,7 +81,25 @@ impl SandboxIo for FakeSandbox {
         Box::pin(async move { Ok(RunnabilityReport { runnable: true, exit_code: Some(0), stdout: String::new(), stderr: String::new(), truncated: false }) })
     }
     fn run_requested_tests<'a>(&'a self, _i: usize, _l: Language) -> PF<'a, TestOutcome> {
-        Box::pin(async move { self.test_calls.fetch_add(1, Ordering::SeqCst); Ok(TestOutcome { success: true, exit_code: Some(0), stdout: "ok".into(), stderr: String::new(), stdout_truncated: false, stderr_truncated: false }) })
+        let failed = self.fail_tests;
+        Box::pin(async move {
+            self.test_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(TestOutcome {
+                success: !failed,
+                exit_code: Some(if failed { 1 } else { 0 }),
+                stdout: "ok".into(),
+                stderr: String::new(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+            })
+        })
+    }
+}
+struct ReadyCoding;
+#[rustfmt::skip]
+impl CodingTransport for ReadyCoding {
+    fn coding_step<'a>(&'a self, s: &'a mut Session, _i: &'a CodingStepInput) -> PF<'a, CodingStepOutput> {
+        Box::pin(async move { s.add_tokens(10).map_err(|e| PipelineError::Llm(e.to_string()))?; Ok(CodingStepOutput { code: "def solve():\n    return 42".into(), ready: true, summary: "done".into() }) })
     }
 }
 #[derive(Default)]
@@ -179,7 +198,10 @@ fn change_approach_intent_roundtrips() {
 #[rustfmt::skip]
 async fn change_approach_intent_clears_the_selection() {
     let (root, io, mut ex) = setup("change-approach").await;
-    let mut orch = started(); let mut pipe = loaded_pipe(&orch).await; let fakes = Fakes::new();
+    let mut orch = started(); let mut pipe = loaded_pipe(&orch).await; let mut fakes = Fakes::new();
+    // A clean run would close the question. Fail the run so the
+    // selection stays and ChangeApproach still has something to clear.
+    fakes.sandbox.fail_tests = true;
     append(&root, &line(&Intent::new("s1", 1, IntentKind::SelectPreset { preset: 0 })));
     append(&root, &line(&Intent::new("s1", 2, IntentKind::ChangeApproach)));
     let reports = ex.drain(&io, &mut orch, &mut pipe, &fakes.transports(), 10).await.unwrap();
@@ -399,6 +421,61 @@ async fn executor_applies_through_core_validation() {
     let applied = ex.drain(&io, &mut orch, &mut pipe, &fakes.transports(), 11).await.unwrap();
     assert!(applied.iter().any(|r| r.outcome == ApplyOutcome::Applied));
     assert_eq!(count(&orch, |k| matches!(k, EventKind::ApproachSelected { .. })), 1);
+}
+
+#[tokio::test]
+#[rustfmt::skip]
+async fn a_clean_run_of_a_finished_solution_opens_the_next_question() {
+    let (root, io, mut ex) = setup("advance-clean").await;
+    let mut orch = started();
+    let mut pipe = loaded_pipe(&orch).await;
+    let fakes = Fakes::new();
+    let coding = ReadyCoding;
+    let transports = ControlTransports { coding: &coding, sandbox: &fakes.sandbox, generator: &fakes.generator, chat: &fakes.chat };
+    append(&root, &line(&Intent::new("s1", 1, IntentKind::SelectPreset { preset: 0 })));
+    let reports = ex.drain(&io, &mut orch, &mut pipe, &transports, 10).await.unwrap();
+    assert_eq!(reports[0].outcome, ApplyOutcome::Applied, "{reports:?}");
+    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })), 1);
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { index: 0 })), 1);
+    assert_eq!(orch.current_index(), Some(1));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+#[rustfmt::skip]
+async fn a_failed_run_leaves_the_solved_question_open() {
+    let (root, io, mut ex) = setup("advance-fail").await;
+    let mut orch = started();
+    let mut pipe = loaded_pipe(&orch).await;
+    let mut fakes = Fakes::new();
+    fakes.sandbox.fail_tests = true;
+    let coding = ReadyCoding;
+    let transports = ControlTransports { coding: &coding, sandbox: &fakes.sandbox, generator: &fakes.generator, chat: &fakes.chat };
+    append(&root, &line(&Intent::new("s1", 1, IntentKind::SelectPreset { preset: 0 })));
+    let reports = ex.drain(&io, &mut orch, &mut pipe, &transports, 10).await.unwrap();
+    assert_eq!(reports[0].outcome, ApplyOutcome::Applied, "{reports:?}");
+    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { .. })), 0);
+    assert_eq!(orch.current_index(), Some(0));
+    assert!(orch.session().current_slot().is_some_and(|s| s.approach.is_some()));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+#[rustfmt::skip]
+async fn a_clean_run_opens_the_next_question_even_without_ready() {
+    let (root, io, mut ex) = setup("advance-draft").await;
+    let mut orch = started();
+    let mut pipe = loaded_pipe(&orch).await;
+    let fakes = Fakes::new();
+    append(&root, &line(&Intent::new("s1", 1, IntentKind::SelectPreset { preset: 0 })));
+    let reports = ex.drain(&io, &mut orch, &mut pipe, &fakes.transports(), 10).await.unwrap();
+    assert_eq!(reports[0].outcome, ApplyOutcome::Applied, "{reports:?}");
+    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { index: 0 })), 1);
+    assert_eq!(orch.current_index(), Some(1));
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test]

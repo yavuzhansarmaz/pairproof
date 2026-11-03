@@ -7,7 +7,7 @@ use pairproof::scoring::{
 };
 use ApproachQuality::*;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::{q, qs};
 
 fn q_acceptance(slug: &str, difficulty: Difficulty, acceptance_pct: Option<u32>) -> QuestionRef {

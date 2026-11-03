@@ -7,7 +7,7 @@ use pairproof::llm::grading::{
 use pairproof::llm::{LlmError, MetaClient};
 use pairproof::scoring::GradeOutcome;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q;
 
 fn started_session() -> Session {

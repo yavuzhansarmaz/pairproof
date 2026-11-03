@@ -12,7 +12,7 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use std::sync::Mutex;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 type PF<'a, T> = PipelineFuture<'a, T>;
 

@@ -1,123 +1,141 @@
 # PairProof
 
-## 1. Product introduction
+**AI writes the code. You score how the engineer directs it.**
 
-PairProof is an AI-native technical interviewing tool. Traditional interviews ban the tools engineers use every day. PairProof does the opposite: the AI writes the code, and the candidate is scored on how they direct it — approach selection, timely intervention, verification discipline, and token efficiency.
+Traditional interviews ban the tools people use at work. PairProof flips that: live LeetCode-style questions, a disposable Docker sandbox, and a candidate scored on approach selection, intervention, verification, and token efficiency — not typing speed.
 
-PairProof runs live LeetCode-style questions as a two-sided interview that measures engineering judgment, not typing. It is a single Rust binary (`pairproof`, version `0.1.0`) with two roles: expert and candidate.
+One Rust binary. Two roles. Expert hosts. Candidate joins.
 
-## 2. How PairProof works
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
+[![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey.svg)](#prerequisites)
 
-One binary, two roles. The expert runs the interview from one machine; the candidate joins from another.
+## Why PairProof
 
-- The expert pastes a job description; additional notes are optional. The system extracts topics, level, and a proposed language (Python, JavaScript, or SQL only) from the job description and any notes provided.
-- The system auto-selects 5 easy warm-up questions. When the candidate is working, the system auto-selects 3 medium and 2 hard questions (random selection with topic fallback; the expert does not hand-pick question titles in the TUI).
-- Per question, the candidate picks 1 of 4 AI-generated approaches (or `Other`), then continues, redirects, changes approach, requests tests, finishes, or skips. A separate unscored AI coach pane offers hints.
-- The expert watches a live rating starting at 6.0. The candidate never sees the live score, approach quality, or expected token counts during the session — only the final breakdown at the end.
-- At close, the expert receives a Markdown report with per-question graded evidence.
+Real engineering is directing tools, not memorizing syntax under a blank editor. PairProof measures that: judgment under AI, not whiteboard theater. Live, explainable scoring. Sandboxed remote sessions. One binary for both sides.
 
-Startup note: on every interactive (TTY) launch without a subcommand, PairProof checks for an update and may restart itself before opening the TUI. Non-TTY launches and subcommand invocations (`update`, `uninstall`) skip this check.
-
-## 3. Expert workflow
-
-1. Start PairProof as expert (see Section 9). If you pass `--role expert`, preflight runs immediately; otherwise it runs when you enter the Expert Setup screen.
-2. Pass the preflight checklist (Docker, daemon, sandbox image, port, connection, Mutagen probe). A `Fail` blocks the session; a `Warn` (for example, a missing sandbox image that will be built on first use) does not. The connection line is informational only: the reachable endpoint is set up automatically when the session starts, and no network action is required from the user.
-3. Make sure a Meta Model API key is available before the session (see Section 9). All Meta charges run on the expert's key. On the Expert Setup screen you first acknowledge the Meta disclosure with Enter, then — if no key is configured yet — press Enter again to type and save a Meta API key (input is masked). A key from the environment or the stored key file is used as-is, and a previously given disclosure acknowledgement is remembered.
-4. Paste the job description first and confirm with Enter, then paste additional notes or press Enter to skip them. Only the job description is required for topic/level/language extraction. Blank pastes and pastes over 50,000 characters are rejected.
-5. Confirm the extracted setup. The system creates a disposable Docker sandbox and a session.
-6. Share the connection string with the candidate. The secret in the string rotates every 60 seconds until the first valid connection locks it.
-7. Monitor the live rating, per-question progress, and paste alerts. The expert sees the live rating and breakdown, but not candidate chat content.
-8. End the session with `e` on the Monitor screen when ready. Ending triggers grading, report generation, and cleanup (see Section 9).
-
-## 4. Candidate workflow
-
-1. Open an empty folder, run `pairproof`, select `Candidate` (or run `pairproof --role candidate` in a terminal), and paste the connection string from the expert. Input is masked.
-2. PairProof verifies the host fingerprint, authenticates over SSH, and checks that the candidate and expert binary versions match exactly. If versions differ, the session does not start.
-3. You land over SSH in a disposable Docker container on the expert's machine. Your working folder (`<current directory>/pairproof-workspace` by default) syncs to the container workspace with Mutagen. Local files are preserved when the session ends.
-4. Work one question at a time in a split screen: the scored arena on one side (pick 1 of 4 approaches or `Other`, then continue / redirect / change approach / request tests / finish / skip) and an unscored AI coach on the other side. Coach hints never affect the score.
-5. A disconnect is not the end of the session. The expert can reissue a fresh connection string (press `R` on the expert side) after a 30-second heartbeat timeout.
-6. When the expert ends the session, you see the final breakdown. If the session ends in technical failure, the candidate view shows "No evaluation produced".
-
-Known limitation: requesting a re-question blocks question flow, and there is currently no expert-side resolve action for it. Avoid using re-question unless the interviewer confirms how to proceed. Whether this can deadlock a question is a current limitation (see Section 11).
-
-## 5. Scoring philosophy
-
-Scoring is explainable by construction. It uses a fixed step table with multipliers plus a capped AI correction — it is not a learned or weighted machine-learning model.
-
-- The live rating starts at 6.0 and is clamped to [3, 10]. It moves only on candidate-controlled events: approach quality (only the last approach quality per question counts), token efficiency versus the locked expectation (finished questions only), intervention (a flat bonus once per finished question if the candidate redirected or changed approach), unnecessary changes away from the best approach, and related recorded events. Every live line carries a human-readable detail string (quality, step, multiplier, token counts and ratio, redirect/change counts).
-- Chat activity, test requests, and failing tests never move the live rating. The AI wrote the code, so failing tests alone do not lower the candidate's rating.
-- At close, the strong model grades each finished question separately (grade 0–10, judged from code against the question statement; skipped questions are never sent for grading). The final rating is the live rating plus AI corrections proportionally scaled so the total AI effect is capped at ±0.8, clamped to [3, 10]. A question counts as solved when its grade is ≥ 5.0.
-- The final Markdown report (`sessions/<id>/report.md`) renders the rating, solved/finished/skipped counts, AI correction total, time, per-line scoring detail, and per-question grade, token ratio, time, test outcome, and rationale. The report marks evidence provenance honestly: AI grades and some token totals are marked as not event-recorded. Do not treat AI grades as event-proven.
-- The report states its own limits: it is decision support, not a hiring decision; one session is not proof of competence; the rubric is a hypothesis, not a proven predictor.
-
-Not currently scored in the live flow (do not rely on these):
-
-- Counted test pass/fail: requesting tests runs the solution file and shows the raw outcome verbatim, but live pass/fail counts are not derived from it.
-- Bulk-paste flags: a paste detector and a scoring rule exist, but no production polling/confirmation path feeds confirmed flags into the live rating. Paste signals are not yet wired into the live rating.
-- Extra questions: the data model supports one extra question, but no TUI/orchestration path exposes it. Do not expect an "add extra question" action.
-
-## 6. Security model and trust boundaries
-
-- **Expert machine (trusted):** holds the Meta Model API key, the Docker daemon (root-equivalent — protect this machine accordingly), and makes all LeetCode and Meta HTTPS calls. All Meta charges run on the expert's key. The candidate never provides a Meta key.
-- **Candidate machine (untrusted caller):** needs only the `pairproof` binary, an empty folder, Mutagen, and standard SSH tools. It never needs Docker or a Meta key.
-- The API key never enters the container or the connection string. The connection-string secret is an ephemeral SSH password for a per-session `pp-` user; it is delivered to the container only via `docker exec` stdin (`chpasswd`) and to Mutagen via an isolated askpass feeder. Host identity is pinned by fingerprint (`ssh-keyscan` verification with strict host-key checking).
-- Sandbox isolation: one Docker container and one per-session network per session; resource limits (512 MB memory, 1 CPU, 256 PIDs); dropped capabilities; exactly one published port; no volume mounts and no privileged mode; in-container firewall rules restrict traffic; SSH inside the container disables root login, public-key auth, forwarding, X11, and tunnelling; file paths are validated (relative paths only, 1 MiB per-file cap); code execution is allowlisted to `python3`, `node`, and `mariadb` under a kill timeout.
-- The candidate sees only a snapshot view (question titles and summaries, no approach quality, best-approach markers, expected tokens, or grading internals). The expert monitor shows the live rating and breakdown but no candidate chat content.
-- Raw job-description/notes pastes are deleted at session end. Final artifacts never carry the API key, connection secret, or raw pastes.
-- API keys at rest: the stored key file (`~/.config/pairproof/api_key`) is written with `0600` permissions in a `0700` directory via atomic rename, with symlink refusal. Keys are masked (last 4 characters only) in display and redacted in debug output.
-
-Endpoint reachability: at session start PairProof sets up the candidate endpoint automatically — it uses a public interface address directly, or opens a session-scoped router port mapping via NAT-PMP or UPnP IGD (discovering the external address via STUN and the router), puts that public endpoint in the connection string, and removes the mapping at session end. No user network configuration is required. When no automatic path exists (for example behind CGNAT with no mappable router), the session falls back to the loopback endpoint `127.0.0.1:<port>`, which still supports same-machine use and a manually arranged tunnel.
-
-## 7. Prerequisites and supported environment
-
-Supported platforms for release binaries:
-
-- Linux x86_64 (musl)
-- Linux aarch64 (musl)
-- macOS x86_64
-- macOS aarch64
-
-Windows is unsupported.
-
-### Expert machine
-
-- `pairproof` binary (installer or source build).
-- Docker with a running daemon (required for the sandbox). The sandbox image is built from an embedded Dockerfile on first use.
-- A Meta Model API key (see Section 9).
-- Network access to the Meta Model API and LeetCode, and a reachable endpoint for the candidate (see Section 6).
-
-### Candidate machine
-
-- `pairproof` binary (same version as the expert — exact version match required).
-- An empty folder to work in.
-- Mutagen (file sync).
-- `ssh`/`scp` (and `ssh-keyscan`, used for host verification).
-- The connection string from the expert.
-- No Docker and no Meta API key required.
-
-### Shared notes
-
-- Users do not need Rust or Cargo — see Section 8.
-- Docker and Mutagen: recent stable releases are recommended. No minimum version is enforced beyond binary presence in this release.
-- Mutagen is a candidate-machine requirement; the expert-side preflight check reports it as a warning for awareness.
-
-## 8. Installation and build
+---
 
 ## Install (Users)
-
-Install the latest stable release with one line — no Rust or Cargo required:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/yavuzhansarmaz/pairproof/main/install.sh | bash
 ```
 
-The installer downloads the matching release archive, verifies its SHA-256 checksum before installing, and installs the single `pairproof` binary to `~/.local/bin/pairproof`. It requires no `sudo` and does not modify any shell configuration files. The installer installs neither Docker nor Mutagen — install those separately. If `~/.local/bin` is not already in your `PATH`, add it yourself, for example in `~/.bashrc` or `~/.zshrc`:
+Installs `~/.local/bin/pairproof` (no sudo, SHA-256 verified). Add `~/.local/bin` to your `PATH` if needed:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Then start a new shell (or run the binary by its full path, `~/.local/bin/pairproof`).
+Docker (expert) and [Mutagen](https://mutagen.io/) (candidate) are installed separately.
+
+---
+
+## Quick start
+
+**Expert** (needs Docker + a [Meta Model API](https://api.meta.ai/v1) key):
+
+```sh
+export MODEL_API_KEY="<your-key>"   # or save via the TUI / ~/.config/pairproof/api_key
+pairproof --role expert
+```
+
+Paste a job description → confirm the extracted topics/level/language → share the connection string.
+
+**Candidate** (needs Mutagen + `ssh`; same `pairproof` version as the expert):
+
+```sh
+mkdir interview && cd interview
+pairproof --role candidate
+```
+
+Paste the connection string. Your current folder syncs into the sandbox as `q1/`, `q2/`, … — local files stay when the session ends.
+
+```sh
+pairproof update                 # latest release
+pairproof update --check         # check only, no download
+pairproof uninstall              # remove binary and saved config
+pairproof uninstall --keep-data  # remove binary, keep config
+```
+
+> PairProof does **not** load `.env` files. Export `MODEL_API_KEY` in the shell, or use the stored key file.
+
+---
+
+## How it works
+
+```
+ Expert machine                              Candidate machine
+ ──────────────                              ─────────────────
+ pairproof --role expert                     pairproof --role candidate
+       │                                            │
+       ├─ Meta extracts JD topics                   ├─ paste connection string
+       ├─ Docker sandbox + NAT endpoint             ├─ SSH fingerprint pin
+       ├─ rotating connection string ─────────────► ├─ version handshake
+       │                                            ├─ Mutagen ↔ /workspace
+       ├─ LeetCode questions + AI approaches        ├─ pick approach / steer AI
+       ├─ live rating (hidden from candidate)       ├─ edit qN/solution.*
+       └─ grade → report.md → cleanup               └─ final breakdown
+```
+
+| | Expert | Candidate |
+|---|---|---|
+| Runs | Interview host, Meta calls, Docker sandbox | Client only |
+| Needs | Docker, Meta API key, network reachability | Mutagen, SSH tools |
+| Sees | Live rating, progress, paste alerts | Questions, approaches, coach (unscored) |
+| Ends session | Yes (`e` on Monitor) | Acknowledges final breakdown |
+
+Per question the candidate picks 1 of 4 AI-generated approaches (or Other), then continues, redirects, changes approach, requests tests, finishes, or skips. An unscored coach pane can hint without affecting the score.
+
+Interactive launches check for updates before opening the TUI. Subcommands (`update`, `uninstall`) and non-TTY runs skip that check.
+
+---
+
+## Scoring
+
+Explainable by construction: a fixed step table plus a capped AI correction — not a learned hiring model.
+
+- Live rating starts at **6.0**, clamped to **[3, 10]**
+- Moves on candidate-controlled events: approach quality, token efficiency vs expectation, intervention (redirect/change), and related recorded steps
+- Chat, test requests, and failing tests do **not** move the live rating (the AI wrote the code)
+- At close, a strong model grades each finished question (0–10). AI effect on the final rating is capped at **±0.8**
+- Report lands in `sessions/<id>/report.md` with per-line detail and honest provenance notes
+
+Scores are **decision support**, not an automated hiring decision. One session is not proof of competence.
+
+---
+
+## Security model
+
+| Boundary | Trust |
+|---|---|
+| Expert machine | Trusted — holds the Meta key and Docker daemon (root-equivalent; protect it) |
+| Candidate machine | Untrusted caller — never needs Docker or a Meta key |
+| Sandbox | One container + network per session; 512 MB / 1 CPU / 256 PIDs; dropped caps; no mounts; no privileged mode; allowlisted `python3` / `node` / `mariadb` |
+
+- API key never enters the container or connection string
+- Connection secret is an ephemeral SSH password for a per-session `pp-*` user
+- Host identity pinned via `ssh-keyscan` + strict host-key checking
+- Mutagen uses an isolated daemon and askpass feeder
+- Raw JD/notes pastes deleted at session end; artifacts never store keys or secrets
+- Stored key at `~/.config/pairproof/api_key` with `0600` / `0700` permissions
+
+Reachability is automatic (public address, NAT-PMP, or UPnP + STUN). If nothing maps (e.g. CGNAT), the session falls back to `127.0.0.1:<port>` for same-machine use or a manual tunnel.
+
+---
+
+## Prerequisites
+
+**Release binaries:** Linux x86_64/aarch64 (musl), macOS x86_64/aarch64. Windows is unsupported.
+
+**Expert:** `pairproof`, Docker (daemon running), Meta API key, network to Meta + LeetCode, reachable endpoint for the candidate.
+
+**Candidate:** same `pairproof` version as the expert, empty working folder, Mutagen, `ssh` / `ssh-keyscan`, connection string.
+
+Exact version match is required — mismatched binaries refuse to start the session.
+
+---
 
 ## Build (Developers)
 
@@ -126,113 +144,31 @@ cargo build
 cargo test
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
+
+cargo test -- --ignored   # live suites: network + API key + Docker + Mutagen
 ```
 
-Release builds use `cargo build --release --target <target> --locked`.
+Docs:
 
-## 9. Running an interview
-
-### Expert setup
-
-```sh
-pairproof
-pairproof --role expert
-```
-
-With no `--role`, choose Expert on the start screen. Preflight runs automatically for `--role expert` or when you enter the Expert Setup screen. Follow the Expert workflow in Section 3: paste job description, then notes, confirm setup, and share the current connection string (it rotates every 60 seconds until first connection).
-
-### Candidate connection
-
-```sh
-pairproof
-pairproof --role candidate
-```
-
-With no `--role`, choose Candidate on the start screen (or press `c` in role select). Paste the connection string promptly — expired strings are rejected. See Section 4.
-
-### API keys
-
-PairProof uses the Meta Model API only (`https://api.meta.ai/v1`; model IDs are fixed in the binary and not user-configurable). The expert provides the key in exactly one of these ways:
-
-- Environment variable: `MODEL_API_KEY` set in the process environment, or
-- Stored key file: `~/.config/pairproof/api_key`.
-
-The environment variable wins over the stored file when both are set. The candidate never sets a Meta key.
-
-Important: PairProof does **not** read a `.env` file. Putting `MODEL_API_KEY` only in a `.env` file has no effect unless you export/source it into the process environment yourself, for example:
-
-```sh
-export MODEL_API_KEY="<your-key>"
-pairproof --role expert
-```
-
-Never commit a real API key. Keep any local `.env` untracked (it is git-ignored).
-
-### Docker
-
-Docker is required on the expert machine only. Preflight fails hard if Docker, the daemon, or a free sandbox port is unavailable; a missing sandbox image is a warning (it will be built on first use, which can take several minutes). The candidate machine does not run Docker.
-
-### Mutagen
-
-Mutagen is required on the candidate machine for file sync. The expert-side preflight warning about Mutagen refers to the candidate machine — install Mutagen there. PairProof runs Mutagen with an isolated data directory and daemon; it does not touch your global Mutagen daemon. Sync terminates at session end and local candidate files are kept.
-
-### Update and uninstall
-
-```sh
-pairproof update
-pairproof update --check
-pairproof uninstall
-pairproof uninstall --yes
-pairproof uninstall --keep-data
-pairproof uninstall --yes --keep-data
-```
-
-- `pairproof update` updates to the latest stable release; `--check` only checks without downloading. Downloads are SHA-256 verified; on checksum mismatch the operation aborts and any existing binary is preserved.
-- `pairproof uninstall` asks for confirmation, then removes the binary and `~/.config/pairproof` (including any saved API key). `--yes` skips confirmation. `--keep-data` removes only the binary and keeps `~/.config/pairproof`. Sessions and project files are never removed by uninstall.
-
-### Completion and cleanup
-
-Only the expert ends the session (`e` on the Monitor screen). On end, PairProof grades finished questions, computes the final rating, writes the session bundle first (`sessions/<id>/`: `events.jsonl`, `tokens.json`, `context.json`, `report.md`, `solutions/`), then cancels in-flight work, terminates the connection, stops sync, destroys the sandbox container and network, and deletes raw pastes. Every cleanup step is attempted even if an earlier step fails. The candidate acknowledges the final breakdown when it arrives; if the acknowledgement times out (60 seconds), the expert proceeds and records the timeout. Session folders are kept after uninstall.
-
-## 10. Development and testing
-
-Developer prerequisites: Rust (stable, only to build from source), plus Docker and Mutagen for sandbox/sync features, and a Meta Model API key for live flows (expert side).
-
-```sh
-cargo build
-cargo test
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-```
-
-Live suites (need network, API key, Docker, and Mutagen) are ignored by default:
-
-```sh
-cargo test -- --ignored
-```
-
-Live suites that exercise the full stack (Docker sandbox + SSH + Mutagen + Meta + LeetCode together) are manual-only and ignored by default. CI runs `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` on every change.
-
-Developer documentation:
-
-- [Compatibility notes](docs/architecture/compatibility.md)
 - [Runtime architecture](docs/architecture/runtime.md)
-- [Testing guide](docs/development/testing.md)
+- [Compatibility](docs/architecture/compatibility.md)
+- [Testing](docs/development/testing.md)
 
-## 11. Project status
+---
 
-PairProof is an early-stage open-source project (version `0.1.0`), originally built as a hackathon project and now developed in the open. The core interview flow — expert setup, candidate connection, live explainable scoring, and the final report — is implemented and covered by an extensive automated test suite.
+## Status
 
-Current scope and known limitations:
+Early open-source (`0.1.0`) — started as a hackathon project. Core flow (setup → connect → live scoring → report) is implemented and covered by a large automated suite.
 
-- **Remote sessions:** the candidate endpoint is set up automatically at session start (public address, NAT-PMP, or UPnP port mapping; see Section 6). Networks where no automatic mapping is possible (for example CGNAT without a mappable router) fall back to the loopback endpoint, which needs a manually arranged tunnel for a remote candidate; a relay that also covers those networks is not built yet.
-- **Re-question flow:** candidates can request a replacement question, but the expert-side resolution action is not implemented yet; interviewers should skip this action for now.
-- **Scoring inputs:** live scoring is based on approach quality, token efficiency, and intervention events. Counted test pass/fail rates and bulk-paste signals are not yet part of the score (see Section 5).
-- **Resilience:** recovery handling covers question-loading failures; a general pause/resume for arbitrary external service outages is planned but not available yet.
-- **API key setup:** the Meta Model API key is configured before launch via environment or stored key file (see Section 9); in-app key entry is on the roadmap.
+**Known limits**
 
-PairProof's scores are decision support for interviewers, not an automated hiring decision — as the generated report itself states.
+- No relay yet for networks that cannot auto-map (CGNAT fallback needs a manual tunnel)
+- Candidate re-question has no expert resolve action yet — skip it for now
+- Live score does not yet include counted test pass/fail or bulk-paste signals
+- Pause/resume for arbitrary outages is not available yet
 
-## 12. License
+---
+
+## License
 
 Apache-2.0. See [LICENSE](LICENSE).

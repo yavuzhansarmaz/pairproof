@@ -10,7 +10,7 @@ use pairproof::tui::candidate_chat::{
 };
 use pairproof::tui::candidate_work::CandidateWork;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q_easy as q;
 
 fn started() -> Session {

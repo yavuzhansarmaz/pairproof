@@ -17,7 +17,7 @@ use pairproof::scoring::{
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q;
 
 fn close(actual: f64, expected: f64) {

@@ -84,7 +84,7 @@ pub(crate) fn settle_pending(state: &mut CandidateRunState, view: &CandidateView
             let n = pending.index + 1;
             state.after_code = Some((
                 pending.index,
-                format!("code written in q{n}. d asks for tests. t runs the file."),
+                format!("code written in q{n}. this question is still open."),
             ));
         }
     }

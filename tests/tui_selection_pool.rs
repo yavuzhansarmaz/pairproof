@@ -24,7 +24,7 @@ use pairproof::tui::expert_runtime::{
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q;
 
 const T0: u64 = 1_730_000_000_000;

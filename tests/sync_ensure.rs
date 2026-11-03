@@ -1,4 +1,4 @@
-mod common_mod;
+use crate::common_mod;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};

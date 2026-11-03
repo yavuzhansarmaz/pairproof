@@ -15,7 +15,7 @@ use pairproof::tui::expert_runtime::{
     ExpertRuntime, ExpertRuntimeDeps, ExpertSessionSpec, LocalHelloSource,
 };
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 type PF<'a, T> = PipelineFuture<'a, T>;
 const T0: u64 = 1_730_000_000_000;

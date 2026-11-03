@@ -1,6 +1,6 @@
 //! Live Meta Model API spike checks. Requires MODEL_API_KEY; ignored by default.
 //!
-//! Run with: MODEL_API_KEY=... cargo test --test meta_api_live -- --ignored
+//! Run with: MODEL_API_KEY=... cargo test meta_api_live -- --ignored
 
 use pairproof::llm::{Message, MetaClient, LIGHT_MODEL, STRONG_MODEL};
 

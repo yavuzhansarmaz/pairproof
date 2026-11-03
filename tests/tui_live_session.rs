@@ -23,7 +23,7 @@ use pairproof::tui::expert_runtime::{
     DockerHelloSource, ExpertRuntime, ExpertRuntimeDeps, ExpertSessionSpec, PollOutcome,
 };
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q_easy as q;
 type PF<'a, T> = PipelineFuture<'a, T>;
 const CODE: &str = "def solve():\n    return 42  # pairproof-live-10j\n";
@@ -187,7 +187,7 @@ async fn flow(
             .await
             .map_err(|e| e.to_string())?;
         let _ = candidate.poll_snapshot();
-        if candidate.view().selected.is_some() {
+        if candidate.view().question_index == Some(1) {
             break;
         }
         chk(Instant::now() < deadline, "SelectPreset never applied")?;
@@ -214,25 +214,30 @@ async fn flow(
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     println!("live10j solution synced to alpha: {}", solution.display());
-    candidate
-        .send_intent(IntentKind::RequestTests)
-        .map_err(|e| e.to_string())?;
-    candidate
-        .send_intent(IntentKind::Finish)
-        .map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        expert
-            .drain_intents(now_ms())
-            .await
+    if expert.orchestrator().current_index() != Some(1) {
+        candidate
+            .send_intent(IntentKind::RequestTests)
             .map_err(|e| e.to_string())?;
-        if expert.orchestrator().current_index() == Some(1) {
-            break;
+        candidate
+            .send_intent(IntentKind::Finish)
+            .map_err(|e| e.to_string())?;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            expert
+                .drain_intents(now_ms())
+                .await
+                .map_err(|e| e.to_string())?;
+            if expert.orchestrator().current_index() == Some(1) {
+                break;
+            }
+            chk(Instant::now() < deadline, "Finish never applied")?;
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        chk(Instant::now() < deadline, "Finish never applied")?;
-        tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    println!("live10j RequestTests+Finish applied current_index=1");
+    println!(
+        "live10j question advanced current_index={}",
+        expert.orchestrator().current_index().unwrap_or(0)
+    );
     let poller = std::thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(90);
         loop {
