@@ -170,17 +170,30 @@ pub(crate) fn handle_key(
             _ = app.handle(AppEvent::SelectCandidate)
         }
         K::Char('e') if app.screen() == AppScreen::Monitor => {
-            if let Some(active) = runtime.as_mut() {
-                match block_on(tokio_rt, active.end_session(now_ms())) {
-                    Some(Ok(_)) => {
-                        app.set_final_lines(active.final_lines());
-                        app.clear_status_message();
-                        let _ = app.handle(AppEvent::EndSession);
-                    }
-                    Some(Err(err)) => set_error(app, "end failed", &err.to_string()),
-                    None => set_error(app, "end failed", "runtime unavailable"),
-                }
+            // Grading, the final ack, and cleanup can take up to a
+            // minute. Run them off the TTY thread so the loading
+            // screen keeps animating instead of a frozen monitor.
+            if pending.end_rx.is_some() {
+                return;
             }
+            let Some(mut active) = runtime.take() else {
+                return;
+            };
+            let (tx, rx) = std::sync::mpsc::channel();
+            pending.end_rx = Some(rx);
+            let now = now_ms();
+            std::thread::spawn(move || {
+                let result = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|err| err.to_string())
+                    .and_then(|rt| {
+                        rt.block_on(active.end_session(now))
+                            .map(|_| ())
+                            .map_err(|err| err.to_string())
+                    });
+                let _ = tx.send((active, result));
+            });
         }
         K::Char('c') if app.screen() == AppScreen::Monitor => {
             if let Some(active) = runtime.as_mut() {

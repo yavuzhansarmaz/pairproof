@@ -5,6 +5,15 @@ use super::*;
 
 use crate::tui::shared::pop_last;
 
+/// True when the approach cursor sits on the `other` row.
+fn cursor_on_other(state: &CandidateRunState, option_count: usize) -> bool {
+    option_count > 0
+        && state
+            .staging
+            .current_stage()
+            .is_some_and(|stage| stage.cursor == option_count)
+}
+
 fn apply(status: &mut Option<String>, result: Result<Intent, CandidateRuntimeError>) -> bool {
     match result {
         Ok(_) => {
@@ -115,8 +124,17 @@ pub fn handle_live_key<T: CandidateTransport>(
             K::Down => state.staging.move_cursor(1, view.options.len()),
             K::Left => navigate(state, runtime, status, &view, -1),
             K::Right => navigate(state, runtime, status, &view, 1),
-            K::Char(' ') if !control => state.staging.mark_cursor(view.options.len()),
+            K::Char(' ') if !control => {
+                state.staging.mark_cursor(view.options.len());
+                // Selecting the other row opens its text field. The
+                // letters that follow belong to the approach, not to
+                // the redirect command.
+                if cursor_on_other(state, view.options.len()) {
+                    state.focus = CandidateFocus::Other;
+                }
+            }
             K::Enter => {
+                let on_other = cursor_on_other(state, view.options.len());
                 let choice = state
                     .staging
                     .current_stage()
@@ -138,12 +156,24 @@ pub fn handle_live_key<T: CandidateTransport>(
                             state.staging.save_other_text("");
                         }
                     }
+                    None if on_other => {
+                        state.staging.mark_cursor(view.options.len());
+                        state.focus = CandidateFocus::Other;
+                    }
                     None => {
                         *status = Some(
                             "mark an approach with space, then press enter to submit.".to_string(),
                         );
                     }
                 }
+            }
+            // The other row is a text field: `d` and the other work
+            // keys are letters of the approach, not commands.
+            K::Char(c) if !control && cursor_on_other(state, view.options.len()) => {
+                state.staging.mark_cursor(view.options.len());
+                state.focus = CandidateFocus::Other;
+                let _ = other_insert(&mut state.work, &c.to_string(), false);
+                state.staging.save_other_text(state.work.other_text());
             }
             K::Char(c) if !control => match work_key_action(c) {
                 Some(WorkKeyAction::SelectPreset(preset)) => {
@@ -225,7 +255,7 @@ pub fn handle_live_key<T: CandidateTransport>(
             K::Enter => {
                 let text = state.work.redirect_text().to_string();
                 if text.trim().is_empty() {
-                    *status = Some("type a redirect first, then press enter.".to_string());
+                    *status = Some("type additional notes first, then press enter.".to_string());
                 } else if apply(status, runtime.send_intent(IntentKind::Redirect { text })) {
                     state.work.set_redirect_text("");
                     state.focus = CandidateFocus::Work;
@@ -245,6 +275,7 @@ pub fn handle_live_key<T: CandidateTransport>(
                 if text.trim().is_empty() {
                     *status = Some("type a message first, then press enter.".to_string());
                 } else if apply(status, runtime.send_chat(&text)) {
+                    state.chat.remember_sent(&text);
                     state.chat.clear_input();
                 }
             }

@@ -257,6 +257,29 @@ fn arrow_navigation_keeps_the_marked_choice_per_question() {
 }
 
 #[test]
+fn typing_on_the_other_row_fills_other_and_enter_submits() {
+    let mut runtime = connected_runtime();
+    let mut state = CandidateRunState::new();
+    state.focus = CandidateFocus::Work;
+    for _ in 0..4 {
+        press(&mut state, &mut runtime, K::Down);
+    }
+    for c in ['d', 'o'] {
+        press(&mut state, &mut runtime, K::Char(c));
+    }
+    assert_eq!(state.focus, CandidateFocus::Other);
+    assert_eq!(state.work.other_text(), "do");
+    assert_eq!(state.work.redirect_text(), "");
+    press(&mut state, &mut runtime, K::Enter);
+    assert_eq!(
+        runtime.transport().sent.last().map(|i| i.kind.clone()),
+        Some(IntentKind::SelectOther {
+            text: "do".to_string()
+        })
+    );
+}
+
+#[test]
 fn blank_other_submits_from_the_other_row() {
     let mut runtime = connected_runtime();
     let mut state = CandidateRunState::new();
@@ -383,12 +406,13 @@ fn final_screen_shows_only_candidate_safe_results() {
     let lines = view.final_screen_lines();
     let joined = lines.join("\n");
     assert!(joined.contains("final rating: 7.50 / 10"), "{joined}");
-    assert!(
-        joined.contains("solved: 1  finished: 1  skipped: 1"),
-        "{joined}"
-    );
-    assert!(joined.contains("Q1 Two Sum: 8.0 - solved"), "{joined}");
-    assert!(joined.contains("Q2 Add Two: skipped"), "{joined}");
+    assert!(joined.contains("solved: 1"), "{joined}");
+    assert!(joined.contains("finished: 1"), "{joined}");
+    assert!(joined.contains("skipped: 1"), "{joined}");
+    assert!(joined.contains("Q1  Two Sum"), "{joined}");
+    assert!(joined.contains("8.0 - solved"), "{joined}");
+    assert!(joined.contains("Q2  Add Two"), "{joined}");
+    assert!(joined.contains("skipped"), "{joined}");
     assert_eq!(lines.last().map(String::as_str), Some("enter to close"));
     assert!(
         !joined.contains("Find two numbers."),

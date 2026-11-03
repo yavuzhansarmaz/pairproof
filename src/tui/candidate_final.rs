@@ -47,15 +47,27 @@ pub fn candidate_final_lines(final_result: &CandidateFinal) -> Vec<String> {
         CandidateFinal::Breakdown(view) => {
             let mut lines = vec![
                 "Final breakdown".to_string(),
+                String::new(),
                 format!("final rating: {:.2}", view.rating),
+                String::new(),
+                format!("solved: {}", view.solved_count),
+                format!("finished: {}", view.finished_count),
+                format!("skipped: {}", view.skipped_count),
+                format!("paste flags: {}", view.paste_flag_count),
             ];
-            lines.extend(view.lines.iter().cloned());
-            lines.extend(view.per_question.iter().cloned());
-            lines.push(format!("solved: {}", view.solved_count));
-            lines.push(format!("finished: {}", view.finished_count));
-            lines.push(format!("skipped: {}", view.skipped_count));
-            lines.push(format!("paste flags: {}", view.paste_flag_count));
-            lines.push(view.artefact_note.clone());
+            if !view.per_question.is_empty() {
+                lines.push(String::new());
+                lines.push("Questions".to_string());
+                for block in &view.per_question {
+                    lines.push(String::new());
+                    lines.extend(block.split('\n').map(str::to_string));
+                }
+            }
+            if !view.lines.is_empty() {
+                lines.push(String::new());
+                lines.push("How the rating moved".to_string());
+                lines.extend(view.lines.iter().cloned());
+            }
             lines
         }
         CandidateFinal::TechnicalFailure => vec![
@@ -90,10 +102,19 @@ pub fn candidate_final_lines_for_height(
 ) -> Vec<String> {
     match final_result {
         CandidateFinal::Breakdown(view) => {
-            let mut content = vec!["Final breakdown".to_string()];
-            content.extend(view.lines.iter().cloned());
-            content.extend(view.per_question.iter().cloned());
-            content.push(view.artefact_note.clone());
+            let mut content = vec!["Final breakdown".to_string(), String::new()];
+            if !view.per_question.is_empty() {
+                content.push("Questions".to_string());
+                for block in &view.per_question {
+                    content.push(String::new());
+                    content.extend(block.split('\n').map(str::to_string));
+                }
+            }
+            if !view.lines.is_empty() {
+                content.push(String::new());
+                content.push("How the rating moved".to_string());
+                content.extend(view.lines.iter().cloned());
+            }
             let pinned = candidate_final_pinned_lines(final_result);
             visible_lines(&content, height, &pinned)
                 .iter()

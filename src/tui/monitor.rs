@@ -44,11 +44,21 @@ pub struct MonitorView {
     pub status_label: String,
 }
 
+fn component_label(comp: ScoreComponent) -> &'static str {
+    match comp {
+        ScoreComponent::Approach => "approach",
+        ScoreComponent::Tokens => "tokens",
+        ScoreComponent::Intervention => "intervention",
+        ScoreComponent::UnnecessaryChange => "unnecessary change",
+        ScoreComponent::Paste => "paste",
+    }
+}
+
 fn score_line(slot_index: usize, comp: ScoreComponent, delta: f64, detail: &str) -> String {
     sanitize_display(&format!(
-        "Q{} {:?} {:+.2}: {}",
+        "Q{} {} {:+.2} — {}",
         slot_index + 1,
-        comp,
+        component_label(comp),
         delta,
         sanitize_display(detail)
     ))
@@ -115,7 +125,7 @@ pub fn format_duration_ms(ms: u64) -> String {
     }
 }
 
-fn human_status(label: &str) -> &str {
+pub(crate) fn human_status(label: &str) -> &str {
     match label {
         "Setup" => "setup",
         "WaitingForCandidate" => "waiting for candidate",
@@ -218,23 +228,23 @@ pub fn final_view(
                 .find(|s| s.index == pq.slot_index)
                 .map(|s| sanitize_display(&s.question.title))
                 .unwrap_or_default();
-            let grade = pq.grade.map_or("not scored".into(), |g| format!("{g:.1}"));
+            let grade = match pq.grade {
+                Some(g) => format!("grade {g:.1}"),
+                None => "not scored".to_string(),
+            };
             let exp = pq.expected_tokens.map_or("n/a".into(), |t| t.to_string());
-            let time = pq.time_ms.map_or("n/a".into(), |t| format!("{t} ms"));
+            let time = pq
+                .time_ms
+                .map_or("n/a".into(), |t| format_duration_ms(t));
             let test = pq
                 .latest_test
                 .map(|t| format!("{} passed, {} failed", t.passed, t.failed))
                 .unwrap_or_else(|| "no test run yet".into());
             sanitize_display(&format!(
-                "Q{} {}: grade {}, correction {:+.3}, tokens {}/{}, time {}, test {}",
-                pq.slot_index + 1,
-                title,
-                grade,
-                pq.correction,
-                pq.actual_tokens,
-                exp,
-                time,
-                test
+                "Q{index}  {title} — {grade}\ncorrection {correction:+.3} · tokens {actual} / {exp} · time {time}\ntests {test}",
+                index = pq.slot_index + 1,
+                actual = pq.actual_tokens,
+                correction = pq.correction,
             ))
         })
         .collect();

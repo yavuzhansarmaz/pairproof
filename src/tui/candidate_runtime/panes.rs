@@ -128,11 +128,11 @@ pub(crate) fn live_lines(
     }
     // `view.lines()` is already sanitized by its producer; only the
     // raw typed texts appended here are sanitized, at this boundary.
-    lines.extend([
-        sanitize_display(&format!("other: {}", state.work.other_text())),
-        sanitize_display(&format!("redirect: {}", state.work.redirect_text())),
-        sanitize_display(&format!("message: {}", state.chat.input_text())),
-    ]);
+    lines.extend(composer_lines(state));
+    lines.push(sanitize_display(&format!(
+        "message: {}",
+        state.chat.input_text()
+    )));
     if state.paste_notice || state.chat.paste_notice() {
         lines.push("pasting is blocked here; type instead.".to_string());
     }
@@ -143,7 +143,7 @@ pub(crate) fn live_lines(
     lines.push(if view.is_terminal() {
         "enter quit".to_string()
     } else {
-        "focus: tab or click a panel to switch question/coach".to_string()
+        question_hint(state, view.options.len())
     });
     lines
 }
@@ -161,24 +161,80 @@ pub(crate) fn live_panes(
         left.push(CONNECTION_LOST.to_string());
         left.push("press R to reconnect with a fresh string.".to_string());
     }
-    left.extend([
-        sanitize_display(&format!("other: {}", state.work.other_text())),
-        sanitize_display(&format!("redirect: {}", state.work.redirect_text())),
-    ]);
+    left.extend(composer_lines(state));
     if state.paste_notice || state.chat.paste_notice() {
         left.push("pasting is blocked here; type instead.".to_string());
     }
     if let Some(text) = status {
         left.push(sanitize_display(text));
     }
-    left.push(
-        "focus: up/down move, space select, enter submit, left/right question, tab panel"
-            .to_string(),
-    );
-    let mut right = view.chat_lines();
+    left.push(question_hint(state, view.options.len()));
+    let mut right = view.chat_transcript(&state.chat.sent_messages());
     right.push(sanitize_display(&format!(
         "message: {}",
         state.chat.input_text()
     )));
     (left, right)
+}
+
+/// The input line for the field that is actually receiving keys.
+/// `other` and `redirect` are separate actions; only the active one
+/// is shown, so typed text cannot appear in the other field.
+fn composer_lines(state: &CandidateRunState) -> Vec<String> {
+    match state.focus {
+        CandidateFocus::Other => {
+            vec![sanitize_display(&format!(
+                "other: {}",
+                state.work.other_text()
+            ))]
+        }
+        CandidateFocus::Redirect => {
+            vec![sanitize_display(&format!(
+                "additional notes: {}",
+                state.work.redirect_text()
+            ))]
+        }
+        CandidateFocus::Work | CandidateFocus::Chat => {
+            let mut lines = Vec::new();
+            if !state.work.other_text().is_empty() {
+                lines.push(sanitize_display(&format!(
+                    "other: {}",
+                    state.work.other_text()
+                )));
+            }
+            if !state.work.redirect_text().is_empty() {
+                lines.push(sanitize_display(&format!(
+                    "additional notes: {}",
+                    state.work.redirect_text()
+                )));
+            }
+            lines
+        }
+    }
+}
+
+fn cursor_on_other(state: &CandidateRunState, option_count: usize) -> bool {
+    option_count > 0
+        && state
+            .staging
+            .current_stage()
+            .is_some_and(|stage| stage.cursor == option_count)
+}
+
+/// Bottom hint. On the other row it describes the approach field,
+/// because that row is where the candidate types.
+fn question_hint(state: &CandidateRunState, option_count: usize) -> String {
+    match state.focus {
+        CandidateFocus::Other => {
+            "focus: type your approach, enter submit, backspace delete, tab next".to_string()
+        }
+        CandidateFocus::Redirect => {
+            "focus: type additional notes, enter send, backspace delete, tab next".to_string()
+        }
+        _ if cursor_on_other(state, option_count) => {
+            "focus: type your approach, enter submit, backspace delete, tab next".to_string()
+        }
+        _ => "focus: up/down move, space select, enter submit, left/right question, tab panel"
+            .to_string(),
+    }
 }

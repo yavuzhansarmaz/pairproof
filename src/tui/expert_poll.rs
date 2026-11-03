@@ -57,6 +57,33 @@ impl ExpertLoopState {
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
     }
+
+    /// Applies a finished background session end. Success opens the
+    /// final breakdown; failure returns to the live monitor.
+    pub(crate) fn poll_end_session(&mut self, app: &mut app::ExpertApp) {
+        let Some(rx) = &self.pending.end_rx else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok((active, Ok(()))) => {
+                self.pending.end_rx = None;
+                app.set_final_lines(active.final_lines());
+                app.clear_status_message();
+                self.runtime = Some(active);
+                let _ = app.handle(app::AppEvent::EndSession);
+            }
+            Ok((active, Err(err))) => {
+                self.pending.end_rx = None;
+                self.runtime = Some(active);
+                set_error(app, "end failed", &err);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.pending.end_rx = None;
+                set_error(app, "end failed", "runtime unavailable");
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
 }
 
 /// Whether entering `screen` should auto-start its pool fetch.

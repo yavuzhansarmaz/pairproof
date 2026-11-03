@@ -23,6 +23,10 @@ pub(crate) type QuestionPreviewReceiver = std::sync::mpsc::Receiver<(
     Result<String, String>,
 )>;
 
+/// One finished session end: the runtime handed back, and whether
+/// grading, the final ack, and cleanup succeeded.
+pub(crate) type EndSessionReceiver = std::sync::mpsc::Receiver<(ExpertRuntime, Result<(), String>)>;
+
 /// Background work the TTY loop waits on: a proposal request and
 /// a deferred runtime build, both surfaced as the loading screen.
 #[derive(Default)]
@@ -33,6 +37,7 @@ pub(crate) struct PendingWork {
     pub(crate) selection_rx: Option<SelectionFetchReceiver>,
     pub(crate) api_key_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
     pub(crate) preview_rx: Option<QuestionPreviewReceiver>,
+    pub(crate) end_rx: Option<EndSessionReceiver>,
 }
 
 /// Mutable state owned by the expert TTY loop.
@@ -194,13 +199,15 @@ impl ExpertLoopState {
         lines
     }
 
-    /// True while a background request (proposal or runtime build)
-    /// runs.
+    /// True while a background request (proposal, runtime build, or
+    /// session end) runs. The TTY loop draws the loading screen
+    /// instead of blocking the frame.
     pub(crate) fn is_loading(&self) -> bool {
         self.pending.proposal_rx.is_some()
             || self.pending.runtime_rx.is_some()
             || self.pending.selection_rx.is_some()
             || self.pending.api_key_rx.is_some()
+            || self.pending.end_rx.is_some()
     }
 
     /// Routes one key event through API-key entry and help overlays.
@@ -215,11 +222,16 @@ impl ExpertLoopState {
         if self.is_loading() {
             // Loading: only quit keys are live; the rest is ignored
             // so the request cannot be re-entered or navigated away.
-            let quit = key.code == crossterm::event::KeyCode::Esc
-                || (key.code == crossterm::event::KeyCode::Char('c')
-                    && key
-                        .modifiers
-                        .contains(crossterm::event::KeyModifiers::CONTROL));
+            // Ending a session is the exception: that work has already
+            // started, and quitting here would freeze on cleanup
+            // instead of keeping the loading screen up until it lands.
+            let ending = self.pending.end_rx.is_some();
+            let quit = !ending
+                && (key.code == crossterm::event::KeyCode::Esc
+                    || (key.code == crossterm::event::KeyCode::Char('c')
+                        && key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL)));
             if quit {
                 let _ = app.handle(app::AppEvent::Quit);
             }

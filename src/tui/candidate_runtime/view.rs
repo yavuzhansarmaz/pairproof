@@ -102,7 +102,7 @@ impl CandidateView {
         [
             format!("selected approach: {approach}"),
             format!("latest test: {test}"),
-            format!("phase: {}", self.phase),
+            format!("phase: {}", crate::tui::monitor::human_status(&self.phase)),
             sync,
         ]
         .iter()
@@ -228,14 +228,29 @@ impl CandidateView {
     }
     /// Right-pane lines: the Coach welcome first, then its replies.
     pub fn chat_lines(&self) -> Vec<String> {
-        let mut lines = vec![format!("> {COACH_WELCOME}")];
-        lines.extend(self.chat_replies.iter().map(|reply| format!("> {reply}")));
-        if let Some(partial) = &self.chat_partial {
-            if !sanitize_display(partial).trim().is_empty() {
-                lines.push(format!("> {partial}"));
+        self.chat_transcript(&[])
+    }
+
+    /// Coach pane as a conversation. `>` lines are the coach (drawn
+    /// on the left); `<` lines are the candidate (drawn on the right).
+    /// A blank line separates turns. `sent` is what the candidate
+    /// already submitted, in order, paired with each coach reply.
+    pub fn chat_transcript(&self, sent: &[String]) -> Vec<String> {
+        let mut lines = Vec::new();
+        push_turn(&mut lines, ">", COACH_WELCOME);
+        let turns = sent.len().max(self.chat_replies.len());
+        for i in 0..turns {
+            if let Some(text) = sent.get(i) {
+                push_turn(&mut lines, "<", text);
+            }
+            if let Some(reply) = self.chat_replies.get(i) {
+                push_turn(&mut lines, ">", reply);
             }
         }
-        lines.iter().map(|line| sanitize_display(line)).collect()
+        if let Some(partial) = &self.chat_partial {
+            push_turn(&mut lines, ">", partial);
+        }
+        lines
     }
     /// Centred final screen shown when the expert ends the session:
     /// only what the candidate may see — the final rating, how many
@@ -256,11 +271,14 @@ impl CandidateView {
             } else {
                 (finished, skipped)
             };
-            lines.push(format!("final rating: {:.2} / 10", f.rating));
-            lines.push(format!(
-                "solved: {solved}  finished: {finished}  skipped: {skipped}"
-            ));
             lines.push(String::new());
+            lines.push(format!("final rating: {:.2} / 10", f.rating));
+            lines.push(String::new());
+            lines.push(format!("solved: {solved}"));
+            lines.push(format!("finished: {finished}"));
+            lines.push(format!("skipped: {skipped}"));
+            lines.push(String::new());
+            lines.push("Questions".to_string());
             for q in &f.per_question {
                 let title = if q.title.is_empty() {
                     self.nav
@@ -277,9 +295,11 @@ impl CandidateView {
                     None if q.state == "Skipped" => "skipped".to_string(),
                     None => "not scored".to_string(),
                 };
-                lines.push(format!("Q{} {}: {}", q.slot_index + 1, title, label));
+                lines.push(String::new());
+                lines.push(format!("Q{}  {title}", q.slot_index + 1));
+                lines.push(format!("    {label}"));
                 if let Some(r) = &q.rationale {
-                    lines.push(format!("  {r}"));
+                    lines.push(format!("    {r}"));
                 }
             }
         } else {
@@ -303,4 +323,15 @@ impl CandidateView {
         }
         lines
     }
+}
+
+fn push_turn(lines: &mut Vec<String>, marker: &str, text: &str) {
+    let clean = sanitize_display(text);
+    if clean.trim().is_empty() {
+        return;
+    }
+    if !lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines.push(format!("{marker} {clean}"));
 }

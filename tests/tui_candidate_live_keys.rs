@@ -96,6 +96,22 @@ fn a_sends_change_approach_when_connected() {
 }
 
 #[test]
+fn chat_enter_keeps_the_sent_message_and_clears_the_box() {
+    let mut state = CandidateRunState::new();
+    state.focus = CandidateFocus::Chat;
+    state.chat.type_text("where do I start?");
+    let mut runtime = connected_runtime();
+    let mut status = None;
+    handle_live_key(&mut state, &mut runtime, key(K::Enter), &mut status);
+    assert!(state.chat.input_text().is_empty());
+    assert_eq!(
+        state.chat.sent_messages(),
+        vec!["where do I start?".to_string()]
+    );
+    assert_eq!(runtime.transport().sent.len(), 1);
+}
+
+#[test]
 fn empty_chat_enter_sends_nothing() {
     let mut state = CandidateRunState::new();
     state.focus = CandidateFocus::Chat;

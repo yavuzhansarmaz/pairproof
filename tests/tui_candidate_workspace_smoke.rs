@@ -117,7 +117,7 @@ fn pane_lines(view: &CandidateView) -> (Vec<String>, Vec<String>) {
     let mut left = view.question_lines();
     left.extend([
         "other: ".to_string(),
-        "redirect: ".to_string(),
+        "additional notes: ".to_string(),
         "focus: tab or click a panel to switch question/coach".to_string(),
     ]);
     let mut right = view.chat_lines();
@@ -320,9 +320,14 @@ async fn smoke_candidate_streams_coach_reply_and_keeps_scrolling() {
     let view = CandidateView::from_snapshot(Some(&final_snap));
     assert!(view.chat_lines().join("\n").contains("Think step by step."));
     // Coach pane scrolled to bottom shows the reply end, not the welcome.
+    let reply = view
+        .chat_lines()
+        .into_iter()
+        .find(|line| line.contains("Think step by step."))
+        .expect("reply");
     let mut right = vec![view.chat_lines()[0].clone()];
     right.extend((0..30).map(|i| format!("coach filler {i:02}")));
-    right.push(view.chat_lines()[1].clone());
+    right.push(reply);
     right.push("message: ".to_string());
     let mut left = view.question_lines();
     left.extend((0..30).map(|i| format!("question filler {i:02}")));

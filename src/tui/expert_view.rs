@@ -195,7 +195,11 @@ pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
                 if app.final_lines.is_empty() {
                     lines.push("session ended.".into());
                 } else {
-                    lines.extend(app.final_lines.iter().cloned());
+                    // The breakdown already opens with this heading.
+                    let body = app.final_lines.iter().skip(usize::from(
+                        app.final_lines.first().is_some_and(|line| line == heading),
+                    ));
+                    lines.extend(body.cloned());
                 }
             }
             S::Exited => lines.push("goodbye.".into()),

@@ -229,6 +229,25 @@ impl ChatController {
         &self.history
     }
 
+    /// Keeps a message the candidate just sent, so the coach pane
+    /// can show it on the right after the input is cleared.
+    pub fn remember_sent(&mut self, text: &str) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        self.history.push(Message::new("user", text));
+    }
+
+    /// Texts the candidate has sent, in order.
+    pub fn sent_messages(&self) -> Vec<String> {
+        self.history
+            .iter()
+            .filter(|message| message.role == "user")
+            .map(|message| message.content.clone())
+            .collect()
+    }
+
     /// Returns the last generic service error, if any.
     pub fn last_error(&self) -> Option<ChatServiceError> {
         self.last_error

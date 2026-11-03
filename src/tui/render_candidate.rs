@@ -7,7 +7,7 @@
 //! split, and every key action are unchanged — this module only
 //! draws.
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -87,6 +87,27 @@ fn question_line(line: &str, first: bool) -> Line<'static> {
             body_line(line)
         }
     }
+}
+
+/// One coach-pane row. `>` is the coach, drawn on the left in navy.
+/// `<` is the candidate, drawn on the right in bold white. The
+/// marker itself is not shown.
+fn coach_bubble(line: &str) -> Line<'static> {
+    if let Some(text) = line.strip_prefix("< ") {
+        return Line::from(Span::styled(
+            text.to_string(),
+            Style::default().fg(TEXT_COLOR).add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Right);
+    }
+    if let Some(text) = line.strip_prefix("> ") {
+        return Line::from(Span::styled(
+            text.to_string(),
+            Style::default().fg(HEADING_COLOR),
+        ))
+        .alignment(Alignment::Left);
+    }
+    body_line(line)
 }
 
 fn pane_block(title: Line<'static>, focused: bool) -> Block<'static> {
@@ -317,7 +338,7 @@ pub fn draw_candidate_screen_with_status(
         Paragraph::new(
             c_window
                 .iter()
-                .map(|(_, line)| body_line(line))
+                .map(|(_, line)| coach_bubble(line))
                 .collect::<Vec<_>>(),
         )
         .style(Style::default().fg(TEXT_COLOR))

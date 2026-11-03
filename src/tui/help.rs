@@ -114,8 +114,9 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
         (CandidateScreen::Waiting, _) => lines.extend(["waiting for the expert.", "esc quit"]),
         (CandidateScreen::Solving, CandidateFocus::Work) => lines.extend([
             "1-4 choose an approach",
-            "5 or o describe your own approach",
-            "c continue, d redirect, a change approach",
+            "on other: type your approach, enter submits it",
+            "5 or o opens that approach field",
+            "c continue, d additional notes for the code, a change approach",
             "t run tests, f finish the question, s skip the question",
             "r request a new question",
             "tab or click a panel to switch pane",
@@ -128,8 +129,8 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
             "tab or click a panel to switch pane",
         ]),
         (CandidateScreen::Solving, CandidateFocus::Redirect) => lines.extend([
-            "type a redirect instruction.",
-            "enter send the redirect",
+            "type additional notes for the code being written.",
+            "enter send the notes",
             "backspace delete a character",
             "tab or click a panel to switch pane",
         ]),
