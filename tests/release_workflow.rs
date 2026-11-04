@@ -363,8 +363,8 @@ fn plan(current: &str, latest: &str) -> String {
 }
 
 #[test]
-fn main_push_keeps_the_version_written_in_cargo_toml() {
-    assert_eq!(plan("0.1.2", "0.1.2"), "0.1.2 keep");
+fn main_push_bumps_patch_unless_cargo_version_changed() {
+    assert_eq!(plan("0.1.2", "0.1.2"), "0.1.3 bump");
     assert_eq!(plan("0.2.0", "0.1.2"), "0.2.0 keep");
     assert_eq!(plan("0.1.3", "0.1.2"), "0.1.3 keep");
     assert_eq!(plan("0.1.2", ""), "0.1.2 keep");

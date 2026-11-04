@@ -3,8 +3,8 @@
 #
 # Usage: plan_release_version.sh <cargo-version> <latest-release-version>
 # The latest release may be empty when the repository has no release yet.
-# Prints "<version> keep". A version equal to the latest release is not
-# incremented; a release is published only when Cargo.toml names a new one.
+# Prints "<version> keep" when Cargo.toml already names the version to ship,
+# or "<version> bump" when the patch number must increase.
 set -eu
 
 CURRENT="${1:?cargo version required}"
@@ -25,6 +25,15 @@ if [ -n "$LATEST" ]; then
   }
 fi
 
-# Ship the version written in Cargo.toml. If it already matches the latest
-# release, the workflow sees the existing tag and does not publish again.
-printf '%s keep\n' "$CURRENT"
+# No release yet, or Cargo.toml was set to something other than the latest
+# release: ship the version already written in Cargo.toml.
+if [ -z "$LATEST" ] || [ "$CURRENT" != "$LATEST" ]; then
+  printf '%s keep\n' "$CURRENT"
+  exit 0
+fi
+
+MAJOR="${CURRENT%%.*}"
+REST="${CURRENT#*.}"
+MINOR="${REST%%.*}"
+PATCH="${CURRENT##*.}"
+printf '%s bump\n' "$MAJOR.$MINOR.$((PATCH + 1))"
