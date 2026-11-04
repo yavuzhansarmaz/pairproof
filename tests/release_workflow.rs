@@ -93,7 +93,9 @@ fn release_workflow_triggers_on_version_tags() {
         "workflow must not treat plan bump output as the string true"
     );
     assert!(
-        text.contains("PLANNED_BUMP\" = \"bump\"") || text.contains("PLANNED_BUMP\" = 'bump'") || text.contains("$PLANNED_BUMP\" = \"bump\""),
+        text.contains("PLANNED_BUMP\" = \"bump\"")
+            || text.contains("PLANNED_BUMP\" = 'bump'")
+            || text.contains("$PLANNED_BUMP\" = \"bump\""),
         "publish must commit a Cargo.toml bump when the planner prints bump"
     );
     assert!(
