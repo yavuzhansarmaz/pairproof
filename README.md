@@ -42,7 +42,7 @@ pairproof
 
 Press `e` for Expert or `c` for Candidate.
 
-**Expert** (`e`; needs [Docker](https://docs.docker.com/get-docker/) + a [Meta Model API](https://api.meta.ai/v1) key):
+**Expert** (`e`; needs [Docker](https://docs.docker.com/get-docker/) + a Meta Model API key):
 
 ```sh
 export MODEL_API_KEY="<your-key>"   # or save via the TUI / ~/.config/pairproof/api_key
