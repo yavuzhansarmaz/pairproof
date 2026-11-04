@@ -13,8 +13,8 @@ use pairproof::tui::candidate_runtime::CandidateRuntimeError;
 use pairproof::tui::candidate_work::CandidateWork;
 use pairproof::tui::help::{
     candidate_connect_message, candidate_error_message, candidate_help_lines,
-    candidate_help_lines_for, candidate_is_typing, countdown_line, disclosure_lines,
-    expert_error_message, expert_help_lines,
+    candidate_help_lines_for, candidate_is_typing, candidate_opens_help, countdown_line,
+    disclosure_lines, expert_error_message, expert_help_lines,
 };
 
 fn key(code: KeyCode) -> KeyEvent {
@@ -353,8 +353,13 @@ fn help_key_ignored_while_typing() {
     handle_candidate_key(&mut state, key(KeyCode::Tab));
     assert_eq!(state.focus, CandidateFocus::Chat);
     handle_candidate_key(&mut state, key(KeyCode::Char('?')));
+    assert!(state.show_help, "empty coach field: ? opens help");
+    handle_candidate_key(&mut state, key(KeyCode::Char('b')));
     assert!(!state.show_help);
-    assert_eq!(state.chat.input_text(), "?");
+    handle_candidate_key(&mut state, key(KeyCode::Char('h')));
+    handle_candidate_key(&mut state, key(KeyCode::Char('?')));
+    assert!(!state.show_help);
+    assert_eq!(state.chat.input_text(), "h?");
 }
 
 #[test]
@@ -393,4 +398,33 @@ fn candidate_is_typing_covers_text_fields_and_work_pane() {
             assert!(!candidate_is_typing(screen, focus), "{screen:?}/{focus:?}");
         }
     }
+}
+
+#[test]
+fn candidate_opens_help_on_empty_solving_fields() {
+    assert!(!candidate_opens_help(
+        CandidateScreen::Connect,
+        CandidateFocus::Work,
+        true
+    ));
+    assert!(candidate_opens_help(
+        CandidateScreen::Solving,
+        CandidateFocus::Work,
+        true
+    ));
+    assert!(candidate_opens_help(
+        CandidateScreen::Solving,
+        CandidateFocus::Chat,
+        true
+    ));
+    assert!(!candidate_opens_help(
+        CandidateScreen::Solving,
+        CandidateFocus::Chat,
+        false
+    ));
+    assert!(candidate_opens_help(
+        CandidateScreen::Rules,
+        CandidateFocus::Work,
+        true
+    ));
 }

@@ -233,7 +233,11 @@ pub fn handle_live_key<T: CandidateTransport>(
     }
     if key.code == K::Char('?')
         && !control
-        && !crate::tui::help::candidate_is_typing(CandidateScreen::Solving, state.focus)
+        && crate::tui::help::candidate_opens_help(
+            CandidateScreen::Solving,
+            state.focus,
+            state.typing_field_empty(),
+        )
     {
         if !state.show_help {
             state.show_help = true;

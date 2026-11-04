@@ -167,6 +167,21 @@ pub fn candidate_is_typing(screen: CandidateScreen, focus: CandidateFocus) -> bo
     }
 }
 
+/// True when `?` opens help instead of typing a question mark.
+/// Connect always types. On Solving, an empty text field still
+/// opens help so the pinned `? help` hint stays truthful.
+pub fn candidate_opens_help(
+    screen: CandidateScreen,
+    focus: CandidateFocus,
+    field_empty: bool,
+) -> bool {
+    match screen {
+        CandidateScreen::Connect => false,
+        CandidateScreen::Solving if candidate_is_typing(screen, focus) => field_empty,
+        _ => !candidate_is_typing(screen, focus),
+    }
+}
+
 /// Maps a candidate connection failure to a fixed generic message.
 pub fn candidate_connect_message(err: &CandidateConnectError) -> &'static str {
     match err {

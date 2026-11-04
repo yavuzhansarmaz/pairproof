@@ -326,35 +326,40 @@ fn cursor_on_other(state: &CandidateRunState, option_count: usize) -> bool {
             .is_some_and(|stage| stage.cursor == option_count)
 }
 
+/// Chrome that stays on every solving hint. Command keys (`c`, `r`,
+/// `t`, `a`, `f`) live on the `?` overlay so the footer stays small.
+const SOLVING_CHROME: &str = "tab panel, ? help, esc quit";
+
 /// Bottom hint. On the other row it describes the approach field,
 /// because that row is where the candidate types.
-fn question_hint(state: &CandidateRunState, option_count: usize) -> String {
+pub fn question_hint(state: &CandidateRunState, option_count: usize) -> String {
     // The `focus:` prefix is a pin marker. The question pane strips
     // it and colours the key names like the other screens.
     match state.focus {
         CandidateFocus::Other => {
-            "focus: enter submit, backspace delete, tab panel, esc quit".to_string()
+            format!("focus: enter submit, backspace delete, {SOLVING_CHROME}")
         }
         CandidateFocus::Redirect => {
-            "focus: enter send, empty enter back, backspace delete, tab panel, esc quit".to_string()
+            format!("focus: enter send, empty enter back, backspace delete, {SOLVING_CHROME}")
         }
         CandidateFocus::Chat => {
-            "focus: enter send, backspace delete, up/down scroll, tab panel, esc quit".to_string()
+            format!("focus: enter send, backspace delete, up/down scroll, {SOLVING_CHROME}")
         }
         _ if state.staging.current_flow().is_busy() => {
-            "focus: working, tab panel, ? help, esc quit".to_string()
+            format!("focus: working, {SOLVING_CHROME}")
         }
         _ if cursor_on_other(state, option_count) => {
-            "focus: enter submit, backspace delete, tab panel, esc quit".to_string()
+            format!("focus: enter submit, backspace delete, {SOLVING_CHROME}")
         }
-        _ if state.after_code.as_ref().is_some_and(|(index, _)| {
-            state.staging.current_index() == Some(*index)
-        }) || state.staging.current_flow()
-            == crate::tui::candidate_stage::QuestionFlowState::SolutionReady =>
+        _ if state
+            .after_code
+            .as_ref()
+            .is_some_and(|(index, _)| state.staging.current_index() == Some(*index))
+            || state.staging.current_flow()
+                == crate::tui::candidate_stage::QuestionFlowState::SolutionReady =>
         {
-            "focus: c continue, r run, t write tests, a change approach, f submit, tab panel, esc quit"
-                .to_string()
+            format!("focus: {SOLVING_CHROME}")
         }
-        _ => "focus: up/down move, space select, enter submit, tab panel, esc quit".to_string(),
+        _ => format!("focus: up/down move, space select, enter submit, {SOLVING_CHROME}"),
     }
 }

@@ -162,3 +162,39 @@ fn candidate_question_pane_scrolls_and_keeps_footer() {
     assert!(last_inner_row.contains("tab"), "{last_inner_row}");
     assert!(!last_inner_row.contains("focus"), "{last_inner_row}");
 }
+
+#[test]
+fn question_hint_keeps_help_and_omits_command_keys() {
+    use pairproof::tui::candidate_run::{CandidateFocus, CandidateRunState};
+    use pairproof::tui::candidate_runtime::question_hint;
+    use pairproof::tui::candidate_stage::QuestionFlowState;
+
+    let mut state = CandidateRunState::new();
+    let pick = question_hint(&state, 4);
+    assert!(
+        pick.contains("? help") && pick.contains("tab panel") && pick.contains("esc quit"),
+        "{pick}"
+    );
+    assert!(pick.contains("up/down move"), "{pick}");
+    assert!(!pick.contains("c continue"), "{pick}");
+    assert!(!pick.contains("t write tests"), "{pick}");
+
+    state.staging.switch_to(0, &None, 4, "");
+    state.staging.set_flow(0, QuestionFlowState::SolutionReady);
+    let ready = question_hint(&state, 4);
+    assert_eq!(ready, "focus: tab panel, ? help, esc quit");
+    assert!(!ready.contains("c continue"), "{ready}");
+    assert!(!ready.contains("r run"), "{ready}");
+    assert!(!ready.contains("t write tests"), "{ready}");
+    assert!(!ready.contains("a change approach"), "{ready}");
+    assert!(!ready.contains("f submit"), "{ready}");
+
+    state.staging.set_flow(0, QuestionFlowState::Submitting);
+    let busy = question_hint(&state, 4);
+    assert_eq!(busy, "focus: working, tab panel, ? help, esc quit");
+
+    state.focus = CandidateFocus::Chat;
+    let chat = question_hint(&state, 4);
+    assert!(chat.contains("? help"), "{chat}");
+    assert!(!chat.contains("c continue"), "{chat}");
+}
