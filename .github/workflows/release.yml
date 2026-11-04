@@ -1,31 +1,46 @@
 name: Release
 
 on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
   push:
-    branches:
-      - main
     tags:
       - 'v*.*.*'
   workflow_dispatch:
 
-# A main push and a tag push for the same release must not overlap.
+# One release at a time. A main release waits until CI has finished.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-main
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  gate:
+    name: Wait for CI
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: CI passed
+        shell: sh
+        run: echo "CI succeeded, or this run is a tag or a manual dispatch"
+
   prepare:
     name: Plan version
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: gate
+    if: always() && needs.gate.result == 'success' && github.event_name == 'workflow_run'
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.plan.outputs.version }}
       bump: ${{ steps.plan.outputs.bump }}
+      release: ${{ steps.plan.outputs.release }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Plan release version
         id: plan
         shell: sh
@@ -41,12 +56,21 @@ jobs:
           PLAN="$(sh scripts/plan_release_version.sh "$CURRENT" "$LATEST")"
           VERSION="$(printf '%s' "$PLAN" | awk '{ print $1 }')"
           BUMP="$(printf '%s' "$PLAN" | awk '{ print $2 }')"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1 || gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already exists; release not needed"
+            RELEASE=false
+          else
+            RELEASE=true
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
-          echo "cargo=$CURRENT latest=${LATEST:-none} version=$VERSION bump=$BUMP"
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
+          echo "cargo=$CURRENT latest=${LATEST:-none} version=$VERSION bump=$BUMP release=$RELEASE"
 
   validate:
     name: Validate
+    needs: gate
+    if: always() && needs.gate.result == 'success' && github.event_name != 'workflow_run'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -97,11 +121,13 @@ jobs:
 
   build:
     name: Build (${{ matrix.target }})
-    needs: [validate, prepare]
+    needs: [gate, validate, prepare]
     if: >-
       always() &&
-      needs.validate.result == 'success' &&
-      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
+      needs.gate.result == 'success' &&
+      (needs.validate.result == 'success' || needs.validate.result == 'skipped') &&
+      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') &&
+      (needs.prepare.outputs.release == 'true' || (github.event_name != 'workflow_run' && needs.prepare.result == 'skipped'))
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -121,6 +147,8 @@ jobs:
             asset: pairproof-darwin-aarch64-apple-darwin.tar.gz
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       - name: Apply planned version
         if: needs.prepare.outputs.bump == 'true'
         shell: sh
@@ -172,20 +200,21 @@ jobs:
 
   publish:
     name: Publish
-    needs: [validate, build, prepare]
+    needs: [gate, validate, build, prepare]
     if: >-
       always() &&
-      needs.validate.result == 'success' &&
+      needs.gate.result == 'success' &&
       needs.build.result == 'success' &&
+      (needs.validate.result == 'success' || needs.validate.result == 'skipped') &&
       (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') &&
-      (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+      (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_run')
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:

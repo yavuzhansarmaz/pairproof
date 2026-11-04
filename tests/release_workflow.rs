@@ -69,12 +69,20 @@ fn release_workflow_triggers_on_version_tags() {
         "publish must be gated to tag refs"
     );
     assert!(
-        text.contains("branches:") && text.contains("- main"),
-        "workflow must also run on a push to main"
+        text.contains("workflow_run:") && text.contains("workflows: [\"CI\"]"),
+        "a main release must wait for the CI workflow"
+    );
+    assert!(
+        text.contains("workflow_run.conclusion == 'success'"),
+        "a main release must not start when CI failed"
     );
     assert!(
         text.contains("scripts/plan_release_version.sh"),
-        "a main push must plan the version from Cargo.toml and the latest release"
+        "a main release must plan the version from Cargo.toml and the latest release"
+    );
+    assert!(
+        text.contains("release not needed"),
+        "a main release must stop when the planned version is already published"
     );
     let publish = publish_section(&text);
     assert!(
@@ -82,8 +90,8 @@ fn release_workflow_triggers_on_version_tags() {
         "publish must run for tag refs"
     );
     assert!(
-        publish.contains("github.ref == 'refs/heads/main'"),
-        "publish must also run for a push to main"
+        publish.contains("github.event_name == 'workflow_run'"),
+        "publish must run after CI on main"
     );
 }
 
@@ -257,8 +265,8 @@ fn release_workflow_publish_requires_all_builds() {
     let publish = publish_section(&text);
 
     assert!(
-        publish.contains("needs: [validate, build, prepare]"),
-        "publish must need validate, the builds, and the version plan"
+        publish.contains("needs: [gate, validate, build, prepare]"),
+        "publish must need CI, validation, the builds, and the version plan"
     );
     assert!(
         publish.contains("contents: write"),
