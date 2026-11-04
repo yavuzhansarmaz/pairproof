@@ -118,7 +118,10 @@ fn rating_clamps_at_bounds() {
         map.insert(i, vec![Best]);
     }
     let b = live_rating(&s, &map);
-    close(b.unclamped, 6.0 + 6.25 * pairproof::scoring::POSITIVE_GAIN_SCALE);
+    close(
+        b.unclamped,
+        6.0 + 6.25 * pairproof::scoring::POSITIVE_GAIN_SCALE,
+    );
     close(b.rating, 10.0);
     let mut s = started_easy();
     for i in 0..20u64 {
@@ -147,7 +150,11 @@ fn a_full_best_clear_stays_under_the_ceiling() {
         "a clean clear of all 10 should not sit on 10, got {}",
         b.rating
     );
-    assert!(b.rating > 9.0, "a clean clear should still be high, got {}", b.rating);
+    assert!(
+        b.rating > 9.0,
+        "a clean clear should still be high, got {}",
+        b.rating
+    );
     assert!(b.unclamped < 10.0, "unclamped {}", b.unclamped);
 }
 
