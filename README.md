@@ -34,23 +34,31 @@ Docker (expert) and [Mutagen](https://mutagen.io/) (candidate) are installed sep
 
 ## Quick start
 
-**Expert** (needs Docker + a [Meta Model API](https://api.meta.ai/v1) key):
+Run PairProof, then pick a role on the main menu:
+
+```sh
+pairproof
+```
+
+Press `e` for Expert or `c` for Candidate.
+
+**Expert** (`e`; needs Docker + a [Meta Model API](https://api.meta.ai/v1) key):
 
 ```sh
 export MODEL_API_KEY="<your-key>"   # or save via the TUI / ~/.config/pairproof/api_key
-pairproof --role expert
+pairproof
 ```
 
-Paste a job description → confirm the extracted topics/level/language → share the connection string.
+Press `e`. Paste a job description → confirm the extracted topics/level/language → share the connection string.
 
-**Candidate** (needs Mutagen + `ssh`; same `pairproof` version as the expert):
+**Candidate** (`c`; needs Mutagen + `ssh`; same `pairproof` version as the expert). Start in an empty folder — that folder is the workspace:
 
 ```sh
 mkdir interview && cd interview
-pairproof --role candidate
+pairproof
 ```
 
-Paste the connection string. Your current folder syncs into the sandbox as `q1/`, `q2/`, … — local files stay when the session ends.
+Press `c`. Paste the connection string. Questions sync into that folder as `q1/`, `q2/`, … — local files stay when the session ends.
 
 ```sh
 pairproof update                 # latest release
@@ -68,7 +76,7 @@ pairproof uninstall --keep-data  # remove binary, keep config
 ```
  Expert machine                              Candidate machine
  ──────────────                              ─────────────────
- pairproof --role expert                     pairproof --role candidate
+ pairproof, then e                           pairproof, then c
        │                                            │
        ├─ Meta extracts JD topics                   ├─ paste connection string
        ├─ Docker sandbox + NAT endpoint             ├─ SSH fingerprint pin
