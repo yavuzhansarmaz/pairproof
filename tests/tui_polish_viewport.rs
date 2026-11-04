@@ -70,7 +70,7 @@ fn graded(slot: usize, grade: f64) -> GradeOutcome {
 }
 
 #[test]
-fn final_breakdown_scrolls_with_the_rating_table_pinned() {
+fn final_breakdown_scrolls_as_one_page() {
     let mut lines = vec!["Final breakdown".to_string(), String::new()];
     for i in 0..30 {
         lines.push(format!("question detail {i}"));
@@ -83,21 +83,8 @@ fn final_breakdown_scrolls_with_the_rating_table_pinned() {
         "skipped: 0".to_string(),
         "enter to exit".to_string(),
     ]);
-    let top = final_frame(&lines, 12, 0);
+    let top = final_frame(&lines, 12, 0, 100);
     assert!(top.lines.len() <= 12, "{:?}", top.lines);
-    assert_eq!(top.lines.last().map(String::as_str), Some("enter to exit"));
-    assert!(
-        top.lines
-            .iter()
-            .any(|line| line.contains('┌') && line.contains('┐')),
-        "rating table: {:?}",
-        top.lines
-    );
-    assert!(
-        top.lines.iter().any(|line| line.contains("7.50 / 10")),
-        "{:?}",
-        top.lines
-    );
     assert!(
         top.lines
             .iter()
@@ -105,15 +92,52 @@ fn final_breakdown_scrolls_with_the_rating_table_pinned() {
         "{:?}",
         top.lines
     );
+    assert!(
+        !top.lines.iter().any(|line| line.contains('┌')),
+        "the rating follows the questions: {:?}",
+        top.lines
+    );
     assert!(top.max_scroll > 0, "the breakdown should scroll");
-    let bottom = final_frame(&lines, 12, top.max_scroll);
+    let stepped = final_frame(&lines, 12, 1, 100);
     assert_eq!(
-        bottom.lines.last().map(String::as_str),
-        Some("enter to exit")
+        stepped.lines[0].trim_end(),
+        top.lines[1].trim_end(),
+        "{:?}",
+        stepped.lines
+    );
+    let bottom = final_frame(&lines, 12, top.max_scroll, 100);
+    let widest = |lines: &[String]| {
+        lines
+            .iter()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0)
+    };
+    assert_eq!(
+        widest(&top.lines),
+        widest(&bottom.lines),
+        "the card keeps one width while scrolling"
+    );
+    let exit = bottom
+        .lines
+        .iter()
+        .find(|line| line.contains("enter to exit"))
+        .expect("exit");
+    assert!(
+        exit.starts_with("enter to exit"),
+        "the exit line stays on the left: {exit:?}"
+    );
+    assert!(
+        bottom
+            .lines
+            .iter()
+            .any(|line| line.contains('┌') && line.contains('┐')),
+        "{:?}",
+        bottom.lines
     );
     assert!(
         bottom.lines.iter().any(|line| line.contains("7.50 / 10")),
-        "the table stays put: {:?}",
+        "{:?}",
         bottom.lines
     );
     assert!(
@@ -121,14 +145,6 @@ fn final_breakdown_scrolls_with_the_rating_table_pinned() {
             .lines
             .iter()
             .any(|line| line.contains("question detail 29")),
-        "scrolling reaches the last detail: {:?}",
-        bottom.lines
-    );
-    assert!(
-        !bottom
-            .lines
-            .iter()
-            .any(|line| line.contains("question detail 0")),
         "{:?}",
         bottom.lines
     );
@@ -136,6 +152,41 @@ fn final_breakdown_scrolls_with_the_rating_table_pinned() {
     assert!(table.iter().any(|line| line.contains("rating")));
     assert!(table.iter().any(|line| line.contains("solved")));
     assert!(!table.iter().any(|line| line.contains("final rating")));
+}
+
+#[test]
+fn final_rating_table_stays_centred_without_resizing_the_card() {
+    let mut lines = vec!["Final breakdown".to_string(), "q".repeat(80)];
+    for i in 0..12 {
+        lines.push(format!("short {i}"));
+    }
+    lines.extend([
+        "final rating: 7.50 / 10".to_string(),
+        "solved: 1".to_string(),
+        "enter to exit".to_string(),
+    ]);
+    let top = final_frame(&lines, 6, 0, 120);
+    let bottom = final_frame(&lines, 6, top.max_scroll, 120);
+    let widest = |rows: &[String]| {
+        rows.iter()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0)
+    };
+    assert_eq!(widest(&top.lines), widest(&bottom.lines));
+    let rule = bottom
+        .lines
+        .iter()
+        .find(|line| line.contains('┌'))
+        .expect("rating table");
+    let box_at = rule.chars().position(|c| c == '┌').expect("box");
+    assert!(box_at > 0, "the rating table is centred: {rule:?}");
+    let exit = bottom
+        .lines
+        .iter()
+        .find(|line| line.contains("enter to exit"))
+        .expect("exit");
+    assert!(exit.starts_with("enter to exit"), "{exit:?}");
 }
 
 #[test]

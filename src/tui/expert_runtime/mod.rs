@@ -15,7 +15,8 @@ use crate::leetcode::selection::{pool_with_fallback, FallbackReport, PoolClient}
 use crate::leetcode::LeetCodeClient;
 use crate::llm::extraction::ExtractionResult;
 use crate::orchestration::control::{
-    check_app_versions, parse_final_ack, parse_heartbeat, parse_hello, FinalAckOutcome,
+    check_app_versions, parse_final_ack, parse_heartbeat, parse_hello, CandidateSnapshot,
+    FinalAckOutcome, SnapshotRun,
 };
 use crate::orchestration::{
     build_snapshot_with_recovery, compute_final, generate_report, grade_session, publish_snapshot,
@@ -80,6 +81,10 @@ pub use crate::tui::expert_session::{format_session_id, SANDBOX_PORT_RANGE};
 
 /// Missed-liveness window before the expert marks the candidate disconnected.
 pub const HEARTBEAT_TIMEOUT_MS: u64 = 30_000;
+/// How long End waits for the candidate final-ack while the candidate is live.
+pub const FINAL_ACK_WAIT_MS: u64 = 60_000;
+/// How long End waits for that ack after the candidate is already gone.
+pub const DISCONNECTED_ACK_WAIT_MS: u64 = 2_000;
 /// Selection retry floor: one attempt per 30s per screen while failing.
 pub const SELECTION_RETRY_MS: u64 = 30_000;
 /// Selection screens with independent failure backoff.
@@ -195,6 +200,8 @@ pub struct ExpertRuntime {
     final_grades: Vec<GradeOutcome>,
     last_hb_at: Option<u64>,
     reissued: Option<ConnectionString>,
+    last_published_snapshot: Option<CandidateSnapshot>,
+    last_published_run: Option<SnapshotRun>,
     username: EphemeralUsername,
     pushed_window: Option<u64>,
     secret_pusher: Option<Arc<dyn crate::orchestration::secret_push::SecretPush>>,
@@ -282,6 +289,8 @@ impl ExpertRuntime {
             last_seen_ms: now_ms,
             last_hb_at: None,
             reissued: None,
+            last_published_snapshot: None,
+            last_published_run: None,
             username: spec.username,
             pushed_window: None,
             secret_pusher,

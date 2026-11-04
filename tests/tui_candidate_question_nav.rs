@@ -38,37 +38,53 @@ fn navigation_reopens_finished_question_and_keeps_its_approach() {
     session
         .select_approach(ApproachChoice::Preset(1), 100, 5)
         .expect("select");
-    session.finish_question(6).expect("finish");
-    assert_eq!(session.current_index(), Some(1));
-    session.navigate_to(0, 7).expect("reopen finished");
-    assert_eq!(session.current_index(), Some(0));
-    let slot = session.slot(0).expect("slot 0");
-    assert_eq!(slot.status, QuestionStatus::Active);
-    assert_eq!(slot.approach, Some(ApproachChoice::Preset(1)));
-    assert_eq!(slot.finished_at_ms, None);
-    // The question left behind keeps its place and can be resumed.
-    session.navigate_to(1, 8).expect("back to second");
+    // Unsubmitted questions can be switched freely and retain their approach.
+    session.navigate_to(1, 6).expect("switch to second");
     assert_eq!(session.current_index(), Some(1));
     assert_eq!(
         session.slot(0).expect("slot 0").status,
         QuestionStatus::Pending
     );
-    // A never-started question can be opened directly too.
-    session.navigate_to(3, 9).expect("open pending");
+    session
+        .navigate_to(0, 7)
+        .expect("return to unsubmitted first");
+    assert_eq!(session.current_index(), Some(0));
+    let slot = session.slot(0).expect("slot 0");
+    assert_eq!(slot.status, QuestionStatus::Active);
+    assert_eq!(slot.approach, Some(ApproachChoice::Preset(1)));
+    // Once finished (permanently submitted), slot 0 cannot be reopened.
+    session.finish_question(8).expect("finish");
+    assert_eq!(session.current_index(), Some(1));
+    assert!(session.navigate_to(0, 9).is_err());
+    assert_eq!(
+        session.slot(0).expect("slot 0").status,
+        QuestionStatus::Finished
+    );
+    assert_eq!(session.current_index(), Some(1));
+    // A never-started pending question can be opened directly too.
+    session.navigate_to(3, 10).expect("open pending");
     assert_eq!(session.current_index(), Some(3));
 }
 
 #[test]
 fn navigation_out_of_completed_easy_block_reopens_a_question() {
     let mut session = started();
-    for i in 0..5u64 {
+    session.skip_question(10).expect("skip 0");
+    for i in 1..5u64 {
         session.finish_question(10 + i).expect("finish");
     }
     assert_eq!(session.current_index(), None);
-    session.navigate_to(2, 30).expect("reopen");
-    assert_eq!(session.current_index(), Some(2));
+    // Finished questions are permanently submitted and cannot be reopened.
+    assert!(session.navigate_to(2, 30).is_err());
     assert_eq!(
         session.slot(2).expect("slot").status,
+        QuestionStatus::Finished
+    );
+    // A skipped (unsubmitted) question can still be reopened.
+    session.navigate_to(0, 31).expect("reopen skipped");
+    assert_eq!(session.current_index(), Some(0));
+    assert_eq!(
+        session.slot(0).expect("slot").status,
         QuestionStatus::Active
     );
 }
@@ -251,21 +267,36 @@ fn arrow_navigation_keeps_the_marked_choice_per_question() {
     state.focus = CandidateFocus::Work;
     press(&mut state, &mut runtime, K::Down);
     press(&mut state, &mut runtime, K::Char(' '));
-    press(&mut state, &mut runtime, K::Right);
-    assert_eq!(
-        runtime.transport().sent.last().map(|i| i.kind.clone()),
-        Some(IntentKind::Navigate { index: 1 })
+    // Pressing Right does not advance the question before pressing `f`.
+    let mut status = None;
+    handle_live_key(&mut state, &mut runtime, key(K::Right), &mut status);
+    assert!(
+        runtime.transport().sent.is_empty(),
+        "Right arrow must not leave the current question without f"
     );
-    // The expert moves us to Q2; the candidate stages Q2 fresh...
+    assert!(
+        status
+            .as_deref()
+            .unwrap_or("")
+            .contains("press f to submit"),
+        "status: {status:?}"
+    );
+    // When the server transitions to Q2 (e.g. after submission) and back in staging,
+    // ApproachStaging preserves per-question choices.
     runtime.transport_mut().snapshot = Some(snapshot(1));
     runtime.poll_snapshot().expect("poll");
-    press(&mut state, &mut runtime, K::Left);
-    assert_eq!(
-        runtime.transport().sent.last().map(|i| i.kind.clone()),
-        Some(IntentKind::Navigate { index: 0 })
+    handle_live_key(&mut state, &mut runtime, key(K::Left), &mut status);
+    assert!(
+        runtime.transport().sent.is_empty(),
+        "Left arrow must not reopen a submitted question"
     );
-    // ...and coming back, the mark on Q1 is still there: Enter
-    // submits the same preset without re-marking.
+    assert!(
+        status
+            .as_deref()
+            .unwrap_or("")
+            .contains("submitted questions cannot be reopened"),
+        "status: {status:?}"
+    );
     runtime.transport_mut().snapshot = Some(snapshot(0));
     runtime.poll_snapshot().expect("poll");
     press(&mut state, &mut runtime, K::Enter);
@@ -438,4 +469,31 @@ fn final_screen_shows_only_candidate_safe_results() {
         !joined.contains("Find two numbers."),
         "no question text: {joined}"
     );
+}
+
+#[test]
+fn tab_from_approaches_switches_to_the_coach_panel() {
+    let mut runtime = connected_runtime();
+    let mut state = CandidateRunState::new();
+    state.focus = CandidateFocus::Work;
+    press(&mut state, &mut runtime, K::Down);
+    press(&mut state, &mut runtime, K::Tab);
+    assert_eq!(state.focus, CandidateFocus::Chat);
+    assert_eq!(
+        state.staging.current_stage().map(|stage| stage.cursor),
+        Some(1)
+    );
+    assert!(runtime.transport().sent.is_empty());
+    press(&mut state, &mut runtime, K::Tab);
+    assert_eq!(state.focus, CandidateFocus::Work);
+    assert_eq!(
+        state.staging.current_stage().map(|stage| stage.cursor),
+        Some(1)
+    );
+    state.focus = CandidateFocus::Other;
+    press(&mut state, &mut runtime, K::Tab);
+    assert_eq!(state.focus, CandidateFocus::Chat);
+    state.focus = CandidateFocus::Redirect;
+    press(&mut state, &mut runtime, K::Tab);
+    assert_eq!(state.focus, CandidateFocus::Chat);
 }

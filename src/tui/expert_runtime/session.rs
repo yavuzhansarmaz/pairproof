@@ -29,9 +29,16 @@ impl ExpertRuntime {
             Err(_) => vec!["session ended.".to_string()],
         }
     }
-    /// Ends the session with the production 60s final-ack wait.
+    /// Ends the session. A live candidate gets the full final-ack wait;
+    /// a disconnected one does not, because that ack will never arrive.
     pub async fn end_session(&mut self, now_ms: u64) -> Result<CleanupReport, ExpertRuntimeError> {
-        self.end_session_with_ack_deadline(now_ms, 60_000).await
+        let ack_deadline_ms = if self.is_disconnected() {
+            DISCONNECTED_ACK_WAIT_MS
+        } else {
+            FINAL_ACK_WAIT_MS
+        };
+        self.end_session_with_ack_deadline(now_ms, ack_deadline_ms)
+            .await
     }
     /// Ends the session: publish the final snapshot, wait bounded
     /// for the candidate final ack, then run cleanup. A timeout
@@ -161,9 +168,16 @@ impl ExpertRuntime {
             Box::new(move || {
                 let session_id = session_id.clone();
                 Box::pin(async move {
-                    crate::sync::terminate_sync(&session_id)
-                        .await
-                        .map_err(|e| e.to_string())
+                    match tokio::time::timeout(
+                        Duration::from_secs(8),
+                        crate::sync::terminate_sync(&session_id),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => Ok(()),
+                        Ok(Err(e)) => Err(e.to_string()),
+                        Err(_) => Err("timeout".to_string()),
+                    }
                 })
             }),
             Box::new(move || {
@@ -196,6 +210,11 @@ impl ExpertRuntime {
                     .failed
                     .push(("final_snapshot_ack".into(), "timeout".into()));
             }
+            if let Err(err) = &published {
+                stored
+                    .failed
+                    .push(("final_snapshot_publish".into(), err.to_string()));
+            }
             self.cleanup_report = Some(stored);
         }
         let mut report = result?;
@@ -204,7 +223,14 @@ impl ExpertRuntime {
                 .failed
                 .push(("final_snapshot_ack".into(), "timeout".into()));
         }
-        published?;
+        if let Err(err) = published {
+            if self.sandbox_handle.is_none() {
+                return Err(err.into());
+            }
+            report
+                .failed
+                .push(("final_snapshot_publish".into(), err.to_string()));
+        }
         self.cleanup_report = Some(report.clone());
         Ok(report)
     }

@@ -44,21 +44,22 @@ fn sync_create_argv_exact() {
     let user = EphemeralUsername::parse("pp-abcd1234").expect("username");
     let spec = sync_create("s1", "/home/candidate/session-s1", &endpoint, &user).expect("create");
     assert_eq!(spec.program, "mutagen");
-    assert_eq!(
-        spec.args,
-        strings(&[
-            "sync",
-            "create",
-            "--name",
-            "pairproof-sync-s1",
-            "--mode",
-            "two-way-safe",
-            "--symlink-mode",
-            "ignore",
-            "/home/candidate/session-s1",
-            "pp-abcd1234@203.0.113.10:2222:/workspace",
-        ])
-    );
+    let mut expected = vec![
+        "sync",
+        "create",
+        "--name",
+        "pairproof-sync-s1",
+        "--mode",
+        "two-way-safe",
+        "--symlink-mode",
+        "ignore",
+    ];
+    expected.extend(pairproof::sync::SYNC_IGNORE_ARGS);
+    expected.extend([
+        "/home/candidate/session-s1",
+        "pp-abcd1234@203.0.113.10:2222:/workspace",
+    ]);
+    assert_eq!(spec.args, strings(&expected));
     assert_eq!(
         mutagen_version().expect("version").args,
         strings(&["version"])

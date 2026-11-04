@@ -425,7 +425,7 @@ async fn executor_applies_through_core_validation() {
 
 #[tokio::test]
 #[rustfmt::skip]
-async fn a_clean_run_of_a_finished_solution_opens_the_next_question() {
+async fn a_clean_run_keeps_the_question_open_until_submit() {
     let (root, io, mut ex) = setup("advance-clean").await;
     let mut orch = started();
     let mut pipe = loaded_pipe(&orch).await;
@@ -435,10 +435,17 @@ async fn a_clean_run_of_a_finished_solution_opens_the_next_question() {
     append(&root, &line(&Intent::new("s1", 1, IntentKind::SelectPreset { preset: 0 })));
     let reports = ex.drain(&io, &mut orch, &mut pipe, &transports, 10).await.unwrap();
     assert_eq!(reports[0].outcome, ApplyOutcome::Applied, "{reports:?}");
-    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 0, "selection must not auto-run tests");
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })), 0);
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { .. })), 0);
+    assert_eq!(orch.current_index(), Some(0));
+    append(&root, &line(&Intent::new("s1", 2, IntentKind::RequestTests)));
+    let test_reports = ex.drain(&io, &mut orch, &mut pipe, &transports, 11).await.unwrap();
+    assert_eq!(test_reports[1].outcome, ApplyOutcome::Applied, "{test_reports:?}");
+    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 0, "t writes tests, does not run them");
     assert_eq!(count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })), 1);
-    assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { index: 0 })), 1);
-    assert_eq!(orch.current_index(), Some(1));
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { .. })), 0);
+    assert_eq!(orch.current_index(), Some(0));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -453,9 +460,10 @@ async fn a_failed_run_leaves_the_solved_question_open() {
     let coding = ReadyCoding;
     let transports = ControlTransports { coding: &coding, sandbox: &fakes.sandbox, generator: &fakes.generator, chat: &fakes.chat };
     append(&root, &line(&Intent::new("s1", 1, IntentKind::SelectPreset { preset: 0 })));
+    append(&root, &line(&Intent::new("s1", 2, IntentKind::RequestTests)));
     let reports = ex.drain(&io, &mut orch, &mut pipe, &transports, 10).await.unwrap();
-    assert_eq!(reports[0].outcome, ApplyOutcome::Applied, "{reports:?}");
-    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(reports.iter().map(|r| r.outcome).collect::<Vec<_>>(), vec![ApplyOutcome::Applied, ApplyOutcome::Applied], "{reports:?}");
+    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 0, "t writes tests, does not run them");
     assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { .. })), 0);
     assert_eq!(orch.current_index(), Some(0));
     assert!(orch.session().current_slot().is_some_and(|s| s.approach.is_some()));
@@ -464,17 +472,19 @@ async fn a_failed_run_leaves_the_solved_question_open() {
 
 #[tokio::test]
 #[rustfmt::skip]
-async fn a_clean_run_opens_the_next_question_even_without_ready() {
+async fn a_clean_run_stays_on_the_question_even_without_ready() {
     let (root, io, mut ex) = setup("advance-draft").await;
     let mut orch = started();
     let mut pipe = loaded_pipe(&orch).await;
     let fakes = Fakes::new();
     append(&root, &line(&Intent::new("s1", 1, IntentKind::SelectPreset { preset: 0 })));
+    append(&root, &line(&Intent::new("s1", 2, IntentKind::RunSolution)));
     let reports = ex.drain(&io, &mut orch, &mut pipe, &fakes.transports(), 10).await.unwrap();
-    assert_eq!(reports[0].outcome, ApplyOutcome::Applied, "{reports:?}");
+    assert_eq!(reports.iter().map(|r| r.outcome).collect::<Vec<_>>(), vec![ApplyOutcome::Applied, ApplyOutcome::Applied], "{reports:?}");
     assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { index: 0 })), 1);
-    assert_eq!(orch.current_index(), Some(1));
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })), 0);
+    assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { .. })), 0);
+    assert_eq!(orch.current_index(), Some(0));
     let _ = std::fs::remove_dir_all(root);
 }
 

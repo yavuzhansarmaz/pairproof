@@ -4,8 +4,8 @@ use pairproof::llm::approaches::parse_approach_set;
 use pairproof::llm::coding::{apply_usage, parse_coding_step, CodingStepInput, CodingStepOutput};
 use pairproof::llm::Usage;
 use pairproof::orchestration::{
-    ApproachGenerator, CodingTransport, FetchedStatement, Orchestrator, PipelineError,
-    PipelineFuture, QuestionPipeline, SandboxIo, StatementFetcher,
+    build_snapshot, ApproachGenerator, CodingTransport, FetchedStatement, Orchestrator,
+    PipelineError, PipelineFuture, QuestionPipeline, SandboxIo, SessionSyncPhase, StatementFetcher,
 };
 use pairproof::sandbox::{RunnabilityReport, TestOutcome};
 use pairproof::scoring::{ApproachGrade, ApproachQuality, ApproachSet};
@@ -257,14 +257,46 @@ async fn coding_loop_stops_on_expert_end() {
     assert_eq!(sandbox.files.lock().unwrap().len(), 1);
 }
 #[tokio::test]
-async fn request_tests_runs_real_sandbox_test_wrapper() {
+async fn request_tests_writes_tests_without_executing() {
+    let (mut orch, mut pipe, coding, sandbox) = setup(DRAFT_JSON, 10).await;
+    pipe.select_preset(&mut orch, 0, &coding, &sandbox, 10)
+        .await
+        .unwrap();
+    assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 0);
+    let before = coding.calls.load(Ordering::SeqCst);
+    let outcome = pipe
+        .request_tests(&mut orch, &coding, &sandbox, 20)
+        .await
+        .unwrap();
+    assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(coding.calls.load(Ordering::SeqCst), before + 1);
+    assert!(
+        coding
+            .inputs
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .tests_requested
+    );
+    assert_eq!(outcome.code, "def solve():\n    return 1");
+    assert!(pipe.test_records().is_empty());
+    let n = count(&orch, |k| matches!(k, EventKind::TestsRequested { .. }));
+    assert_eq!(n, 1);
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. })),
+        0
+    );
+}
+#[tokio::test]
+async fn run_solution_records_expected_vs_actual_counts() {
     let (mut orch, mut pipe, coding, _) = setup(DRAFT_JSON, 10).await;
     let raw = TestOutcome {
         success: false,
         exit_code: Some(1),
-        stdout: "1 passed, 1 failed in output text".into(),
-        stderr: "assert boom".into(),
-        stdout_truncated: true,
+        stdout: "case ok\nTESTS: 2 passed, 1 failed".into(),
+        stderr: String::new(),
+        stdout_truncated: false,
         stderr_truncated: false,
     };
     let sandbox = FakeSandbox {
@@ -275,43 +307,46 @@ async fn request_tests_runs_real_sandbox_test_wrapper() {
         .await
         .unwrap();
     assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 0);
-    let record = pipe.request_tests(&mut orch, &sandbox, 20).await.unwrap();
+    let record = pipe.run_solution(&mut orch, &sandbox, 20).await.unwrap();
     assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 1);
     assert_eq!(record.outcome, raw);
-    let n = count(&orch, |k| matches!(k, EventKind::TestsRequested { .. }));
-    assert_eq!(n, 1);
+    assert_eq!(pipe.test_records(), std::slice::from_ref(&record));
+    assert_eq!(pipe.run_records(), std::slice::from_ref(&record));
+    let latest = orch
+        .session()
+        .current_slot()
+        .unwrap()
+        .latest_test
+        .map(|t| (t.passed, t.failed));
+    assert_eq!(latest, Some((2, 1)));
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })),
+        0
+    );
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. })),
+        1
+    );
 }
 #[tokio::test]
-async fn test_results_are_recorded_once_and_displayed_verbatim() {
-    let (mut orch, mut pipe, coding, _) = setup(DRAFT_JSON, 10).await;
-    let raw = TestOutcome {
-        success: true,
-        exit_code: Some(0),
-        stdout: "raw stdout: 3 ok".into(),
-        stderr: "raw stderr".into(),
-        stdout_truncated: false,
-        stderr_truncated: true,
-    };
-    let sandbox = FakeSandbox {
-        outcome: Some(raw.clone()),
-        ..Default::default()
-    };
+async fn run_solution_without_tests_does_not_record_counts() {
+    let (mut orch, mut pipe, coding, sandbox) = setup(DRAFT_JSON, 10).await;
     pipe.select_preset(&mut orch, 0, &coding, &sandbox, 10)
         .await
         .unwrap();
-    let record = pipe.request_tests(&mut orch, &sandbox, 20).await.unwrap();
-    assert_eq!(pipe.test_records(), std::slice::from_ref(&record));
-    assert_eq!(record.outcome.stdout, "raw stdout: 3 ok");
+    let record = pipe.run_solution(&mut orch, &sandbox, 20).await.unwrap();
+    assert!(record.outcome.stdout.contains("no tests ran"));
+    assert!(record.outcome.stdout.contains("press t to write tests"));
     assert_eq!(orch.session().current_slot().unwrap().latest_test, None);
-    let n = count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. }));
-    assert_eq!(n, 0);
-    pipe.record_counted_test_result(&mut orch, 3, 0, 21)
-        .unwrap();
-    let slot = orch.session().current_slot().unwrap();
-    let latest = slot.latest_test.map(|t| (t.passed, t.failed));
-    assert_eq!(latest, Some((3, 0)));
-    let n = count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. }));
-    assert_eq!(n, 1);
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. })),
+        0
+    );
+    let snap = build_snapshot(&orch, &pipe, SessionSyncPhase::Active, &[], None);
+    assert_eq!(
+        snap.latest_test, None,
+        "a run with no tests must not look like 1 passed"
+    );
 }
 #[tokio::test]
 async fn coding_api_usage_is_booked_exactly_once_on_success_and_failure() {
@@ -382,4 +417,149 @@ async fn coding_step_books_tokens_once_on_real_session() {
         .await
         .unwrap();
     assert_eq!(orch.session().current_slot().unwrap().actual_tokens, 74);
+}
+
+#[tokio::test]
+async fn full_iterative_question_lifecycle_and_final_submission_boundary() {
+    use pairproof::core::QuestionStatus;
+
+    let (mut orch, mut pipe, _coding, sandbox) = setup(DRAFT_JSON, 10).await;
+    let step_coding = FakeCoding::new(
+        r#"{"code":"def solve(nums):\n    return sum(nums)","ready":false,"summary":"iter"}"#,
+        15,
+    );
+
+    // 1-4. Select approach and generate initial solution; not auto-executed or submitted.
+    let initial = pipe
+        .select_preset(&mut orch, 1, &step_coding, &sandbox, 10)
+        .await
+        .unwrap();
+    assert_eq!(initial.code, "def solve(nums):\n    return sum(nums)");
+    assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(orch.current_index(), Some(0));
+    assert_eq!(
+        orch.session().slot(0).unwrap().status,
+        QuestionStatus::Active
+    );
+    assert_eq!(pipe.code_revision(0), 1);
+
+    // 5-6. Request additional changes (`c` / redirect); question & context are retained.
+    let iter2_coding = FakeCoding::new(
+        r#"{"code":"def solve(nums):\n    if not nums:\n        return 0\n    return sum(nums)","ready":false,"summary":"edge case"}"#,
+        15,
+    );
+    pipe.redirect_coding(
+        &mut orch,
+        "handle empty list edge case",
+        &iter2_coding,
+        &sandbox,
+        20,
+    )
+    .await
+    .unwrap();
+    {
+        let inputs = iter2_coding.inputs.lock().unwrap();
+        assert_eq!(inputs[0].question_statement, "Statement for e0");
+        assert!(!inputs[0].approach_text.is_empty());
+        assert_eq!(
+            inputs[0].current_code,
+            "def solve(nums):\n    return sum(nums)"
+        );
+        assert_eq!(
+            inputs[0].instruction.as_deref(),
+            Some("handle empty list edge case")
+        );
+        assert!(!inputs[0].tests_requested);
+    }
+    assert_eq!(pipe.code_revision(0), 2);
+    assert_eq!(orch.current_index(), Some(0));
+
+    // 7. `t` writes tests (extra score); `tests_requested` stays sticky for slot 0.
+    let test_gen_coding = FakeCoding::new(
+        r#"{"code":"def solve(nums):\n    return sum(nums)\nif __name__ == '__main__':\n    assert solve([]) == 0","ready":true,"summary":"with tests"}"#,
+        15,
+    );
+    pipe.request_tests(&mut orch, &test_gen_coding, &sandbox, 30)
+        .await
+        .unwrap();
+    assert!(test_gen_coding.inputs.lock().unwrap()[0].tests_requested);
+    assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(pipe.code_revision(0), 3);
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })),
+        1
+    );
+
+    // 8. `r` runs those tests against the solution and records expected vs actual.
+    let run_rec = pipe.run_solution(&mut orch, &sandbox, 40).await.unwrap();
+    assert!(run_rec.outcome.success);
+    assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(pipe.run_records().len(), 1);
+    assert_eq!(pipe.test_records().len(), 1);
+    assert_eq!(
+        orch.current_index(),
+        Some(0),
+        "passing tests must not auto-submit"
+    );
+
+    // 10-13. Candidate edits file in workspace, then continues with agent; edits and test flag are preserved.
+    sandbox
+        .write_solution(
+            0,
+            Language::Python,
+            "def solve(nums):\n    # candidate manual edit\n    return sum(nums)\n",
+        )
+        .await
+        .unwrap();
+    let iter3_coding = FakeCoding::new(
+        r#"{"code":"def solve(nums):\n    # candidate manual edit + refactored\n    return sum(nums)","ready":true,"summary":"refactored"}"#,
+        15,
+    );
+    pipe.redirect_coding(
+        &mut orch,
+        "refactor implementation",
+        &iter3_coding,
+        &sandbox,
+        60,
+    )
+    .await
+    .unwrap();
+    {
+        let inputs = iter3_coding.inputs.lock().unwrap();
+        assert!(
+            inputs[0].current_code.contains("# candidate manual edit"),
+            "agent must read candidate's workspace edit: {}",
+            inputs[0].current_code
+        );
+        assert!(
+            inputs[0].tests_requested,
+            "test generation flag must remain preserved across iterations"
+        );
+    }
+
+    // Candidate makes one final manual tweak in workspace before pressing `f`.
+    let final_candidate_code =
+        "def solve(nums):\n    return sum(nums)  # final candidate solution\n";
+    sandbox
+        .write_solution(0, Language::Python, final_candidate_code)
+        .await
+        .unwrap();
+
+    // 14-17. Final submission (`f`) captures workspace solution, marks Q0 Finished, advances to Q1, and locks Q0.
+    pipe.finish_question_with_sandbox(&mut orch, &sandbox, 70)
+        .await
+        .unwrap();
+    assert!(pipe.is_submitted(0));
+    assert_eq!(pipe.current_code(0), Some(final_candidate_code));
+    assert_eq!(
+        orch.session().slot(0).unwrap().status,
+        QuestionStatus::Finished
+    );
+    assert_eq!(orch.current_index(), Some(1));
+
+    // Previous question (slot 0) cannot be reopened or modified.
+    assert!(pipe.navigate_question(&mut orch, 0, 71).is_err());
+    assert!(orch.navigate_to(0, 72).is_err());
+    assert_eq!(orch.current_index(), Some(1));
+    assert_eq!(pipe.current_code(0), Some(final_candidate_code));
 }

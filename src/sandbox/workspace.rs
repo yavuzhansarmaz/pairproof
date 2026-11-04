@@ -99,17 +99,9 @@ pub async fn write_file(
     )
     .await?;
     checked_dir(handle, user, &parent, "realpath_parent").await?;
-    let remove = vec!["rm".to_string(), "-f".to_string(), target.clone()];
-    run_user_ok(
-        handle,
-        user,
-        &remove,
-        None,
-        DEFAULT_MAX_OUTPUT,
-        "remove_target",
-    )
-    .await?;
-    let tee = vec!["tee".to_string(), target.clone()];
+    let leaf = path.as_str().rsplit('/').next().unwrap_or("file");
+    let tmp = format!("{parent}/.{leaf}.pairproof-tmp");
+    let tee = vec!["tee".to_string(), tmp.clone()];
     run_user_ok(
         handle,
         user,
@@ -117,6 +109,16 @@ pub async fn write_file(
         Some(content),
         DEFAULT_MAX_OUTPUT,
         "write_tee",
+    )
+    .await?;
+    let rename = vec!["mv".to_string(), "-f".to_string(), tmp, target.clone()];
+    run_user_ok(
+        handle,
+        user,
+        &rename,
+        None,
+        DEFAULT_MAX_OUTPUT,
+        "rename_target",
     )
     .await?;
     let count = vec!["wc".to_string(), "-c".to_string(), target];
@@ -181,7 +183,7 @@ pub async fn read_file(
     Ok(outcome.stdout)
 }
 
-/// Writes the statement, creating an empty solution file only when absent.
+/// Writes the statement without touching or pre-creating an empty solution file.
 pub async fn write_question(
     handle: &SandboxHandle,
     user: &EphemeralUsername,
@@ -197,14 +199,5 @@ pub async fn write_question(
     }
     let (question, solution) = question_layout(index, language)?;
     write_file(handle, user, &question, statement.as_bytes()).await?;
-    let probe = vec![
-        "test".to_string(),
-        "-f".to_string(),
-        solution.container_path(),
-    ];
-    let probe_out = run_user(handle, user, &probe, None, DEFAULT_MAX_OUTPUT).await?;
-    if !probe_out.success() {
-        write_file(handle, user, &solution, b"").await?;
-    }
     Ok((question, solution))
 }

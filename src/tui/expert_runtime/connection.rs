@@ -202,7 +202,19 @@ impl ExpertRuntime {
             self.snapshot_recovery(),
         );
         snapshot.chat_partial = self.executor.chat_partial().map(str::to_string);
-        publish_snapshot(&*self.control_io, &snapshot).await?;
+        let run = snapshot.latest_run();
+        // `latest_run` is stored in a process-wide map, so reading it
+        // back off `last_published_snapshot` always sees the run just
+        // recorded by `build_snapshot`. Capture it at publish time or
+        // a coding-only update (`t` after `r`) is skipped and the
+        // candidate stays on "updating tests".
+        if self.last_published_snapshot.as_ref() != Some(&snapshot)
+            || run != self.last_published_run
+        {
+            publish_snapshot(&*self.control_io, &snapshot).await?;
+            self.last_published_snapshot = Some(snapshot);
+            self.last_published_run = run;
+        }
         self.maybe_trigger_load();
         self.check_heartbeat(self.fresh_now(now_ms)).await;
         Ok(reports)

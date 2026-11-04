@@ -128,6 +128,154 @@ fn line_count(bytes: &[u8]) -> u64 {
     }
 }
 
+/// True when `root/q{index+1}/solution.*` exists as a non-empty file.
+pub fn has_synced_solution(root: &Path, index: usize) -> bool {
+    let dir = root.join(format!("q{}", index + 1));
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return false;
+    };
+    entries.filter_map(|e| e.ok()).any(|entry| {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        name.starts_with("solution.")
+            && !name.ends_with(".pairproof-tmp")
+            && entry.metadata().is_ok_and(|m| m.is_file() && m.len() > 0)
+    })
+}
+
+/// Lines for the files Mutagen has synced into `qN/`: the names,
+/// how to run the solution, and a short preview of that file.
+/// An empty directory, or one that is not there yet, yields nothing.
+pub fn workspace_preview(root: &Path, index: usize) -> Vec<String> {
+    workspace_preview_with_run(root, index, None)
+}
+
+/// Like [`workspace_preview`], appending the latest execution or test output.
+pub fn workspace_preview_with_run(
+    root: &Path,
+    index: usize,
+    latest_run: Option<&crate::orchestration::control_snapshot::SnapshotRun>,
+) -> Vec<String> {
+    let n = index + 1;
+    let dir = root.join(format!("q{n}"));
+    let mut names: Vec<String> = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.metadata().is_ok_and(|m| m.is_file()))
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.') {
+                    return None;
+                }
+                if name.starts_with("solution.") && entry.metadata().map_or(0, |m| m.len()) == 0 {
+                    return None;
+                }
+                Some(name)
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    names.sort();
+    let run_lines = format_run_output(latest_run);
+    if names.is_empty() && run_lines.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![String::new(), "Workspace".to_string()];
+    for name in &names {
+        lines.push(sanitize_display(&format!("q{n}/{name}")));
+    }
+    if let Some(solution) = names.iter().find(|name| name.starts_with("solution.")) {
+        if let Some(hint) = run_hint(n, solution) {
+            lines.push(hint);
+        }
+        let preview = file_preview(&dir.join(solution));
+        if !preview.is_empty() {
+            lines.push(String::new());
+            lines.extend(preview);
+        }
+    }
+    if !run_lines.is_empty() {
+        lines.push(String::new());
+        lines.extend(run_lines);
+    }
+    lines
+}
+
+fn format_run_output(
+    latest_run: Option<&crate::orchestration::control_snapshot::SnapshotRun>,
+) -> Vec<String> {
+    let Some(run) = latest_run else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    match run.kind.as_str() {
+        "run" | "test" => {
+            let no_tests = run.stdout.to_ascii_lowercase().contains("no tests ran");
+            if no_tests {
+                out.push("last run: no tests (press t to write tests)".to_string());
+            } else {
+                let label = if run.kind == "run" {
+                    "last run"
+                } else {
+                    "last test"
+                };
+                let status = if run.success { "passed" } else { "failed" };
+                let code_suffix = run
+                    .exit_code
+                    .map_or(String::new(), |c| format!(" (exit {c})"));
+                out.push(sanitize_display(&format!("{label}: {status}{code_suffix}")));
+            }
+        }
+        "code" if !run.success => {
+            out.push("syntax check: failed".to_string());
+        }
+        _ => return Vec::new(),
+    }
+    for line in run.stdout.lines().take(8) {
+        if !line.trim().is_empty() {
+            out.push(sanitize_display(&format!("stdout: {line}")));
+        }
+    }
+    for line in run.stderr.lines().take(8) {
+        if !line.trim().is_empty() {
+            out.push(sanitize_display(&format!("stderr: {line}")));
+        }
+    }
+    out
+}
+
+fn run_hint(question: usize, file: &str) -> Option<String> {
+    let path = format!("q{question}/{file}");
+    let hint = if file.ends_with(".py") {
+        format!("run: python3 {path}")
+    } else if file.ends_with(".js") {
+        format!("run: node {path}")
+    } else if file.ends_with(".sql") {
+        format!("solution file: {path}")
+    } else {
+        return None;
+    };
+    Some(sanitize_display(&hint))
+}
+
+/// First lines of a synced file, capped so a long solution cannot
+/// take over the question pane.
+fn file_preview(path: &Path) -> Vec<String> {
+    const MAX_LINES: usize = 36;
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    if bytes.is_empty() || bytes.len() as u64 > MAX_SOLUTION_BYTES {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<String> = text.lines().take(MAX_LINES).map(sanitize_display).collect();
+    if text.lines().nth(MAX_LINES).is_some() {
+        lines.push("...".to_string());
+    }
+    lines
+}
+
 /// Reports local solution progress without modifying the file.
 pub fn solution_progress(alpha: &Path, index: usize, language: Language) -> SolutionProgress {
     let Some(path) = solution_path(alpha, index, language) else {

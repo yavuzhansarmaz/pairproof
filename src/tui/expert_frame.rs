@@ -30,6 +30,35 @@ pub(crate) struct FramePlan {
     pub(crate) preview_tick: usize,
 }
 
+/// True when this event scrolls the final breakdown. The loop paints
+/// after one of these so a burst of wheel or key-repeat events moves
+/// a row at a time.
+pub(crate) fn is_final_scroll_event(
+    screen: app::AppScreen,
+    event: &crossterm::event::Event,
+) -> bool {
+    if screen != app::AppScreen::Final {
+        return false;
+    }
+    use crossterm::event::{Event, KeyCode, MouseEventKind};
+    match event {
+        Event::Key(key) => matches!(
+            key.code,
+            KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::PageUp
+                | KeyCode::PageDown
+                | KeyCode::Home
+                | KeyCode::End
+        ),
+        Event::Mouse(mouse) => matches!(
+            mouse.kind,
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+        ),
+        _ => false,
+    }
+}
+
 /// Centring decision for one frame: intro screens sit centred, an
 /// open selection list expands to full area, overlays stay centred.
 fn frame_centered(
@@ -203,7 +232,12 @@ impl ExpertLoopState {
             && !self.show_disclosure
             && !loading
         {
-            let frame = viewport::final_frame(&lines, inner_height, self.final_scroll);
+            let frame = viewport::final_frame(
+                &lines,
+                inner_height,
+                self.final_scroll,
+                terminal_width as u16,
+            );
             self.final_scroll = frame.scroll;
             self.final_max_scroll = frame.max_scroll;
             self.final_page = frame.page;
@@ -278,8 +312,8 @@ impl ExpertLoopState {
                     && !self.is_loading() =>
             {
                 match mouse.kind {
-                    MouseEventKind::ScrollDown => self.scroll_final_by(3),
-                    MouseEventKind::ScrollUp => self.scroll_final_by(-3),
+                    MouseEventKind::ScrollDown => self.scroll_final_by(1),
+                    MouseEventKind::ScrollUp => self.scroll_final_by(-1),
                     _ => {}
                 }
                 None

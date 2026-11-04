@@ -1,5 +1,5 @@
 //! Coding loop: one core action, one coding step, workspace write, and a
-//! runnability check per candidate action. Tests run only on request.
+//! runnability check per candidate action. `t` writes tests; `r` runs them.
 //! Transports run on the real session, so the Phase 4 layer books usage
 //! and logs session events on it exactly once.
 
@@ -10,16 +10,18 @@ use crate::core::{ApproachChoice, CoreError, Language, Session};
 use crate::llm::coding::{run_coding_step, CodingStepInput, CodingStepOutput};
 use crate::llm::MetaClient;
 use crate::orchestration::pipeline::{
-    ApproachGenerator, PipelineError, PipelineFuture, QuestionPipeline, TestRunRecord,
+    ApproachGenerator, PipelineError, PipelineFuture, QuestionPipeline,
 };
 use crate::orchestration::session::Orchestrator;
 use crate::sandbox::validate::question_layout;
 use crate::sandbox::{
     check_runnability, read_file, run_tests, write_file, RunnabilityReport, SandboxHandle,
-    TestOutcome, WorkspacePath,
+    TestOutcome, WorkspacePath, RUN_TIMEOUT,
 };
 
 const SANDBOX_TIMEOUT: Duration = Duration::from_secs(30);
+const WRITE_TESTS_INSTRUCTION: &str =
+    "generate unit tests for the question examples and edge cases";
 
 /// Outcome of one coding step plus its runnability check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,7 +175,7 @@ impl SandboxIo for DockerSandboxIo {
     ) -> PipelineFuture<'a, TestOutcome> {
         Box::pin(async move {
             let path = solution_path(index, language)?;
-            run_tests(&self.handle, &self.user, &path, language, SANDBOX_TIMEOUT)
+            run_tests(&self.handle, &self.user, &path, language, RUN_TIMEOUT)
                 .await
                 .map_err(sandbox_err)
         })
@@ -281,26 +283,41 @@ impl QuestionPipeline {
         .await
     }
 
-    /// Records the test request exactly once, runs the sandbox test
-    /// wrapper, and stores the raw outcome verbatim. The raw outcome has
-    /// no passed or failed counts, so no counted core record is made.
+    /// Records a test request (extra score), then asks the coding agent
+    /// to write tests into the solution file. Does not execute them.
     pub async fn request_tests(
         &mut self,
         orch: &mut Orchestrator,
+        coding: &dyn CodingTransport,
         sandbox: &dyn SandboxIo,
         now_ms: u64,
-    ) -> Result<TestRunRecord, PipelineError> {
+    ) -> Result<CodingStepOutcome, PipelineError> {
         let index = orch.current_index().ok_or(CoreError::NoActiveQuestion)?;
-        let language = orch.session().language();
+        if self.submitted_slots.contains(&index) {
+            return Err(CoreError::InvalidState("question already submitted".into()).into());
+        }
         orch.request_tests(now_ms)?;
-        let outcome = sandbox.run_requested_tests(index, language).await?;
-        let record = TestRunRecord {
-            index,
-            at_ms: now_ms,
-            outcome,
-        };
-        self.test_records.push(record.clone());
-        Ok(record)
+        self.run_one_coding_step(
+            orch,
+            coding,
+            sandbox,
+            Some(WRITE_TESTS_INSTRUCTION.to_string()),
+            true,
+        )
+        .await
+    }
+
+    pub(crate) async fn refresh_code_from_sandbox(
+        &mut self,
+        index: usize,
+        language: Language,
+        sandbox: &dyn SandboxIo,
+    ) {
+        if let Ok(disk_code) = sandbox.read_solution(index, language).await {
+            if !disk_code.trim().is_empty() {
+                self.codes.insert(index, disk_code);
+            }
+        }
     }
 
     fn approach_text(&self, orch: &Orchestrator) -> String {
@@ -331,25 +348,34 @@ impl QuestionPipeline {
             return Err(CoreError::Terminal.into());
         }
         let index = orch.current_index().ok_or(CoreError::NoActiveQuestion)?;
+        if self.submitted_slots.contains(&index) {
+            return Err(CoreError::InvalidState("question already submitted".into()).into());
+        }
         let language = orch.session().language();
+        self.refresh_code_from_sandbox(index, language, sandbox)
+            .await;
+        if tests_requested {
+            self.tests_generated.insert(index);
+        }
+        let current_code = self
+            .codes
+            .get(&index)
+            .cloned()
+            .or_else(|| self.current_statement(orch).map(|f| f.starter_code))
+            .unwrap_or_default();
         let input = CodingStepInput {
             question_statement: self.statement_text(orch)?,
             approach_text: self.approach_text(orch),
-            current_code: self
-                .codes
-                .get(&index)
-                .cloned()
-                .or_else(|| self.current_statement(orch).map(|f| f.starter_code))
-                .unwrap_or_default(),
+            current_code,
             instruction,
-            tests_requested,
+            tests_requested: tests_requested || self.tests_generated.contains(&index),
             language,
         };
         let result = coding.coding_step(orch.session_mut(), &input).await;
         if orch.is_terminal() {
             return Err(CoreError::Terminal.into());
         }
-        if orch.current_index() != Some(index) {
+        if orch.current_index() != Some(index) || self.submitted_slots.contains(&index) {
             return Err(
                 CoreError::InvalidState("session changed during coding step".to_string()).into(),
             );
@@ -360,6 +386,7 @@ impl QuestionPipeline {
             .await?;
         let report = sandbox.check_runnable(index, language).await?;
         self.codes.insert(index, output.code.clone());
+        self.record_coding_run(index, &report);
         Ok(CodingStepOutcome {
             runnable: report.runnable,
             code: output.code,

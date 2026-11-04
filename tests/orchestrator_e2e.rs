@@ -249,20 +249,39 @@ async fn run_scripted(name: &str) -> Scripted {
             fut.await.expect("continue");
         }
         now += 10;
-        let fut = pipe.request_tests(&mut o, &sb, now);
-        let rec = fut.await.expect("tests");
-        assert_eq!(rec.outcome, raw_outcome());
-        assert_eq!(pipe.test_records().last(), Some(&rec));
+        let tests_before = sb.tests.load(Ordering::SeqCst);
+        let fut = pipe.request_tests(&mut o, &coding, &sb, now);
+        fut.await.expect("write tests");
+        assert_eq!(
+            sb.tests.load(Ordering::SeqCst),
+            tests_before,
+            "t writes tests, does not run them"
+        );
         assert!(o
             .session()
             .current_slot()
             .expect("slot")
             .latest_test
             .is_none());
+        now += 10;
+        let rec = pipe
+            .run_solution(&mut o, &sb, now)
+            .await
+            .expect("run tests");
+        assert_eq!(rec.outcome, raw_outcome());
+        assert_eq!(pipe.test_records().last(), Some(&rec));
+        let latest = o
+            .session()
+            .current_slot()
+            .expect("slot")
+            .latest_test
+            .map(|t| (t.passed, t.failed));
+        assert_eq!(latest, Some((0, 1)));
         let ev = o.session().events();
-        let mut iter = ev.iter();
-        let any_tc = iter.any(|e| matches!(e.kind, EventKind::TestRunCompleted { .. }));
-        assert!(!any_tc);
+        let any_tc = ev
+            .iter()
+            .any(|e| matches!(e.kind, EventKind::TestRunCompleted { .. }));
+        assert!(any_tc);
         if idx < 2 {
             let code = pipe.current_code(idx).unwrap_or("");
             let st = CS::from_session(o.session(), &f.statement, code);

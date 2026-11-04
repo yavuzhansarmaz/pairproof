@@ -110,6 +110,24 @@ impl CandidateView {
         .collect()
     }
 
+    /// Latest coding or execution summary recorded for this question view.
+    pub fn latest_run(&self) -> Option<crate::orchestration::control::SnapshotRun> {
+        crate::orchestration::control_snapshot::view_run_for(
+            self.question_index?,
+            self.question_title.as_deref()?,
+        )
+    }
+
+    /// Current code revision for this question (0 before generation).
+    pub fn code_revision(&self) -> u64 {
+        self.latest_run().map_or(0, |r| r.code_revision)
+    }
+
+    /// Current execution sequence for this question.
+    pub fn run_seq(&self) -> u64 {
+        self.latest_run().map_or(0, |r| r.seq)
+    }
+
     /// Status lines, with a local "writing the code" line while a
     /// submitted approach has not appeared in the snapshot yet.
     pub fn status_lines_with_pending(
@@ -130,6 +148,21 @@ impl CandidateView {
                 "selected approach: {}, writing the code",
                 pending.label()
             ));
+        }
+        lines
+    }
+
+    /// Status lines incorporating the active question flow phase.
+    pub fn status_lines_with_flow(
+        &self,
+        pending: Option<&crate::tui::candidate_stage::PendingApproach>,
+        flow: Option<&crate::tui::candidate_stage::QuestionFlowState>,
+    ) -> Vec<String> {
+        let mut lines = self.status_lines_with_pending(pending);
+        if let Some(label) = flow.and_then(|f| f.status_phase_label()) {
+            if let Some(phase_line) = lines.get_mut(2) {
+                *phase_line = sanitize_display(&format!("phase: {label}"));
+            }
         }
         lines
     }
@@ -257,7 +290,8 @@ impl CandidateView {
     }
 
     /// Coach pane as a conversation. `>` lines are the coach, drawn
-    /// on the left. `<` lines are the candidate: the text is drawn on
+    /// on the left, one sentence per line, with a blank line between
+    /// paragraphs. `<` lines are the candidate: the text is drawn on
     /// the right and the `<` sits at the right edge.
     /// A blank line separates turns. `sent` is what the candidate
     /// already submitted, in order, paired with each coach reply.
@@ -378,5 +412,98 @@ fn push_turn(lines: &mut Vec<String>, marker: &str, text: &str) {
     if !lines.is_empty() {
         lines.push(String::new());
     }
-    lines.push(format!("{marker} {clean}"));
+    if marker == ">" {
+        // A coach reply is one string, often one long paragraph.
+        // Break it into sentences and keep the model's own paragraph
+        // gaps, so the pane is not a single wrapped block.
+        lines.extend(coach_display_lines(&clean));
+    } else {
+        lines.push(format!("{marker} {clean}"));
+    }
+}
+
+/// Coach reply as `>` lines: one sentence each, blank line between
+/// paragraphs the model already separated.
+fn coach_display_lines(text: &str) -> Vec<String> {
+    let normalized = text.replace("\r\n", "\n");
+    let mut out = Vec::new();
+    let mut paragraph: Vec<&str> = Vec::new();
+    let mut started = false;
+    for line in normalized.split('\n') {
+        if line.trim().is_empty() {
+            if !paragraph.is_empty() {
+                push_coach_paragraph(&mut out, &paragraph, started);
+                started = true;
+                paragraph.clear();
+            }
+        } else {
+            paragraph.push(line);
+        }
+    }
+    if !paragraph.is_empty() {
+        push_coach_paragraph(&mut out, &paragraph, started);
+    }
+    out
+}
+
+fn push_coach_paragraph(out: &mut Vec<String>, lines: &[&str], gap_before: bool) {
+    let mut sentences = Vec::new();
+    for line in lines {
+        sentences.extend(split_sentences(line));
+    }
+    if sentences.is_empty() {
+        return;
+    }
+    if gap_before {
+        out.push(String::new());
+    }
+    for sentence in sentences {
+        out.push(format!("> {sentence}"));
+    }
+}
+
+/// Splits one line on sentence endings. A decimal (`3.14`) and a
+/// lowercase continuation (`e.g. the`) stay intact. A partial reply
+/// with no ending yet stays one piece.
+fn split_sentences(line: &str) -> Vec<String> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < chars.len() {
+        if matches!(chars[i], '.' | '?' | '!') {
+            let decimal = chars[i] == '.'
+                && i > 0
+                && chars[i - 1].is_ascii_digit()
+                && chars.get(i + 1).is_some_and(|c| c.is_ascii_digit());
+            if !decimal {
+                let mut end = i + 1;
+                while end < chars.len() && matches!(chars[end], '"' | '\'' | '”' | '’' | ')' | ']')
+                {
+                    end += 1;
+                }
+                let boundary = end >= chars.len() || chars[end].is_whitespace();
+                if boundary {
+                    let next = chars[end..].iter().find(|c| !c.is_whitespace()).copied();
+                    // A new sentence may start with a capital or a number
+                    // (`3.14` itself is not a boundary: both sides are digits).
+                    if next.is_none_or(|c| c.is_uppercase() || c.is_ascii_digit()) {
+                        let sentence: String = chars[start..end].iter().collect();
+                        let sentence = sentence.trim();
+                        if !sentence.is_empty() {
+                            parts.push(sentence.to_string());
+                        }
+                        start = end;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    let tail: String = chars[start..].iter().collect();
+    let tail = tail.trim();
+    if !tail.is_empty() {
+        parts.push(tail.to_string());
+    }
+    parts
 }

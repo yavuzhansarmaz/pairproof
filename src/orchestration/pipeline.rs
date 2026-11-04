@@ -2,7 +2,7 @@
 //! Hidden approach quality and expected tokens never leave this module
 //! except as the single locked value passed to the core at selection.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
@@ -11,6 +11,7 @@ use crate::core::{ApproachChoice, CoreError, Language};
 use crate::leetcode::{LeetCodeClient, Question};
 use crate::llm::approaches::{generate_approaches, grade_other_approach};
 use crate::llm::MetaClient;
+use crate::orchestration::control_snapshot::SnapshotRun;
 use crate::orchestration::error::OrchestratorError;
 use crate::orchestration::session::Orchestrator;
 use crate::sandbox::TestOutcome;
@@ -60,7 +61,7 @@ pub struct FetchedStatement {
     pub starter_code: String,
 }
 
-/// Raw sandbox test outcome stored verbatim; no counts are derived from it.
+/// Raw sandbox test-run outcome stored verbatim; counts are parsed at run time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestRunRecord {
     pub index: usize,
@@ -190,6 +191,11 @@ pub struct QuestionPipeline {
     pub(crate) statements: HashMap<String, FetchedStatement>,
     pub(crate) codes: HashMap<usize, String>,
     pub(crate) test_records: Vec<TestRunRecord>,
+    pub(crate) run_records: Vec<TestRunRecord>,
+    pub(crate) submitted_slots: BTreeSet<usize>,
+    pub(crate) tests_generated: BTreeSet<usize>,
+    pub(crate) code_revisions: BTreeMap<usize, u64>,
+    pub(crate) latest_runs: BTreeMap<usize, SnapshotRun>,
     pub(crate) chat_busy: AtomicBool,
     pub(crate) selected_qualities: BTreeMap<usize, Vec<ApproachQuality>>,
     pub(crate) other_grades: BTreeMap<usize, ApproachGrade>,
@@ -213,6 +219,11 @@ impl QuestionPipeline {
             statements: HashMap::new(),
             codes: HashMap::new(),
             test_records: Vec::new(),
+            run_records: Vec::new(),
+            submitted_slots: BTreeSet::new(),
+            tests_generated: BTreeSet::new(),
+            code_revisions: BTreeMap::new(),
+            latest_runs: BTreeMap::new(),
             chat_busy: AtomicBool::new(false),
             selected_qualities: BTreeMap::new(),
             other_grades: BTreeMap::new(),
@@ -367,9 +378,9 @@ impl QuestionPipeline {
         self.codes.get(&index).map(String::as_str)
     }
 
-    /// Explicit counted path: records genuinely parsed passed and failed
-    /// counts through the core exactly once. Raw sandbox outcomes carry
-    /// no counts and never take this path implicitly.
+    /// Records parsed passed and failed counts through the core exactly
+    /// once. [`Self::run_solution`] takes this path after parsing the
+    /// sandbox output.
     pub fn record_counted_test_result(
         &self,
         orch: &mut Orchestrator,

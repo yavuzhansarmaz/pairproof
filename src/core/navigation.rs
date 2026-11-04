@@ -1,19 +1,15 @@
-//! Free question navigation for a live session: switching the
-//! active question in either direction, reopening finished or
-//! skipped questions with their recorded work intact.
+//! Question navigation for a live session: switching the active
+//! question among unsubmitted slots while keeping finished slots locked.
 
 use crate::core::events::EventKind;
 use crate::core::session::{Session, R};
-use crate::core::types::QuestionStatus::{Active, Pending};
+use crate::core::types::QuestionStatus::{Active, Finished, Pending};
 use crate::core::types::SessionStatus;
 use crate::core::types::{ensure, CoreError};
 
 impl Session {
-    /// Switches the active question to the slot with `target` index.
-    /// The question left behind returns to Pending with its approach,
-    /// tokens, and code progress untouched; a finished or skipped
-    /// target reopens (its finish time is cleared, so it is graded
-    /// only if finished again). Switching is free in both directions.
+    /// Switches the active question to `target` if it has not been finished.
+    /// Finished questions are permanently submitted and cannot be reopened.
     pub fn navigate_to(&mut self, target: usize, at_ms: u64) -> R {
         self.ensure_not_terminal()?;
         self.ensure_connected()?;
@@ -29,6 +25,10 @@ impl Session {
         let Some(tp) = self.slots.iter().position(|s| s.index == target) else {
             return Err(CoreError::NoActiveQuestion);
         };
+        ensure(
+            self.slots[tp].status != Finished,
+            self.bad_state("navigate_to finished question"),
+        )?;
         if self.active_pos() == Some(tp) {
             return Ok(());
         }

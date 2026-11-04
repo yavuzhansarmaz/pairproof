@@ -165,7 +165,7 @@ async fn flow(
             .await
             .map_err(|e| e.to_string())?;
         let _ = candidate.poll_snapshot();
-        if candidate.view().question_index == Some(1) {
+        if candidate.view().question_index == Some(0) && candidate.view().selected.is_some() {
             break;
         }
         chk(Instant::now() < deadline, "SelectPreset never applied")?;

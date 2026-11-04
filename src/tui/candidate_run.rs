@@ -18,7 +18,8 @@ use crate::tui::candidate_work::{work_lines, CandidateWork};
 use crate::tui::help::{candidate_help_lines_for, candidate_is_typing};
 pub use crate::tui::shared::now_ms;
 
-/// Focus pane while solving; Tab cycles Work, Other, Redirect, Chat.
+/// Focus while solving. Work, Other, and Redirect are the question
+/// panel. Chat is the coach panel. Tab switches those two panels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CandidateFocus {
     #[default]
@@ -35,12 +36,10 @@ pub enum WorkKeyAction {
     SelectPreset(u8),
     OpenOther,
     Continue,
-    OpenRedirect,
     ChangeApproach,
+    RunSolution,
     RequestTests,
     Finish,
-    Skip,
-    RequestReQuestion,
 }
 
 /// Classifies a typed work-pane character; `None` is not a work key.
@@ -49,23 +48,23 @@ pub fn work_key_action(c: char) -> Option<WorkKeyAction> {
         '1'..='4' => Some(WorkKeyAction::SelectPreset(c as u8 - b'1')),
         '5' | 'o' => Some(WorkKeyAction::OpenOther),
         'c' => Some(WorkKeyAction::Continue),
-        'd' => Some(WorkKeyAction::OpenRedirect),
         'a' => Some(WorkKeyAction::ChangeApproach),
+        'r' => Some(WorkKeyAction::RunSolution),
         't' => Some(WorkKeyAction::RequestTests),
         'f' => Some(WorkKeyAction::Finish),
-        's' => Some(WorkKeyAction::Skip),
-        'r' => Some(WorkKeyAction::RequestReQuestion),
         _ => None,
     }
 }
 
-/// Next pane in the Tab cycle: Work, Other, Redirect, Chat, Work.
+/// Tab switches panels. The approach field and additional notes stay
+/// on the question side, so Tab from either one opens the coach.
+/// Tab from the coach returns to the approach list.
 pub fn next_focus(focus: CandidateFocus) -> CandidateFocus {
     match focus {
-        CandidateFocus::Work => CandidateFocus::Other,
-        CandidateFocus::Other => CandidateFocus::Redirect,
-        CandidateFocus::Redirect => CandidateFocus::Chat,
         CandidateFocus::Chat => CandidateFocus::Work,
+        CandidateFocus::Work | CandidateFocus::Other | CandidateFocus::Redirect => {
+            CandidateFocus::Chat
+        }
     }
 }
 
@@ -159,24 +158,17 @@ fn handle_work_key(state: &mut CandidateRunState, key: KeyEvent, control: bool) 
                 });
             }
             Some(WorkKeyAction::OpenOther) => state.focus = CandidateFocus::Other,
-            Some(WorkKeyAction::Continue) => state.with_session(|work, session| {
-                let _ = work.continue_work(session, &mut UnavailableCodingRunner, now_ms());
-            }),
-            Some(WorkKeyAction::OpenRedirect) => state.focus = CandidateFocus::Redirect,
+            Some(WorkKeyAction::Continue) => state.focus = CandidateFocus::Redirect,
             Some(WorkKeyAction::ChangeApproach) => state.with_session(|work, session| {
                 let _ = work.change_approach(session, now_ms());
             }),
-            Some(WorkKeyAction::RequestTests) => state.with_session(|work, session| {
-                let _ = work.request_tests(session, &mut UnavailableTestRunner, now_ms());
-            }),
+            Some(WorkKeyAction::RunSolution | WorkKeyAction::RequestTests) => {
+                state.with_session(|work, session| {
+                    let _ = work.request_tests(session, &mut UnavailableTestRunner, now_ms());
+                })
+            }
             Some(WorkKeyAction::Finish) => state.with_session(|work, session| {
                 let _ = work.finish_question(session, now_ms());
-            }),
-            Some(WorkKeyAction::Skip) => state.with_session(|work, session| {
-                let _ = work.skip_question(session, now_ms());
-            }),
-            Some(WorkKeyAction::RequestReQuestion) => state.with_session(|work, session| {
-                let _ = work.request_requestion(session, now_ms());
             }),
             None => {}
         },
@@ -217,8 +209,13 @@ fn handle_redirect_key(state: &mut CandidateRunState, key: KeyEvent, control: bo
     match key.code {
         K::Tab => state.focus = next_focus(state.focus),
         K::Enter => {
+            let empty = state.work.redirect_text().trim().is_empty();
             state.with_session(|work, session| {
-                let _ = work.redirect(session, &mut UnavailableCodingRunner, now_ms());
+                if empty {
+                    let _ = work.continue_work(session, &mut UnavailableCodingRunner, now_ms());
+                } else {
+                    let _ = work.redirect(session, &mut UnavailableCodingRunner, now_ms());
+                }
             });
             if state.work.redirect_text().is_empty() {
                 state.focus = CandidateFocus::Work;

@@ -74,14 +74,10 @@ pub fn pane_click_target(column: u16, width: u16, pct: u16) -> PaneSide {
 /// Focus after clicking a panel. A click anywhere on a pane
 /// selects it; the divider column still starts a resize drag
 /// instead (handled by the caller checking `divider_hit` first).
-/// Coach selects Chat; Question selects Work only when leaving
-/// Chat, otherwise the current sub-focus (Work/Other/Redirect)
-/// is kept so typed text and its pane stay intact. This is the
-/// single panel-switch transition used by mouse; Tab keeps the
-/// existing `next_focus` cycle. Both routes cross panels through
-/// the same Work<->Chat boundary: Tab from Chat lands on Work and
-/// the cycle reaches Chat from the question sub-focuses, while a
-/// panel click jumps directly across that same boundary.
+/// Coach selects Chat. Question selects Work only when leaving
+/// Chat, so an open approach field or additional notes stay put.
+/// Tab from any question-side focus opens the coach, and Tab from
+/// the coach returns to the approach list.
 pub fn focus_for_pane(focus: CandidateFocus, side: PaneSide) -> CandidateFocus {
     match side {
         PaneSide::Coach => CandidateFocus::Chat,
@@ -132,6 +128,26 @@ pub fn connect_submit_shows_loading(
     show_help: bool,
 ) -> bool {
     screen == CandidateScreen::Connect && input_len > 0 && !show_help
+}
+
+/// True after accepting the rules (`live == true`) while the first
+/// question statement and approach options have not arrived yet.
+pub fn live_waiting_for_question(
+    live: bool,
+    show_help: bool,
+    connection_lost: bool,
+    view: Option<&CandidateView>,
+) -> bool {
+    live && !show_help
+        && !connection_lost
+        && view.is_none_or(|v| {
+            v.waiting_for_statement()
+                || (v.options.is_empty()
+                    && v.selected.is_none()
+                    && !v.is_terminal()
+                    && v.final_breakdown.is_none()
+                    && !v.recovery.as_ref().is_some_and(|r| r.technical_failure))
+        })
 }
 
 /// Question-pane percent for a drag to `column`, clamped so both
@@ -190,8 +206,17 @@ pub(crate) fn live_panes(
     view: &CandidateView,
     connection_lost: bool,
     status: &Option<String>,
+    workspace: Option<&std::path::Path>,
 ) -> (Vec<String>, Vec<String>) {
     let mut left = view.question_lines_staged(state.staging.current_stage());
+    if let (Some(root), Some(index)) = (workspace, view.question_index) {
+        let latest_run = view.latest_run();
+        left.extend(crate::tui::candidate_sync::workspace_preview_with_run(
+            root,
+            index,
+            latest_run.as_ref(),
+        ));
+    }
     if connection_lost {
         left.push(CONNECTION_LOST.to_string());
         left.push("press R to reconnect with a fresh string.".to_string());
@@ -228,7 +253,7 @@ fn composer_lines(state: &CandidateRunState) -> Vec<String> {
         }
         CandidateFocus::Redirect => {
             vec![sanitize_display(&format!(
-                "additional notes: {}",
+                "instructions: {}",
                 state.work.redirect_text()
             ))]
         }
@@ -242,7 +267,7 @@ fn composer_lines(state: &CandidateRunState) -> Vec<String> {
             }
             if !state.work.redirect_text().is_empty() {
                 lines.push(sanitize_display(&format!(
-                    "additional notes: {}",
+                    "instructions: {}",
                     state.work.redirect_text()
                 )));
             }
@@ -270,6 +295,11 @@ pub fn question_pinned_count(lines: &[String]) -> usize {
 /// What the question pane says while code is being written, and
 /// once that code has landed in the question folder.
 fn work_banner(state: &CandidateRunState, view: &CandidateView) -> Option<String> {
+    if let Some(index) = view.question_index {
+        if let Some(banner) = state.staging.flow_for(index).banner_text(index) {
+            return Some(banner);
+        }
+    }
     if let Some(pending) = &state.pending_approach {
         if view.question_index == Some(pending.index)
             && view.selected.as_ref() != Some(&pending.selection)
@@ -303,18 +333,28 @@ fn question_hint(state: &CandidateRunState, option_count: usize) -> String {
     // it and colours the key names like the other screens.
     match state.focus {
         CandidateFocus::Other => {
-            "focus: enter submit, backspace delete, tab next, esc quit".to_string()
+            "focus: enter submit, backspace delete, tab panel, esc quit".to_string()
         }
         CandidateFocus::Redirect => {
-            "focus: enter send, backspace delete, tab next, esc quit".to_string()
+            "focus: enter send, empty enter back, backspace delete, tab panel, esc quit".to_string()
         }
         CandidateFocus::Chat => {
             "focus: enter send, backspace delete, up/down scroll, tab panel, esc quit".to_string()
         }
-        _ if cursor_on_other(state, option_count) => {
-            "focus: enter submit, backspace delete, tab next, esc quit".to_string()
+        _ if state.staging.current_flow().is_busy() => {
+            "focus: working, tab panel, ? help, esc quit".to_string()
         }
-        _ => "focus: up/down move, enter submit, left/right question, tab panel, esc quit"
-            .to_string(),
+        _ if cursor_on_other(state, option_count) => {
+            "focus: enter submit, backspace delete, tab panel, esc quit".to_string()
+        }
+        _ if state.after_code.as_ref().is_some_and(|(index, _)| {
+            state.staging.current_index() == Some(*index)
+        }) || state.staging.current_flow()
+            == crate::tui::candidate_stage::QuestionFlowState::SolutionReady =>
+        {
+            "focus: c continue, r run, t write tests, a change approach, f submit, tab panel, esc quit"
+                .to_string()
+        }
+        _ => "focus: up/down move, space select, enter submit, tab panel, esc quit".to_string(),
     }
 }

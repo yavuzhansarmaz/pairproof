@@ -84,7 +84,7 @@ pub fn panel_area(area: Rect, lines: &[String], centered: bool) -> Rect {
 }
 
 /// Splits a line into spans, colouring standalone key tokens:
-/// `enter`, `space` (in `space choose`/`space select` hints),
+/// `enter`, `backspace` (pastel purple), `space` (in `space choose`/`space select` hints),
 /// `[PASS]` and the disclosure `d` pastel green,
 /// `b`, `m`, `up/down`, `left/right`, `tab`, and the monitor
 /// `e` (end) / `c` (reissue) keys pastel navy,
@@ -105,6 +105,7 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
         let is_pass =
             text[i..].starts_with("[PASS]") && (i == 0 || bytes[i - 1] == b' ') && next_ok(i + 6);
         let is_enter = text[i..].starts_with("enter") && prev_ok(i) && next_ok(i + 5);
+        let is_backspace = text[i..].starts_with("backspace") && prev_ok(i) && next_ok(i + 9);
         let is_esc = text[i..].starts_with("esc")
             && prev_ok(i)
             && (i + 3 == bytes.len() || matches!(bytes[i + 3], b' ' | b','));
@@ -124,6 +125,11 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
         let is_end_key =
             (text[i..].starts_with("e end") || text[i..].starts_with("e to end")) && prev_ok(i);
         let is_reissue_key = text[i..].starts_with("c reissue") && prev_ok(i);
+        let is_continue_key = text[i..].starts_with("c continue") && prev_ok(i);
+        let is_run_key = text[i..].starts_with("r run") && prev_ok(i);
+        let is_test_key = text[i..].starts_with("t write tests") && prev_ok(i);
+        let is_change_key = text[i..].starts_with("a change approach") && prev_ok(i);
+        let is_submit_key = text[i..].starts_with("f submit") && prev_ok(i);
         let is_help = bytes[i] == b'?'
             && i > 0
             && bytes[i - 1] == b' '
@@ -132,6 +138,7 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
         if is_copy
             || is_pass
             || is_enter
+            || is_backspace
             || is_esc
             || is_back
             || is_meta
@@ -143,6 +150,11 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
             || is_random
             || is_end_key
             || is_reissue_key
+            || is_continue_key
+            || is_run_key
+            || is_test_key
+            || is_change_key
+            || is_submit_key
             || is_help
         {
             if raw_start < i {
@@ -154,6 +166,8 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
                 ("[PASS]", ENTER_KEY_COLOR, 6)
             } else if is_enter {
                 ("enter", ENTER_KEY_COLOR, 5)
+            } else if is_backspace {
+                ("backspace", PROOF_COLOR, 9)
             } else if is_esc {
                 ("esc", ESC_KEY_COLOR, 3)
             } else if is_back {
@@ -174,8 +188,16 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
                 ("r", HELP_KEY_COLOR, 1)
             } else if is_end_key {
                 ("e", PAIR_COLOR, 1)
-            } else if is_reissue_key {
+            } else if is_reissue_key || is_continue_key {
                 ("c", PAIR_COLOR, 1)
+            } else if is_run_key {
+                ("r", PAIR_COLOR, 1)
+            } else if is_test_key {
+                ("t", PAIR_COLOR, 1)
+            } else if is_change_key {
+                ("a", PAIR_COLOR, 1)
+            } else if is_submit_key {
+                ("f", ENTER_KEY_COLOR, 1)
             } else {
                 ("?", HELP_KEY_COLOR, 1)
             };

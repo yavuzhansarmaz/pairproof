@@ -47,6 +47,42 @@ pub fn mutagen_version() -> Result<CommandSpec, SyncError> {
     Ok(CommandSpec::new("mutagen", ["version"]))
 }
 
+/// Ignore flags so a candidate launching from a git/build tree does
+/// not two-way-sync `target/`, VCS, or other project files into the
+/// interview workspace. Only `qN/` question folders are synchronized.
+pub const SYNC_IGNORE_ARGS: &[&str] = &[
+    "--ignore-vcs",
+    "--ignore",
+    "/*",
+    "--ignore",
+    "!/q*/",
+    "--ignore",
+    "!/q*/**",
+    "--ignore",
+    "target/",
+    "--ignore",
+    "node_modules/",
+];
+
+/// Argv for `mutagen sync create` (without the program name).
+pub fn sync_create_args(name: &str, alpha: &str, beta: &str) -> Vec<String> {
+    let mut args = vec![
+        "sync".to_string(),
+        "create".to_string(),
+        "--name".to_string(),
+        name.to_string(),
+        "--mode".to_string(),
+        // Resolved discards one conflicting version with conflicts=0; safe keeps both and reports.
+        "two-way-safe".to_string(),
+        "--symlink-mode".to_string(),
+        "ignore".to_string(),
+    ];
+    args.extend(SYNC_IGNORE_ARGS.iter().map(|s| (*s).to_string()));
+    args.push(alpha.to_string());
+    args.push(beta.to_string());
+    args
+}
+
 /// Builds the sync creation command with endpoints as single argv items.
 pub fn sync_create(
     session_id: &str,
@@ -59,19 +95,7 @@ pub fn sync_create(
     let beta = beta_url(endpoint, user);
     Ok(CommandSpec::new(
         "mutagen",
-        [
-            "sync",
-            "create",
-            "--name",
-            &name,
-            "--mode",
-            // Resolved discards one conflicting version with conflicts=0; safe keeps both and reports.
-            "two-way-safe",
-            "--symlink-mode",
-            "ignore",
-            alpha,
-            &beta,
-        ],
+        sync_create_args(&name, alpha, &beta),
     ))
 }
 
@@ -297,5 +321,24 @@ mod tests {
             assert_eq!(describe_status(raw, true), "[Paused]", "paused {raw}");
         }
         assert_eq!(describe_status("SomeFutureState", false), "SomeFutureState");
+    }
+
+    #[test]
+    fn create_args_ignore_project_tree_and_keep_question_folders() {
+        let args = sync_create_args(
+            "pairproof-sync-s1",
+            "/home/candidate/session-s1",
+            "pp-abcd1234@203.0.113.10:2222:/workspace",
+        );
+        assert!(args.contains(&"--ignore-vcs".to_string()));
+        assert!(args.windows(2).any(|w| w == ["--ignore", "/*"]));
+        assert!(args.windows(2).any(|w| w == ["--ignore", "!/q*/"]));
+        assert!(args.windows(2).any(|w| w == ["--ignore", "!/q*/**"]));
+        assert!(args.windows(2).any(|w| w == ["--ignore", "target/"]));
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("pp-abcd1234@203.0.113.10:2222:/workspace")
+        );
+        assert!(args.contains(&"/home/candidate/session-s1".to_string()));
     }
 }

@@ -183,12 +183,12 @@ fn solving_keys_dispatch_with_unavailable_runners_honestly() {
     let mut state = solving_state(started());
     assert_eq!(state.app.screen(), CandidateScreen::Solving);
     assert_eq!(state.focus, CandidateFocus::Work);
-    handle_candidate_key(&mut state, key(KeyCode::Char('s')));
+    handle_candidate_key(&mut state, key(KeyCode::Char('f')));
     {
         let session = state.app.session().expect("session");
         assert_eq!(
             session.slot(0).expect("slot").status,
-            QuestionStatus::Skipped
+            QuestionStatus::Finished
         );
         assert_eq!(session.current_index(), Some(1));
     }
@@ -204,9 +204,7 @@ fn solving_keys_dispatch_with_unavailable_runners_honestly() {
     }
     let lines = candidate_screen_lines(&state).join("\n");
     assert!(lines.contains("tests are not available yet"), "{lines}");
-    for _ in 0..3 {
-        handle_candidate_key(&mut state, key(KeyCode::Tab));
-    }
+    handle_candidate_key(&mut state, key(KeyCode::Tab));
     assert_eq!(state.focus, CandidateFocus::Chat);
     handle_candidate_key(&mut state, key(KeyCode::Char('h')));
     handle_candidate_key(&mut state, key(KeyCode::Char('i')));

@@ -63,15 +63,14 @@ fn right_lines(count: usize) -> Vec<String> {
 
 #[test]
 fn tab_switches_question_and_coach_panels() {
+    assert_eq!(next_focus(CandidateFocus::Work), CandidateFocus::Chat);
+    assert_eq!(next_focus(CandidateFocus::Other), CandidateFocus::Chat);
+    assert_eq!(next_focus(CandidateFocus::Redirect), CandidateFocus::Chat);
     assert_eq!(next_focus(CandidateFocus::Chat), CandidateFocus::Work);
-    let mut focus = CandidateFocus::Work;
-    let mut reached = Vec::new();
-    for _ in 0..4 {
-        focus = next_focus(focus);
-        reached.push(focus);
-    }
-    assert!(reached.contains(&CandidateFocus::Chat));
-    assert_eq!(focus, CandidateFocus::Work);
+    assert_eq!(
+        next_focus(next_focus(CandidateFocus::Work)),
+        CandidateFocus::Work
+    );
 }
 
 #[test]
@@ -107,12 +106,9 @@ fn mouse_and_keyboard_share_panel_transition() {
         focus_for_pane(CandidateFocus::Work, PaneSide::Coach),
         CandidateFocus::Chat
     );
-    // Tab cycle from Work reaches the same coach panel destination.
-    let mut focus = CandidateFocus::Work;
-    for _ in 0..3 {
-        focus = next_focus(focus);
-    }
-    assert_eq!(focus, CandidateFocus::Chat);
+    assert_eq!(next_focus(CandidateFocus::Work), CandidateFocus::Chat);
+    assert_eq!(next_focus(CandidateFocus::Other), CandidateFocus::Chat);
+    assert_eq!(next_focus(CandidateFocus::Redirect), CandidateFocus::Chat);
     assert_eq!(
         focus_for_pane(CandidateFocus::Chat, PaneSide::Question),
         next_focus(CandidateFocus::Chat)

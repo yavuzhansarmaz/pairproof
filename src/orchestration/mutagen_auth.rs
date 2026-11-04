@@ -58,6 +58,7 @@ pub fn scp_wrapper_script(session: &AskpassSession, real_scp: &Path, ssh_wrapper
 }
 
 /// Isolated environment for one Mutagen invocation set.
+#[derive(Clone)]
 pub struct MutagenAuthEnv {
     data_dir: PathBuf,
     bin_dir: PathBuf,
@@ -142,7 +143,7 @@ impl MutagenAuthEnv {
 
     /// Starts the looping password feeder bound to this environment's FIFO.
     pub fn start_password_feeder(&self, secret: &Secret) -> PasswordFeeder {
-        start_password_feeder_at(&self.fifo, secret, Duration::from_secs(600))
+        start_password_feeder_at(&self.fifo, secret, Duration::from_secs(7200))
     }
 
     /// Starts the looping feeder with an explicit overall deadline.

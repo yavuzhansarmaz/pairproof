@@ -9,7 +9,7 @@ use pairproof::leetcode::Difficulty;
 use pairproof::llm::coding::{CodingStepInput, CodingStepOutput};
 use pairproof::llm::extraction::ExtractionResult;
 use pairproof::llm::Message;
-use pairproof::orchestration::control::{final_ack_bytes, FinalAckOutcome};
+use pairproof::orchestration::control::{final_ack_bytes, heartbeat_bytes, FinalAckOutcome};
 use pairproof::orchestration::*;
 use pairproof::sandbox::{RunnabilityReport, TestOutcome};
 use pairproof::scoring::{ApproachGrade, ApproachQuality, ApproachSet};
@@ -118,6 +118,8 @@ fn write_hello_version(control: &std::path::Path, session_id: &str, version: &st
 #[rustfmt::skip]
 fn write_ack(control: &std::path::Path, session_id: &str) { std::fs::write(control.join("inbox").join("final-ack.json"), final_ack_bytes(session_id)).unwrap(); }
 #[rustfmt::skip]
+fn write_heartbeat(control: &std::path::Path, session_id: &str, at_ms: u64) { std::fs::write(control.join("inbox").join("heartbeat.json"), heartbeat_bytes(session_id, at_ms)).unwrap(); }
+#[rustfmt::skip]
 fn write_ack_raw(control: &std::path::Path, bytes: &[u8]) { std::fs::write(control.join("inbox").join("final-ack.json"), bytes).unwrap(); }
 #[rustfmt::skip]
 fn connected_events(runtime: &ExpertRuntime) -> usize {
@@ -166,6 +168,54 @@ async fn expert_runtime_drains_intents_and_publishes_snapshot() {
     let bytes = std::fs::read(control.join(SNAPSHOT_REL)).unwrap();
     let snapshot = parse_snapshot(&bytes, "s1").unwrap();
     assert_eq!(snapshot.current.as_ref().map(|c| c.index), Some(1));
+}
+
+#[tokio::test]
+#[rustfmt::skip]
+async fn expert_publishes_coding_snapshot_after_a_test_run() {
+    fn push_intent(control: &std::path::Path, seq: u64, kind: IntentKind) {
+        let intent = Intent::new("s1", seq, kind);
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(control.join(INTENT_REL)).unwrap();
+        file.write_all(format!("{}\n", intent.to_line().unwrap()).as_bytes()).unwrap();
+    }
+    let (_root, control, mut runtime) = make_runtime("publish-after-run", false).await;
+    write_hello(&control, "s1");
+    assert_eq!(runtime.poll_candidate(T0 + 1_000).await, PollOutcome::Connected);
+    for _ in 0..50 {
+        runtime.drain_intents(T0 + 2_000).await.unwrap();
+        let snap = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+        if snap.options.len() == 4 { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    push_intent(&control, 1, IntentKind::SelectPreset { preset: 0 });
+    runtime.drain_intents(T0 + 3_000).await.unwrap();
+    let after_code = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    let code_rev = after_code.code_revision();
+    assert!(code_rev > 0, "select must publish a coding run");
+    push_intent(&control, 2, IntentKind::RunSolution);
+    runtime.drain_intents(T0 + 4_000).await.unwrap();
+    let after_run = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    assert_eq!(after_run.latest_test, None, "a run with no tests must not look like 1 passed");
+    assert_eq!(after_run.code_revision(), code_rev);
+    push_intent(&control, 3, IntentKind::RequestTests);
+    runtime.drain_intents(T0 + 5_000).await.unwrap();
+    let after_tests = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    assert!(
+        after_tests.code_revision() > code_rev,
+        "t after r must publish the new code revision, got {} then {}",
+        code_rev,
+        after_tests.code_revision()
+    );
+    let tests_rev = after_tests.code_revision();
+    push_intent(&control, 4, IntentKind::Continue);
+    runtime.drain_intents(T0 + 6_000).await.unwrap();
+    let after_continue = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    assert!(
+        after_continue.code_revision() > tests_rev,
+        "continue after tests must publish the new code revision, got {} then {}",
+        tests_rev,
+        after_continue.code_revision()
+    );
 }
 
 #[tokio::test] #[rustfmt::skip]
@@ -344,6 +394,27 @@ async fn expert_proceeds_after_ack_timeout() {
 
 #[tokio::test]
 #[rustfmt::skip]
+async fn end_session_does_not_wait_full_ack_when_disconnected() {
+    let (_root, control, mut runtime) = make_runtime("end-disconnected", false).await;
+    write_hello(&control, "s1");
+    assert_eq!(runtime.poll_candidate(T0 + 1_000).await, PollOutcome::Connected);
+    runtime.set_heartbeat_timeout(1_000);
+    write_heartbeat(&control, "s1", T0 + 1_500);
+    runtime.drain_intents(T0 + 1_800).await.unwrap();
+    write_heartbeat(&control, "s1", T0 + 1_500);
+    runtime.drain_intents(T0 + 2_900).await.unwrap();
+    assert!(runtime.is_disconnected());
+    let started = std::time::Instant::now();
+    runtime.end_session(T0 + 4_000).await.unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(15),
+        "disconnected end must not wait the live ack window, elapsed {:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test]
+#[rustfmt::skip]
 async fn wrong_session_ack_is_ignored() {
     let (_r1, control1, mut rt1) = make_runtime("ack-wrong1", false).await;
     write_hello(&control1, "s1"); assert_eq!(rt1.poll_candidate(T0 + 1_000).await, PollOutcome::Connected); write_ack(&control1, "other-session");
@@ -434,9 +505,15 @@ async fn expert_scored_session_shows_approach_lines_and_rating() {
     // Preset 1 is the fake set's Best option ("Hash map").
     push_intent(&control, 1, IntentKind::SelectPreset { preset: 1 });
     runtime.drain_intents(T0 + 3_000).await.unwrap();
-    // A clean run finishes the question and opens the next one.
+    // A clean run writes the code and stays on this question.
+    assert_eq!(runtime.orchestrator().current_index(), Some(0));
+    let open = runtime.monitor_view(T0 + 3_000);
+    assert!(open.rating_lines.iter().any(|l| l.contains("approach") && l.contains("Best")), "open lines: {:?}", open.rating_lines);
+    // Finish is what opens the next one and locks the approach score.
+    push_intent(&control, 2, IntentKind::Finish);
+    runtime.drain_intents(T0 + 4_000).await.unwrap();
     assert_eq!(runtime.orchestrator().current_index(), Some(1));
-    let done = runtime.monitor_view(T0 + 3_000);
+    let done = runtime.monitor_view(T0 + 4_000);
     assert!(done.rating_lines.iter().any(|l| l.contains("approach") && l.contains("Best")), "finished lines: {:?}", done.rating_lines);
     let finished = 6.0 + 0.25 * pairproof::scoring::POSITIVE_GAIN_SCALE;
     assert!((done.rating - finished).abs() < 1e-9, "finished rating: {}", done.rating);

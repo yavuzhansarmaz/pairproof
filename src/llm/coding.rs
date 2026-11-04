@@ -36,12 +36,18 @@ struct CodingStepWire {
 pub fn build_coding_messages(input: &CodingStepInput) -> Vec<Message> {
     let tests_directive = if input.tests_requested {
         concat!(
-            "Include a small self-test in the same file: asserts under a main ",
-            "guard (or the language equivalent) that test the examples from ",
-            "the question and a few edge cases."
+            "Include a small self-test in the same file under a main guard ",
+            "(or the language equivalent). Each case calls the solution with ",
+            "hardcoded examples from the question and a few edge cases, then ",
+            "asserts the return value equals the expected result. ",
+            "Do not read stdin or prompt for input. Print one line per case, ",
+            "and finish with exactly: TESTS: <passed> passed, <failed> failed"
         )
     } else {
-        "Include no test code: write only the solution itself."
+        concat!(
+            "Include no test code: write only the solution itself. ",
+            "Do not read stdin, prompt for input, or wait on the console."
+        )
     };
     let system = format!(
         concat!(

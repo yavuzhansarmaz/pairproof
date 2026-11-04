@@ -65,10 +65,116 @@ impl QuestionStage {
     }
 }
 
+/// Explicit lifecycle state of one question on the candidate side.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum QuestionFlowState {
+    #[default]
+    AwaitingApproach,
+    GeneratingInitialSolution {
+        selection: SnapshotSelection,
+        base_revision: u64,
+    },
+    SyncingWorkspace {
+        selection: SnapshotSelection,
+        target_revision: u64,
+    },
+    SolutionReady,
+    ContinuingInteraction,
+    UpdatingSolution {
+        instruction: Option<String>,
+        base_revision: u64,
+    },
+    UpdatingTests {
+        instruction: String,
+        base_revision: u64,
+    },
+    RunningSolution {
+        base_seq: u64,
+    },
+    RunningTests {
+        base_seq: u64,
+    },
+    Submitting,
+    Submitted,
+}
+
+impl QuestionFlowState {
+    /// True while an async coding, sync, execution, or submit step is running.
+    pub fn is_busy(&self) -> bool {
+        matches!(
+            self,
+            Self::GeneratingInitialSolution { .. }
+                | Self::SyncingWorkspace { .. }
+                | Self::UpdatingSolution { .. }
+                | Self::UpdatingTests { .. }
+                | Self::RunningSolution { .. }
+                | Self::RunningTests { .. }
+                | Self::Submitting
+        )
+    }
+
+    /// True while the question is submitting or already permanently submitted.
+    pub fn is_submitted_or_submitting(&self) -> bool {
+        matches!(self, Self::Submitting | Self::Submitted)
+    }
+
+    /// Candidate-safe phase description for the status box, if active.
+    pub fn status_phase_label(&self) -> Option<&'static str> {
+        match self {
+            Self::AwaitingApproach => None,
+            Self::GeneratingInitialSolution { .. } => Some("generating initial solution"),
+            Self::SyncingWorkspace { .. } => Some("syncing solution to workspace"),
+            Self::SolutionReady => Some("solution ready"),
+            Self::ContinuingInteraction => Some("continuing with agent"),
+            Self::UpdatingSolution { .. } => Some("updating solution"),
+            Self::UpdatingTests { .. } => Some("updating tests"),
+            Self::RunningSolution { .. } => Some("running tests"),
+            Self::RunningTests { .. } => Some("running tests"),
+            Self::Submitting => Some("submitting question"),
+            Self::Submitted => Some("submitted"),
+        }
+    }
+
+    /// Pinned banner line for the question pane while work is in progress.
+    pub fn banner_text(&self, index: usize) -> Option<String> {
+        let n = index + 1;
+        match self {
+            Self::GeneratingInitialSolution { selection, .. } => {
+                let pending = PendingApproach {
+                    index,
+                    selection: selection.clone(),
+                };
+                Some(format!(
+                    "working: writing {}. this takes a moment",
+                    pending.label()
+                ))
+            }
+            Self::SyncingWorkspace { .. } => Some(format!(
+                "working: syncing q{n}/solution to workspace. this takes a moment"
+            )),
+            Self::ContinuingInteraction => {
+                Some("ready: type instructions, then enter. empty enter goes back.".to_string())
+            }
+            Self::UpdatingSolution { .. } => Some(format!(
+                "working: updating solution in q{n}/. this takes a moment"
+            )),
+            Self::UpdatingTests { .. } => Some(format!(
+                "working: generating/updating tests in q{n}/. this takes a moment"
+            )),
+            Self::RunningSolution { .. } => Some(format!("working: running tests in q{n}/")),
+            Self::RunningTests { .. } => Some(format!("working: running tests in q{n}/")),
+            Self::Submitting => Some(format!("working: submitting q{n}/")),
+            Self::Submitted => Some(format!("ready: q{n}/ submitted.")),
+            _ => None,
+        }
+    }
+}
+
 /// Staging for every question visited this session, by slot index.
 #[derive(Debug, Clone, Default)]
 pub struct ApproachStaging {
     stages: BTreeMap<usize, QuestionStage>,
+    flows: BTreeMap<usize, QuestionFlowState>,
     current: Option<usize>,
 }
 
@@ -105,9 +211,36 @@ impl ApproachStaging {
         }
     }
 
+    /// Index of the question currently on screen, if one is staged.
+    pub fn current_index(&self) -> Option<usize> {
+        self.current
+    }
+
     /// Stage of the current question, if one is being staged.
     pub fn current_stage(&self) -> Option<&QuestionStage> {
         self.current.and_then(|index| self.stages.get(&index))
+    }
+
+    /// Lifecycle flow state of `index`.
+    pub fn flow_for(&self, index: usize) -> QuestionFlowState {
+        self.flows.get(&index).cloned().unwrap_or_default()
+    }
+
+    /// Lifecycle flow state of the current question on screen.
+    pub fn current_flow(&self) -> QuestionFlowState {
+        self.current
+            .map(|index| self.flow_for(index))
+            .unwrap_or_default()
+    }
+
+    /// Updates the lifecycle flow state for `index`.
+    pub fn set_flow(&mut self, index: usize, flow: QuestionFlowState) {
+        self.flows.insert(index, flow);
+    }
+
+    /// True when `index` is submitting or permanently submitted.
+    pub fn is_submitted(&self, index: usize) -> bool {
+        self.flow_for(index).is_submitted_or_submitting()
     }
 
     /// Moves the cursor by `delta` rows, clamped to the option rows
@@ -141,5 +274,180 @@ impl ApproachStaging {
     fn current_stage_mut(&mut self) -> Option<&mut QuestionStage> {
         let index = self.current?;
         self.stages.get_mut(&index)
+    }
+}
+
+/// Settles pending question lifecycle states against the latest snapshot view and sync status.
+pub(crate) fn settle_with_sync(
+    state: &mut crate::tui::candidate_run::CandidateRunState,
+    view: &crate::tui::candidate_runtime::CandidateView,
+    solution_synced: bool,
+    sync_failed: bool,
+) {
+    for nav in &view.nav {
+        if nav.state == "Finished" {
+            state
+                .staging
+                .set_flow(nav.index, QuestionFlowState::Submitted);
+        }
+    }
+    if let Some(current_idx) = state.staging.current_index() {
+        if state.staging.flow_for(current_idx) == QuestionFlowState::Submitting
+            && view.question_index != Some(current_idx)
+        {
+            state
+                .staging
+                .set_flow(current_idx, QuestionFlowState::Submitted);
+        }
+    }
+    let Some(index) = view.question_index else {
+        return;
+    };
+    let n = index + 1;
+    let rev = view.code_revision();
+    let run_seq = view.run_seq();
+    let ready_msg = format!("code is in q{n}/. c continue, r run, t write tests, or f submit.");
+    let flow = state.staging.flow_for(index);
+    let was_updating_tests = matches!(flow, QuestionFlowState::UpdatingTests { .. });
+    match flow {
+        QuestionFlowState::ContinuingInteraction
+            if state.focus != crate::tui::candidate_run::CandidateFocus::Redirect =>
+        {
+            state
+                .staging
+                .set_flow(index, QuestionFlowState::SolutionReady);
+        }
+        QuestionFlowState::GeneratingInitialSolution {
+            selection,
+            base_revision,
+        } => {
+            if view.selected.as_ref() == Some(&selection) && (rev > base_revision || rev == 0) {
+                if sync_failed || !solution_synced {
+                    state.staging.set_flow(
+                        index,
+                        QuestionFlowState::SyncingWorkspace {
+                            selection,
+                            target_revision: rev,
+                        },
+                    );
+                } else {
+                    state.pending_approach = None;
+                    state
+                        .staging
+                        .set_flow(index, QuestionFlowState::SolutionReady);
+                    state.after_code = Some((index, ready_msg.clone()));
+                }
+            }
+        }
+        QuestionFlowState::SyncingWorkspace {
+            target_revision, ..
+        } => {
+            if !sync_failed && solution_synced && rev >= target_revision {
+                state.pending_approach = None;
+                state
+                    .staging
+                    .set_flow(index, QuestionFlowState::SolutionReady);
+                state.after_code = Some((index, ready_msg.clone()));
+            }
+        }
+        QuestionFlowState::UpdatingSolution { base_revision, .. }
+        | QuestionFlowState::UpdatingTests { base_revision, .. } => {
+            if rev > base_revision {
+                if sync_failed || !solution_synced {
+                    if let Some(selection) = view.selected.clone() {
+                        state.staging.set_flow(
+                            index,
+                            QuestionFlowState::SyncingWorkspace {
+                                selection,
+                                target_revision: rev,
+                            },
+                        );
+                    }
+                } else {
+                    state
+                        .staging
+                        .set_flow(index, QuestionFlowState::SolutionReady);
+                    let target = if was_updating_tests {
+                        "tests"
+                    } else {
+                        "solution"
+                    };
+                    state.after_code = Some((
+                        index,
+                        format!("updated {target} in q{n}/. c continue, r run, t write tests, or f submit."),
+                    ));
+                }
+            }
+        }
+        QuestionFlowState::RunningSolution { base_seq } => {
+            if run_seq > base_seq {
+                state
+                    .staging
+                    .set_flow(index, QuestionFlowState::SolutionReady);
+                let label = match view.latest_run() {
+                    Some(r) if r.success => "passed",
+                    Some(_) => "failed",
+                    None => "completed",
+                };
+                state.after_code = Some((
+                    index,
+                    format!(
+                        "tests {label} in q{n}/. c continue, r run, t write tests, or f submit."
+                    ),
+                ));
+            }
+        }
+        QuestionFlowState::RunningTests { base_seq } => {
+            if run_seq > base_seq || (base_seq == 0 && view.latest_test.is_some()) {
+                state
+                    .staging
+                    .set_flow(index, QuestionFlowState::SolutionReady);
+                let label = match view.latest_run() {
+                    Some(r) if r.success => "passed",
+                    Some(_) => "failed",
+                    None => match view.latest_test {
+                        Some(t) if t.failed == 0 => "passed",
+                        Some(_) => "failed",
+                        None => "completed",
+                    },
+                };
+                state.after_code = Some((
+                    index,
+                    format!(
+                        "tests {label} in q{n}/. c continue, r run, t write tests, or f submit."
+                    ),
+                ));
+            }
+        }
+        QuestionFlowState::AwaitingApproach
+            if view.selected.is_some()
+                && state.pending_approach.is_none()
+                && !sync_failed
+                && solution_synced =>
+        {
+            state
+                .staging
+                .set_flow(index, QuestionFlowState::SolutionReady);
+            if state.after_code.is_none() {
+                state.after_code = Some((index, ready_msg.clone()));
+            }
+        }
+        _ => {}
+    }
+    let landed = state.pending_approach.as_ref().is_some_and(|pending| {
+        view.question_index == Some(pending.index)
+            && view.selected.as_ref() == Some(&pending.selection)
+    });
+    if landed && !sync_failed && solution_synced {
+        if let Some(pending) = state.pending_approach.take() {
+            let n = pending.index + 1;
+            state
+                .staging
+                .set_flow(pending.index, QuestionFlowState::SolutionReady);
+            state.after_code = Some((
+                pending.index,
+                format!("code is in q{n}/. c continue, r run, t write tests, or f submit."),
+            ));
+        }
     }
 }
