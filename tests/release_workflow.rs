@@ -156,8 +156,8 @@ fn release_workflow_validates_tag_matches_cargo() {
         })
         .expect("Cargo.toml must declare a package version");
     assert_eq!(
-        cargo_version, "0.1.1",
-        "Cargo.toml version must match the version that will be tagged"
+        cargo_version, "0.1.2",
+        "Cargo.toml version must match the published release"
     );
 }
 
@@ -363,9 +363,9 @@ fn plan(current: &str, latest: &str) -> String {
 }
 
 #[test]
-fn main_push_bumps_patch_unless_cargo_version_changed() {
-    assert_eq!(plan("0.1.1", "0.1.1"), "0.1.2 bump");
-    assert_eq!(plan("0.2.0", "0.1.1"), "0.2.0 keep");
-    assert_eq!(plan("0.1.2", "0.1.1"), "0.1.2 keep");
-    assert_eq!(plan("0.1.1", ""), "0.1.1 keep");
+fn main_push_keeps_the_version_written_in_cargo_toml() {
+    assert_eq!(plan("0.1.2", "0.1.2"), "0.1.2 keep");
+    assert_eq!(plan("0.2.0", "0.1.2"), "0.2.0 keep");
+    assert_eq!(plan("0.1.3", "0.1.2"), "0.1.3 keep");
+    assert_eq!(plan("0.1.2", ""), "0.1.2 keep");
 }
