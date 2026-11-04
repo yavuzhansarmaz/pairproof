@@ -66,6 +66,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut coach_following = true;
     let mut scrolled_question: Option<usize> = None;
     let mut last_snapshot_poll = std::time::Instant::now() - Duration::from_secs(2);
+    let mut last_live_hb = std::time::Instant::now();
     let mut breakdown_open = false;
     let mut final_scrolling = false;
     let mut held_view = None;
@@ -88,6 +89,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                 state.app.mark_connection_verified();
                 runtime = Some(*built);
                 status = None;
+                last_live_hb = std::time::Instant::now();
             }
             Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
                 connect_rx = None;
@@ -127,12 +129,19 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
         if !live {
             held_view = None;
             poll_rx = None;
+            if let Some(active) = runtime.as_ref() {
+                if last_live_hb.elapsed() >= Duration::from_secs(5) {
+                    last_live_hb = std::time::Instant::now();
+                    active.spawn_background_heartbeat(now_ms());
+                }
+            }
         } else if !final_scrolling {
             final_doc = None;
             if !dragging_split && poll_rx.is_none() && last_snapshot_poll.elapsed() >= poll_interval
             {
                 if let Some(active) = runtime.as_mut() {
                     poll_rx = active.spawn_background_poll(now_ms());
+                    last_live_hb = std::time::Instant::now();
                 }
             }
             held_view = runtime.as_ref().map(|active| active.view());

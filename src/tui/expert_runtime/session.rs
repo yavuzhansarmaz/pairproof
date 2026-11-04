@@ -196,6 +196,11 @@ impl ExpertRuntime {
                     .failed
                     .push(("final_snapshot_ack".into(), "timeout".into()));
             }
+            if let Err(err) = &published {
+                stored
+                    .failed
+                    .push(("final_snapshot_publish".into(), err.to_string()));
+            }
             self.cleanup_report = Some(stored);
         }
         let mut report = result?;
@@ -204,7 +209,14 @@ impl ExpertRuntime {
                 .failed
                 .push(("final_snapshot_ack".into(), "timeout".into()));
         }
-        published?;
+        if let Err(err) = published {
+            if self.sandbox_handle.is_none() {
+                return Err(err.into());
+            }
+            report
+                .failed
+                .push(("final_snapshot_publish".into(), err.to_string()));
+        }
         self.cleanup_report = Some(report.clone());
         Ok(report)
     }

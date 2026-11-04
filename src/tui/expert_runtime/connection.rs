@@ -202,7 +202,16 @@ impl ExpertRuntime {
             self.snapshot_recovery(),
         );
         snapshot.chat_partial = self.executor.chat_partial().map(str::to_string);
-        publish_snapshot(&*self.control_io, &snapshot).await?;
+        if self.last_published_snapshot.as_ref() != Some(&snapshot)
+            || snapshot.latest_run()
+                != self
+                    .last_published_snapshot
+                    .as_ref()
+                    .and_then(|s| s.latest_run())
+        {
+            publish_snapshot(&*self.control_io, &snapshot).await?;
+            self.last_published_snapshot = Some(snapshot);
+        }
         self.maybe_trigger_load();
         self.check_heartbeat(self.fresh_now(now_ms)).await;
         Ok(reports)

@@ -264,6 +264,11 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
         self.phase = CandidateRuntimePhase::Syncing;
         self.transport
             .start_sync(&self.session_id, &self.workspace)?;
+        if self.transport.sync_tracks_workspace() {
+            let now = now_ms();
+            let _ = self.transport.write_heartbeat(&self.session_id, now);
+            self.last_hb_ms = now;
+        }
         self.phase = CandidateRuntimePhase::Connected;
         Ok(())
     }
@@ -328,6 +333,11 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
             Ok(Some(snapshot)) => {
                 if snapshot.session_id != self.session_id {
                     return Err(CandidateRuntimeError::WrongSession);
+                }
+                if matches!(snapshot.phase.as_str(), "WaitingForCandidate" | "Setup")
+                    && self.phase == CandidateRuntimePhase::Connected
+                {
+                    let _ = self.transport.write_hello(&self.session_id);
                 }
                 self.lost = false;
                 match &snapshot.recovery {

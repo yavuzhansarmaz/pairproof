@@ -222,6 +222,16 @@ impl CandidateTransport for SshCandidateTransport {
         let env = MutagenAuthEnv::prepare(askpass, &key_line)
             .map_err(|_| CandidateRuntimeError::SyncFailed)?;
         let feeder = env.start_password_feeder(conn.secret());
+        let body = heartbeat_bytes(session_id, now_ms());
+        let _ = run_ssh_command_with_stdin(
+            conn.endpoint(),
+            conn.username(),
+            conn.secret(),
+            &key_line,
+            &["tee", HEARTBEAT_PATH],
+            Some(body.as_slice()),
+            SSH_TIMEOUT,
+        );
         let started = run_mutagen(&env, &["daemon", "start"], Duration::from_secs(20))
             .map(|o| o.success())
             .unwrap_or(false);

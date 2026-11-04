@@ -75,6 +75,29 @@ pub(crate) struct BackgroundPollOutcome {
 }
 
 impl CandidateRuntime<SshCandidateTransport> {
+    /// Spawns a non-blocking heartbeat write on a worker thread (e.g. while on Rules).
+    pub(crate) fn spawn_background_heartbeat(&self, now_ms: u64) {
+        if self.phase != CandidateRuntimePhase::Connected {
+            return;
+        }
+        let Some((conn, key_line, _, _)) = self.transport.poll_parts() else {
+            return;
+        };
+        let session_id = self.session_id.clone();
+        std::thread::spawn(move || {
+            let body = heartbeat_bytes(&session_id, now_ms);
+            let _ = run_ssh_command_with_stdin(
+                conn.endpoint(),
+                conn.username(),
+                conn.secret(),
+                &key_line,
+                &["tee", HEARTBEAT_PATH],
+                Some(body.as_slice()),
+                SSH_TIMEOUT,
+            );
+        });
+    }
+
     /// Spawns one snapshot + heartbeat + workspace-sync poll on a worker thread.
     pub(crate) fn spawn_background_poll(
         &mut self,
@@ -118,6 +141,18 @@ impl CandidateRuntime<SshCandidateTransport> {
             let mut sync_failed = None;
             if let Ok(Some(ref snap)) = snapshot {
                 if snap.session_id == session_id {
+                    if matches!(snap.phase.as_str(), "WaitingForCandidate" | "Setup") {
+                        let body = hello_bytes(&session_id, env!("CARGO_PKG_VERSION"));
+                        let _ = run_ssh_command_with_stdin(
+                            conn.endpoint(),
+                            conn.username(),
+                            conn.secret(),
+                            &key_line,
+                            &["tee", HELLO_PATH],
+                            Some(body.as_slice()),
+                            SSH_TIMEOUT,
+                        );
+                    }
                     if snap.final_breakdown.is_some() && !ack_sent {
                         let body = final_ack_bytes(&session_id);
                         let _ = run_ssh_command_with_stdin(
