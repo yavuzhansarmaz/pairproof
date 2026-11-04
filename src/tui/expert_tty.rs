@@ -175,6 +175,24 @@ pub fn copy_to_clipboard(text: &str) {
 #[rustfmt::skip]
 pub fn set_error(app: &mut app::ExpertApp, context: &str, detail: &str) { app.set_status_message(help::expert_error_message(context, detail)); }
 
-/// Runs one bounded async step on a lazily built current-thread runtime.
-#[rustfmt::skip]
-pub fn block_on<T>(slot: &mut Option<tokio::runtime::Runtime>, future: impl Future<Output = T>) -> Option<T> { if slot.is_none() { *slot = tokio::runtime::Builder::new_current_thread().enable_all().build().ok(); } slot.as_ref().map(|runtime| runtime.block_on(future)) }
+/// Runs one bounded async step on a lazily built multi-thread runtime
+/// so background tasks (`load-qN`, shadow eval, recovery) keep progressing
+/// between ticks and while selection pools are fetched.
+pub fn block_on<T>(
+    slot: &mut Option<tokio::runtime::Runtime>,
+    future: impl Future<Output = T>,
+) -> Option<T> {
+    if slot.is_none() {
+        *slot = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .or_else(|_| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+            })
+            .ok();
+    }
+    slot.as_ref().map(|runtime| runtime.block_on(future))
+}

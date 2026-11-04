@@ -130,6 +130,26 @@ pub fn connect_submit_shows_loading(
     screen == CandidateScreen::Connect && input_len > 0 && !show_help
 }
 
+/// True after accepting the rules (`live == true`) while the first
+/// question statement and approach options have not arrived yet.
+pub fn live_waiting_for_question(
+    live: bool,
+    show_help: bool,
+    connection_lost: bool,
+    view: Option<&CandidateView>,
+) -> bool {
+    live && !show_help
+        && !connection_lost
+        && view.is_none_or(|v| {
+            v.waiting_for_statement()
+                || (v.options.is_empty()
+                    && v.selected.is_none()
+                    && !v.is_terminal()
+                    && v.final_breakdown.is_none()
+                    && !v.recovery.as_ref().is_some_and(|r| r.technical_failure))
+        })
+}
+
 /// Question-pane percent for a drag to `column`, clamped so both
 /// panes keep at least the minimum share.
 pub fn split_pct_for_column(column: u16, width: u16) -> u16 {

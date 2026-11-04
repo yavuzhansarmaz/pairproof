@@ -39,9 +39,9 @@ pub use self::live::{candidate_loop, default_workspace};
 pub use self::live_keys::handle_live_key;
 pub use self::panes::{
     clamp_scroll, coach_pane_width, coach_scroll_rows, connect_submit_shows_loading, divider_hit,
-    focus_for_pane, max_scroll, pane_click_target, pane_content_width, pane_side_for_column,
-    question_pane_width, question_scroll_rows, screen_centered, scroll_after_growth,
-    split_pct_for_column, PaneSide, DEFAULT_QUESTION_PCT,
+    focus_for_pane, live_waiting_for_question, max_scroll, pane_click_target, pane_content_width,
+    pane_side_for_column, question_pane_width, question_scroll_rows, screen_centered,
+    scroll_after_growth, split_pct_for_column, PaneSide, DEFAULT_QUESTION_PCT,
 };
 pub use self::transport::{SshAuthVerifier, SshCandidateTransport};
 pub use self::view::CandidateView;
@@ -353,12 +353,7 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
             return;
         };
         let index = current.index;
-        if self.synced_question != Some(index) {
-            self.synced_question = Some(index);
-            if self.transport.sync_tracks_workspace() {
-                let _ = self.transport.flush_sync(&self.session_id);
-            }
-        }
+        self.synced_question = Some(index);
         let rev = snapshot.code_revision();
         let target_rev = if rev > 0 {
             rev

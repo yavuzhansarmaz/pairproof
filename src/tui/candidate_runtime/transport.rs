@@ -7,6 +7,7 @@ use super::*;
 pub struct SshCandidateTransport {
     connection: Option<ConnectionString>,
     key_line: Option<String>,
+    verified: bool,
     client: Option<SshControlClient>,
     askpass: Option<AskpassSession>,
     sync_env: Option<MutagenAuthEnv>,
@@ -18,6 +19,7 @@ impl SshCandidateTransport {
         Self {
             connection: None,
             key_line: None,
+            verified: false,
             client: None,
             askpass: None,
             sync_env: None,
@@ -29,6 +31,7 @@ impl SshCandidateTransport {
         Self {
             connection: Some(connection.clone()),
             key_line: Some(key_line),
+            verified: true,
             client: None,
             askpass: None,
             sync_env: None,
@@ -41,6 +44,21 @@ impl SshCandidateTransport {
             (Some(c), Some(k)) => Ok((c, k.as_str())),
             _ => Err(CandidateRuntimeError::Transport),
         }
+    }
+    pub(crate) fn poll_parts(
+        &self,
+    ) -> Option<(
+        ConnectionString,
+        String,
+        SshControlClient,
+        Option<MutagenAuthEnv>,
+    )> {
+        Some((
+            self.connection.clone()?,
+            self.key_line.clone()?,
+            self.client.clone()?,
+            self.sync_env.clone(),
+        ))
     }
 }
 impl Default for SshCandidateTransport {
@@ -90,8 +108,15 @@ fn authenticate_ssh(
 }
 impl CandidateTransport for SshCandidateTransport {
     fn authenticate(&mut self, connection: &ConnectionString) -> Result<(), CandidateRuntimeError> {
+        if self.verified && self.connection.as_ref() == Some(connection) && self.key_line.is_some()
+        {
+            return Ok(());
+        }
         self.connection = Some(connection.clone());
-        authenticate_ssh(connection, &mut self.key_line).map_err(CandidateRuntimeError::Auth)
+        let res =
+            authenticate_ssh(connection, &mut self.key_line).map_err(CandidateRuntimeError::Auth);
+        self.verified = res.is_ok();
+        res
     }
     fn discover_session_id(&mut self) -> Result<String, CandidateRuntimeError> {
         let (conn, key_line) = self.stored()?;
@@ -183,6 +208,7 @@ impl CandidateTransport for SshCandidateTransport {
         crate::sync::validate_alpha_dir(&alpha_text)
             .map_err(|_| CandidateRuntimeError::SyncFailed)?;
         std::fs::create_dir_all(alpha).map_err(|_| CandidateRuntimeError::SyncFailed)?;
+        let reused_askpass = self.askpass.is_some();
         if self.askpass.is_none() {
             self.askpass = Some(
                 AskpassSession::create("candidate")
@@ -199,7 +225,7 @@ impl CandidateTransport for SshCandidateTransport {
         let started = run_mutagen(&env, &["daemon", "start"], Duration::from_secs(20))
             .map(|o| o.success())
             .unwrap_or(false);
-        if started {
+        if started && reused_askpass {
             let _ = run_mutagen(&env, &["sync", "terminate", &name], Duration::from_secs(15));
         }
         let beta = crate::sync::beta_url(conn.endpoint(), conn.username());
@@ -229,7 +255,6 @@ impl CandidateTransport for SshCandidateTransport {
             feeder.stop();
             return Err(CandidateRuntimeError::SyncFailed);
         }
-        let _ = run_mutagen(&env, &["sync", "flush", &name], Duration::from_secs(30));
         self.sync_env = Some(env);
         self.feeder = Some(feeder);
         Ok(())
@@ -262,28 +287,7 @@ impl CandidateTransport for SshCandidateTransport {
         let Some(env) = self.sync_env.as_ref() else {
             return Ok(());
         };
-        let name = sync_name(session_id)?;
-        match run_mutagen(env, &["sync", "flush", &name], Duration::from_secs(30)) {
-            Ok(o) if o.success() => {}
-            _ => return Err(CandidateRuntimeError::SyncFailed),
-        }
-        if let Ok(list) = run_mutagen(
-            env,
-            &["sync", "list", "--template", crate::sync::STATUS_TEMPLATE],
-            Duration::from_secs(10),
-        ) {
-            if list.success() {
-                if let Some(info) = crate::sync::parse_sync_template(&list.stdout)
-                    .into_iter()
-                    .find(|s| s.name == name)
-                {
-                    if info.conflicts > 0 || info.paused {
-                        return Err(CandidateRuntimeError::SyncFailed);
-                    }
-                }
-            }
-        }
-        Ok(())
+        flush_sync_with_env(env, session_id)
     }
     fn terminate_sync(&mut self, session_id: &str) -> Result<(), CandidateRuntimeError> {
         let mut result = Ok(());
@@ -302,6 +306,34 @@ impl CandidateTransport for SshCandidateTransport {
         self.sync_env = None;
         result
     }
+}
+
+pub(crate) fn flush_sync_with_env(
+    env: &MutagenAuthEnv,
+    session_id: &str,
+) -> Result<(), CandidateRuntimeError> {
+    let name = sync_name(session_id)?;
+    match run_mutagen(env, &["sync", "flush", &name], Duration::from_secs(30)) {
+        Ok(o) if o.success() => {}
+        _ => return Err(CandidateRuntimeError::SyncFailed),
+    }
+    if let Ok(list) = run_mutagen(
+        env,
+        &["sync", "list", "--template", crate::sync::STATUS_TEMPLATE],
+        Duration::from_secs(10),
+    ) {
+        if list.success() {
+            if let Some(info) = crate::sync::parse_sync_template(&list.stdout)
+                .into_iter()
+                .find(|s| s.name == name)
+            {
+                if info.conflicts > 0 || info.paused {
+                    return Err(CandidateRuntimeError::SyncFailed);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 pub struct SshAuthVerifier {
     stash: Arc<Mutex<Option<(ConnectionString, String)>>>,

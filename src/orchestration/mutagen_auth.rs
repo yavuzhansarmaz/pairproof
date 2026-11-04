@@ -58,6 +58,7 @@ pub fn scp_wrapper_script(session: &AskpassSession, real_scp: &Path, ssh_wrapper
 }
 
 /// Isolated environment for one Mutagen invocation set.
+#[derive(Clone)]
 pub struct MutagenAuthEnv {
     data_dir: PathBuf,
     bin_dir: PathBuf,

@@ -54,7 +54,7 @@ impl CandidateControlClient {
 }
 
 /// SSH-backed candidate client using the 10G FIFO askpass session.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SshControlClient {
     inner: CandidateControlClient,
     endpoint: Endpoint,

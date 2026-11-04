@@ -54,6 +54,8 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut status: Option<String> = None;
     let mut loading_tick = 0usize;
     let mut connect_rx: Option<std::sync::mpsc::Receiver<ConnectOutcome>> = None;
+    let mut poll_rx: Option<std::sync::mpsc::Receiver<super::connect_work::BackgroundPollOutcome>> =
+        None;
     let mut question_pct = DEFAULT_QUESTION_PCT;
     let mut dragging_split = false;
     let mut question_scroll = 0usize;
@@ -99,20 +101,39 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             }
             Some(Err(std::sync::mpsc::TryRecvError::Empty)) | None => {}
         }
-        // A poll spawns askpass and ssh before the paint. Skip it
-        // while the divider is held, and for the whole time the final
-        // page is being scrolled: the next idle frame polls again.
-        // The breakdown also refreshes at most once a second.
-        let final_hold = breakdown_open && last_snapshot_poll.elapsed() < Duration::from_secs(1);
-        if !final_scrolling {
-            final_doc = None;
-            if live && !dragging_split && !final_hold {
+        // Snapshot polling runs on a background worker thread so the
+        // TTY loop never freezes on SSH or Mutagen during loading or solving.
+        match poll_rx.as_ref().map(|rx| rx.try_recv()) {
+            Some(Ok(outcome)) => {
+                poll_rx = None;
+                last_snapshot_poll = std::time::Instant::now();
                 if let Some(active) = runtime.as_mut() {
-                    if let Err(err) = active.poll_snapshot() {
+                    if let Err(err) = active.apply_background_poll(outcome) {
                         status = Some(crate::tui::help::candidate_error_message(&err).to_string());
                     }
                 }
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                poll_rx = None;
                 last_snapshot_poll = std::time::Instant::now();
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Empty)) | None => {}
+        }
+        let poll_interval = if breakdown_open {
+            Duration::from_secs(1)
+        } else {
+            Duration::from_millis(350)
+        };
+        if !live {
+            held_view = None;
+            poll_rx = None;
+        } else if !final_scrolling {
+            final_doc = None;
+            if !dragging_split && poll_rx.is_none() && last_snapshot_poll.elapsed() >= poll_interval
+            {
+                if let Some(active) = runtime.as_mut() {
+                    poll_rx = active.spawn_background_poll(now_ms());
+                }
             }
             held_view = runtime.as_ref().map(|active| active.view());
         }
@@ -147,11 +168,12 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
         // screen, animated, until its result lands.
         loading_tick = loading_tick.wrapping_add(1);
         let waiting = connect_rx.is_some()
-            || (live
-                && !state.show_help
-                && tick_view
-                    .as_ref()
-                    .is_some_and(|view| view.waiting_for_statement() && !connection_lost));
+            || super::panes::live_waiting_for_question(
+                live,
+                state.show_help,
+                connection_lost,
+                tick_view,
+            );
         let panes = if live && !state.show_help && !waiting && !connection_lost {
             tick_view.as_ref().and_then(|view| {
                 if view.is_terminal() {
@@ -412,6 +434,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                                     "paste the fresh connection string, then press enter."
                                         .to_string(),
                                 );
+                                break;
                             } else if let Some(active) = runtime.as_mut() {
                                 handle_live_key(state, active, key, &mut status);
                             }
@@ -450,6 +473,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                             }
                             if runtime.is_some() && state.app.rules_accepted() {
                                 live = true;
+                                break;
                             }
                         }
                     }
