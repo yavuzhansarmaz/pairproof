@@ -65,6 +65,7 @@ mod scoring_consistency;
 mod scoring_final;
 mod scoring_live;
 mod scoring_llm_compose;
+mod session_sim;
 mod shadow_evaluation;
 mod shadow_runtime;
 mod smoke;

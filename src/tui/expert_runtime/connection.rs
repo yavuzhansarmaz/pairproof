@@ -215,6 +215,11 @@ impl ExpertRuntime {
             self.last_published_snapshot = Some(snapshot);
             self.last_published_run = run;
         }
+        if self.loaded_index == self.orch.current_index()
+            && !self.pipeline.has_current_approaches(&self.orch)
+        {
+            self.loaded_index = None;
+        }
         self.maybe_trigger_load();
         self.check_heartbeat(self.fresh_now(now_ms)).await;
         Ok(reports)

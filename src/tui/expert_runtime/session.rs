@@ -303,4 +303,25 @@ impl ExpertRuntime {
         });
         self.pending_load = Some((index, rx));
     }
+
+    /// Resolves a pending re-question. An approved replacement needs a
+    /// fresh statement and approaches, so the current load is cleared.
+    pub fn resolve_requestion(
+        &mut self,
+        approved: bool,
+        replacement: Option<QuestionRef>,
+        now_ms: u64,
+    ) -> Result<(), ExpertRuntimeError> {
+        let index = self.orch.current_index();
+        self.orch
+            .resolve_requestion(approved, replacement, now_ms)?;
+        if approved {
+            if let Some(index) = index {
+                self.pipeline.invalidate_approaches(index);
+            }
+        }
+        self.loaded_index = None;
+        self.maybe_trigger_load();
+        Ok(())
+    }
 }
