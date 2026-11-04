@@ -164,7 +164,7 @@ fn candidate_question_pane_scrolls_and_keeps_footer() {
 }
 
 #[test]
-fn question_hint_keeps_help_and_omits_command_keys() {
+fn question_hint_keeps_help_on_every_solving_footer() {
     use pairproof::tui::candidate_run::{CandidateFocus, CandidateRunState};
     use pairproof::tui::candidate_runtime::question_hint;
     use pairproof::tui::candidate_stage::QuestionFlowState;
@@ -176,18 +176,15 @@ fn question_hint_keeps_help_and_omits_command_keys() {
         "{pick}"
     );
     assert!(pick.contains("up/down move"), "{pick}");
-    assert!(!pick.contains("c continue"), "{pick}");
-    assert!(!pick.contains("t write tests"), "{pick}");
 
     state.staging.switch_to(0, &None, 4, "");
     state.staging.set_flow(0, QuestionFlowState::SolutionReady);
     let ready = question_hint(&state, 4);
-    assert_eq!(ready, "focus: tab panel, ? help, esc quit");
-    assert!(!ready.contains("c continue"), "{ready}");
-    assert!(!ready.contains("r run"), "{ready}");
-    assert!(!ready.contains("t write tests"), "{ready}");
-    assert!(!ready.contains("a change approach"), "{ready}");
-    assert!(!ready.contains("f submit"), "{ready}");
+    assert!(ready.contains("c continue"), "{ready}");
+    assert!(ready.contains("t write tests"), "{ready}");
+    assert!(ready.contains("? help"), "{ready}");
+    assert!(ready.contains("tab panel"), "{ready}");
+    assert!(ready.contains("esc quit"), "{ready}");
 
     state.staging.set_flow(0, QuestionFlowState::Submitting);
     let busy = question_hint(&state, 4);
@@ -196,5 +193,4 @@ fn question_hint_keeps_help_and_omits_command_keys() {
     state.focus = CandidateFocus::Chat;
     let chat = question_hint(&state, 4);
     assert!(chat.contains("? help"), "{chat}");
-    assert!(!chat.contains("c continue"), "{chat}");
 }

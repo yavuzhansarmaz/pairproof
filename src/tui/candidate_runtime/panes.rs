@@ -326,8 +326,8 @@ fn cursor_on_other(state: &CandidateRunState, option_count: usize) -> bool {
             .is_some_and(|stage| stage.cursor == option_count)
 }
 
-/// Chrome that stays on every solving hint. Command keys (`c`, `r`,
-/// `t`, `a`, `f`) live on the `?` overlay so the footer stays small.
+/// Chrome that stays on every solving hint. `? help` is always here;
+/// command keys stay on the ready footer and the `?` overlay.
 const SOLVING_CHROME: &str = "tab panel, ? help, esc quit";
 
 /// Bottom hint. On the other row it describes the approach field,
@@ -358,7 +358,9 @@ pub fn question_hint(state: &CandidateRunState, option_count: usize) -> String {
             || state.staging.current_flow()
                 == crate::tui::candidate_stage::QuestionFlowState::SolutionReady =>
         {
-            format!("focus: {SOLVING_CHROME}")
+            format!(
+                "focus: c continue, r run, t write tests, a change approach, f submit, {SOLVING_CHROME}"
+            )
         }
         _ => format!("focus: up/down move, space select, enter submit, {SOLVING_CHROME}"),
     }
