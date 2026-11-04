@@ -81,8 +81,25 @@ fn release_workflow_triggers_on_version_tags() {
         "a main release must plan the version from Cargo.toml and the latest release"
     );
     assert!(
+        text.contains("scripts/set_cargo_version.sh"),
+        "a main release must rewrite Cargo.toml before building and publishing"
+    );
+    assert!(
         text.contains("release not needed"),
         "a main release must stop when the planned version is already published"
+    );
+    assert!(
+        !text.contains("outputs.bump == 'true'") && !text.contains("PLANNED_BUMP\" = \"true\""),
+        "workflow must not treat plan bump output as the string true"
+    );
+    assert!(
+        text.contains("PLANNED_BUMP\" = \"bump\"") || text.contains("PLANNED_BUMP\" = 'bump'") || text.contains("$PLANNED_BUMP\" = \"bump\""),
+        "publish must commit a Cargo.toml bump when the planner prints bump"
+    );
+    assert!(
+        text.contains("built binary --version mismatch")
+            || text.contains("release asset --version mismatch"),
+        "release must refuse assets whose --version does not match the tag"
     );
     let publish = publish_section(&text);
     assert!(
@@ -156,7 +173,7 @@ fn release_workflow_validates_tag_matches_cargo() {
         })
         .expect("Cargo.toml must declare a package version");
     assert_eq!(
-        cargo_version, "0.1.2",
+        cargo_version, "0.1.3",
         "Cargo.toml version must match the published release"
     );
 }
@@ -368,4 +385,8 @@ fn main_push_bumps_patch_unless_cargo_version_changed() {
     assert_eq!(plan("0.2.0", "0.1.2"), "0.2.0 keep");
     assert_eq!(plan("0.1.3", "0.1.2"), "0.1.3 keep");
     assert_eq!(plan("0.1.2", ""), "0.1.2 keep");
+    // Cargo.toml lagged a published tag (e.g. tag without version rewrite):
+    // advance past the published latest, do not re-ship the stale cargo version.
+    assert_eq!(plan("0.1.2", "0.1.3"), "0.1.4 bump");
+    assert_eq!(plan("0.1.1", "0.1.3"), "0.1.4 bump");
 }

@@ -150,7 +150,8 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       - name: Apply planned version
-        if: needs.prepare.outputs.bump == 'true'
+        # plan_release_version.sh prints "bump" or "keep", never "true".
+        if: needs.prepare.outputs.version != ''
         shell: sh
         run: sh scripts/set_cargo_version.sh "${{ needs.prepare.outputs.version }}"
       - name: Install Rust toolchain
@@ -177,11 +178,32 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }} --locked
       - name: Package release asset
         shell: sh
+        env:
+          PLANNED_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -eu
           mkdir -p staging dist
           cp "target/${{ matrix.target }}/release/pairproof" staging/pairproof
           chmod 0755 staging/pairproof
+          EXPECTED_VERSION="$PLANNED_VERSION"
+          if [ -z "$EXPECTED_VERSION" ]; then
+            EXPECTED_VERSION="$(awk -F '"' '/^version[[:space:]]*=/ { print $2; exit }' Cargo.toml)"
+          fi
+          # Host-runnable linux musl binary must embed the release version; this
+          # is the same check the client updater runs before replacing itself.
+          # Cross-arch darwin/aarch64 assets are verified at publish via the
+          # linux-x86_64 asset (same Cargo.toml version for the whole matrix).
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-musl" ]; then
+            VERSION_OUTPUT="$(./staging/pairproof --version)"
+            WANTED="pairproof $EXPECTED_VERSION"
+            case "$VERSION_OUTPUT" in
+              *"$WANTED"*) ;;
+              *)
+                echo "error: built binary --version mismatch: expected '$WANTED', got '$VERSION_OUTPUT'" >&2
+                exit 1
+                ;;
+            esac
+          fi
           tar -czf "dist/${{ matrix.asset }}" -C staging pairproof
           if command -v sha256sum >/dev/null 2>&1; then
             HEX="$(sha256sum "dist/${{ matrix.asset }}" | awk '{ print $1 }')"
@@ -236,7 +258,8 @@ jobs:
         run: |
           set -eu
           sh scripts/check_release_assets.sh dist
-          if [ "$PLANNED_BUMP" = "true" ]; then
+          # plan_release_version.sh prints "bump" or "keep", never "true".
+          if [ "$PLANNED_BUMP" = "bump" ]; then
             sh scripts/set_cargo_version.sh "$PLANNED_VERSION"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -246,13 +269,27 @@ jobs:
             TAG="v$PLANNED_VERSION"
             git tag "$TAG"
             git push origin "$TAG"
-          elif [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+          elif [ "${GITHUB_REF}" = "refs/heads/main" ] || [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
             TAG="v$PLANNED_VERSION"
             git tag "$TAG"
             git push origin "$TAG"
           else
             TAG="$TAG_NAME"
           fi
+          # Refuse to publish if the host-runnable linux asset embeds the wrong version.
+          VERIFY_DIR="$(mktemp -d)"
+          trap 'rm -rf "$VERIFY_DIR"' EXIT
+          tar -xzf dist/pairproof-linux-x86_64-unknown-linux-musl.tar.gz -C "$VERIFY_DIR"
+          VERSION_OUTPUT="$("$VERIFY_DIR/pairproof" --version)"
+          RELEASE_VERSION="${TAG#v}"
+          WANTED="pairproof $RELEASE_VERSION"
+          case "$VERSION_OUTPUT" in
+            *"$WANTED"*) ;;
+            *)
+              echo "error: release asset --version mismatch: expected '$WANTED', got '$VERSION_OUTPUT'" >&2
+              exit 1
+              ;;
+          esac
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists"
             exit 0
