@@ -281,9 +281,7 @@ impl QuestionPipeline {
         .await
     }
 
-    /// Records the test request exactly once, runs the sandbox test
-    /// wrapper, and stores the raw outcome verbatim. The raw outcome has
-    /// no passed or failed counts, so no counted core record is made.
+    /// Records the test request, runs the sandbox test wrapper, and stores the outcome.
     pub async fn request_tests(
         &mut self,
         orch: &mut Orchestrator,
@@ -291,7 +289,12 @@ impl QuestionPipeline {
         now_ms: u64,
     ) -> Result<TestRunRecord, PipelineError> {
         let index = orch.current_index().ok_or(CoreError::NoActiveQuestion)?;
+        if self.submitted_slots.contains(&index) {
+            return Err(CoreError::InvalidState("question already submitted".into()).into());
+        }
         let language = orch.session().language();
+        self.refresh_code_from_sandbox(index, language, sandbox)
+            .await;
         orch.request_tests(now_ms)?;
         let outcome = sandbox.run_requested_tests(index, language).await?;
         let record = TestRunRecord {
@@ -300,7 +303,21 @@ impl QuestionPipeline {
             outcome,
         };
         self.test_records.push(record.clone());
+        self.record_exec_run("test", &record);
         Ok(record)
+    }
+
+    pub(crate) async fn refresh_code_from_sandbox(
+        &mut self,
+        index: usize,
+        language: Language,
+        sandbox: &dyn SandboxIo,
+    ) {
+        if let Ok(disk_code) = sandbox.read_solution(index, language).await {
+            if !disk_code.trim().is_empty() {
+                self.codes.insert(index, disk_code);
+            }
+        }
     }
 
     fn approach_text(&self, orch: &Orchestrator) -> String {
@@ -331,25 +348,34 @@ impl QuestionPipeline {
             return Err(CoreError::Terminal.into());
         }
         let index = orch.current_index().ok_or(CoreError::NoActiveQuestion)?;
+        if self.submitted_slots.contains(&index) {
+            return Err(CoreError::InvalidState("question already submitted".into()).into());
+        }
         let language = orch.session().language();
+        self.refresh_code_from_sandbox(index, language, sandbox)
+            .await;
+        if tests_requested {
+            self.tests_generated.insert(index);
+        }
+        let current_code = self
+            .codes
+            .get(&index)
+            .cloned()
+            .or_else(|| self.current_statement(orch).map(|f| f.starter_code))
+            .unwrap_or_default();
         let input = CodingStepInput {
             question_statement: self.statement_text(orch)?,
             approach_text: self.approach_text(orch),
-            current_code: self
-                .codes
-                .get(&index)
-                .cloned()
-                .or_else(|| self.current_statement(orch).map(|f| f.starter_code))
-                .unwrap_or_default(),
+            current_code,
             instruction,
-            tests_requested,
+            tests_requested: tests_requested || self.tests_generated.contains(&index),
             language,
         };
         let result = coding.coding_step(orch.session_mut(), &input).await;
         if orch.is_terminal() {
             return Err(CoreError::Terminal.into());
         }
-        if orch.current_index() != Some(index) {
+        if orch.current_index() != Some(index) || self.submitted_slots.contains(&index) {
             return Err(
                 CoreError::InvalidState("session changed during coding step".to_string()).into(),
             );
@@ -360,6 +386,7 @@ impl QuestionPipeline {
             .await?;
         let report = sandbox.check_runnable(index, language).await?;
         self.codes.insert(index, output.code.clone());
+        self.record_coding_run(index, &report);
         Ok(CodingStepOutcome {
             runnable: report.runnable,
             code: output.code,

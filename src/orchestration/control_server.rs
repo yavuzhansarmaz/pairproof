@@ -192,7 +192,11 @@ pub async fn publish_snapshot(
     io: &dyn ControlIo,
     snapshot: &CandidateSnapshot,
 ) -> Result<(), ControlError> {
-    let bytes = serde_json::to_vec(snapshot)?;
+    let mut value = serde_json::to_value(snapshot)?;
+    if let (Some(obj), Some(run)) = (value.as_object_mut(), snapshot.latest_run()) {
+        obj.insert("latest_run".to_string(), serde_json::to_value(run)?);
+    }
+    let bytes = serde_json::to_vec(&value)?;
     io.write_snapshot_atomic(&bytes).await
 }
 

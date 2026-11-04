@@ -2,7 +2,7 @@
 //! Hidden approach quality and expected tokens never leave this module
 //! except as the single locked value passed to the core at selection.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
@@ -11,6 +11,7 @@ use crate::core::{ApproachChoice, CoreError, Language};
 use crate::leetcode::{LeetCodeClient, Question};
 use crate::llm::approaches::{generate_approaches, grade_other_approach};
 use crate::llm::MetaClient;
+use crate::orchestration::control_snapshot::SnapshotRun;
 use crate::orchestration::error::OrchestratorError;
 use crate::orchestration::session::Orchestrator;
 use crate::sandbox::TestOutcome;
@@ -190,6 +191,11 @@ pub struct QuestionPipeline {
     pub(crate) statements: HashMap<String, FetchedStatement>,
     pub(crate) codes: HashMap<usize, String>,
     pub(crate) test_records: Vec<TestRunRecord>,
+    pub(crate) run_records: Vec<TestRunRecord>,
+    pub(crate) submitted_slots: BTreeSet<usize>,
+    pub(crate) tests_generated: BTreeSet<usize>,
+    pub(crate) code_revisions: BTreeMap<usize, u64>,
+    pub(crate) latest_runs: BTreeMap<usize, SnapshotRun>,
     pub(crate) chat_busy: AtomicBool,
     pub(crate) selected_qualities: BTreeMap<usize, Vec<ApproachQuality>>,
     pub(crate) other_grades: BTreeMap<usize, ApproachGrade>,
@@ -213,6 +219,11 @@ impl QuestionPipeline {
             statements: HashMap::new(),
             codes: HashMap::new(),
             test_records: Vec::new(),
+            run_records: Vec::new(),
+            submitted_slots: BTreeSet::new(),
+            tests_generated: BTreeSet::new(),
+            code_revisions: BTreeMap::new(),
+            latest_runs: BTreeMap::new(),
             chat_busy: AtomicBool::new(false),
             selected_qualities: BTreeMap::new(),
             other_grades: BTreeMap::new(),

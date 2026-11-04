@@ -13,7 +13,7 @@ use serde_json::Value;
 pub use crate::orchestration::control_snapshot::{
     build_snapshot, build_snapshot_with_recovery, snapshot_service_name, CandidateSnapshot,
     SnapshotFinal, SnapshotFinalQuestion, SnapshotNav, SnapshotOption, SnapshotQuestion,
-    SnapshotRecovery, SnapshotSelection, SnapshotTest,
+    SnapshotRecovery, SnapshotRun, SnapshotSelection, SnapshotTest,
 };
 
 /// Control root outside the `/workspace` Mutagen sync root.
@@ -103,6 +103,7 @@ pub enum IntentKind {
     SelectOther { text: String },
     Continue,
     Redirect { text: String },
+    RunSolution,
     RequestTests,
     Finish,
     Skip,
@@ -119,7 +120,8 @@ impl IntentKind {
         match self {
             Self::SelectPreset { .. } => "SelectPreset", Self::SelectOther { .. } => "SelectOther",
             Self::Continue => "Continue", Self::Redirect { .. } => "Redirect",
-            Self::RequestTests => "RequestTests", Self::Finish => "Finish", Self::Skip => "Skip",
+            Self::RunSolution => "RunSolution", Self::RequestTests => "RequestTests",
+            Self::Finish => "Finish", Self::Skip => "Skip",
             Self::RequestReQuestion => "RequestRequestion", Self::ChangeApproach => "ChangeApproach", Self::Navigate { .. } => "Navigate", Self::Disconnect => "Disconnect", Self::ChatRequest { .. } => "ChatRequest",
         }
     }
@@ -173,6 +175,7 @@ fn kind_payload(kind: &IntentKind) -> (&'static str, Value) {
         IntentKind::SelectOther { text } => ("SelectOther", serde_json::json!({"text": text})),
         IntentKind::Continue => ("Continue", serde_json::json!({})),
         IntentKind::Redirect { text } => ("Redirect", serde_json::json!({"text": text})),
+        IntentKind::RunSolution => ("RunSolution", serde_json::json!({})),
         IntentKind::RequestTests => ("RequestTests", serde_json::json!({})),
         IntentKind::Finish => ("Finish", serde_json::json!({})),
         IntentKind::Skip => ("Skip", serde_json::json!({})),
@@ -218,6 +221,7 @@ fn parse_kind(name: &str, payload: &Value) -> Result<IntentKind, ControlError> {
         "SelectOther" => IntentKind::SelectOther { text: payload_text(payload, "text")? },
         "Continue" => IntentKind::Continue,
         "Redirect" => IntentKind::Redirect { text: payload_text(payload, "text")? },
+        "RunSolution" => IntentKind::RunSolution,
         "RequestTests" => IntentKind::RequestTests,
         "Finish" => IntentKind::Finish,
         "Skip" => IntentKind::Skip,

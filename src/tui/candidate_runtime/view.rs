@@ -110,6 +110,24 @@ impl CandidateView {
         .collect()
     }
 
+    /// Latest coding or execution summary recorded for this question view.
+    pub fn latest_run(&self) -> Option<crate::orchestration::control::SnapshotRun> {
+        crate::orchestration::control_snapshot::view_run_for(
+            self.question_index?,
+            self.question_title.as_deref()?,
+        )
+    }
+
+    /// Current code revision for this question (0 before generation).
+    pub fn code_revision(&self) -> u64 {
+        self.latest_run().map_or(0, |r| r.code_revision)
+    }
+
+    /// Current execution sequence for this question.
+    pub fn run_seq(&self) -> u64 {
+        self.latest_run().map_or(0, |r| r.seq)
+    }
+
     /// Status lines, with a local "writing the code" line while a
     /// submitted approach has not appeared in the snapshot yet.
     pub fn status_lines_with_pending(
@@ -130,6 +148,21 @@ impl CandidateView {
                 "selected approach: {}, writing the code",
                 pending.label()
             ));
+        }
+        lines
+    }
+
+    /// Status lines incorporating the active question flow phase.
+    pub fn status_lines_with_flow(
+        &self,
+        pending: Option<&crate::tui::candidate_stage::PendingApproach>,
+        flow: Option<&crate::tui::candidate_stage::QuestionFlowState>,
+    ) -> Vec<String> {
+        let mut lines = self.status_lines_with_pending(pending);
+        if let Some(label) = flow.and_then(|f| f.status_phase_label()) {
+            if let Some(phase_line) = lines.get_mut(2) {
+                *phase_line = sanitize_display(&format!("phase: {label}"));
+            }
         }
         lines
     }

@@ -190,7 +190,12 @@ pub(crate) fn live_panes(
 ) -> (Vec<String>, Vec<String>) {
     let mut left = view.question_lines_staged(state.staging.current_stage());
     if let (Some(root), Some(index)) = (workspace, view.question_index) {
-        left.extend(crate::tui::candidate_sync::workspace_preview(root, index));
+        let latest_run = view.latest_run();
+        left.extend(crate::tui::candidate_sync::workspace_preview_with_run(
+            root,
+            index,
+            latest_run.as_ref(),
+        ));
     }
     if connection_lost {
         left.push(CONNECTION_LOST.to_string());
@@ -228,7 +233,7 @@ fn composer_lines(state: &CandidateRunState) -> Vec<String> {
         }
         CandidateFocus::Redirect => {
             vec![sanitize_display(&format!(
-                "additional notes: {}",
+                "instructions: {}",
                 state.work.redirect_text()
             ))]
         }
@@ -242,7 +247,7 @@ fn composer_lines(state: &CandidateRunState) -> Vec<String> {
             }
             if !state.work.redirect_text().is_empty() {
                 lines.push(sanitize_display(&format!(
-                    "additional notes: {}",
+                    "instructions: {}",
                     state.work.redirect_text()
                 )));
             }
@@ -270,6 +275,11 @@ pub fn question_pinned_count(lines: &[String]) -> usize {
 /// What the question pane says while code is being written, and
 /// once that code has landed in the question folder.
 fn work_banner(state: &CandidateRunState, view: &CandidateView) -> Option<String> {
+    if let Some(index) = view.question_index {
+        if let Some(banner) = state.staging.flow_for(index).banner_text(index) {
+            return Some(banner);
+        }
+    }
     if let Some(pending) = &state.pending_approach {
         if view.question_index == Some(pending.index)
             && view.selected.as_ref() != Some(&pending.selection)
@@ -311,17 +321,20 @@ fn question_hint(state: &CandidateRunState, option_count: usize) -> String {
         CandidateFocus::Chat => {
             "focus: enter send, backspace delete, up/down scroll, tab panel, esc quit".to_string()
         }
+        _ if state.staging.current_flow().is_busy() => {
+            "focus: working, tab panel, ? help, esc quit".to_string()
+        }
         _ if cursor_on_other(state, option_count) => {
             "focus: enter submit, backspace delete, tab panel, esc quit".to_string()
         }
         _ if state.after_code.as_ref().is_some_and(|(index, _)| {
             state.staging.current_index() == Some(*index)
-        }) =>
+        }) || state.staging.current_flow()
+            == crate::tui::candidate_stage::QuestionFlowState::SolutionReady =>
         {
-            "focus: f submit question, t run tests, left/right question, tab panel, esc quit"
+            "focus: c continue, r run, t run tests, a change approach, f submit, tab panel, esc quit"
                 .to_string()
         }
-        _ => "focus: up/down move, space select, enter submit, left/right question, tab panel, esc quit"
-            .to_string(),
+        _ => "focus: up/down move, space select, enter submit, tab panel, esc quit".to_string(),
     }
 }

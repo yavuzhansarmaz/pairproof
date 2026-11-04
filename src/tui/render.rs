@@ -125,6 +125,11 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
         let is_end_key =
             (text[i..].starts_with("e end") || text[i..].starts_with("e to end")) && prev_ok(i);
         let is_reissue_key = text[i..].starts_with("c reissue") && prev_ok(i);
+        let is_continue_key = text[i..].starts_with("c continue") && prev_ok(i);
+        let is_run_key = text[i..].starts_with("r run") && prev_ok(i);
+        let is_test_key = text[i..].starts_with("t run tests") && prev_ok(i);
+        let is_change_key = text[i..].starts_with("a change approach") && prev_ok(i);
+        let is_submit_key = text[i..].starts_with("f submit") && prev_ok(i);
         let is_help = bytes[i] == b'?'
             && i > 0
             && bytes[i - 1] == b' '
@@ -145,6 +150,11 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
             || is_random
             || is_end_key
             || is_reissue_key
+            || is_continue_key
+            || is_run_key
+            || is_test_key
+            || is_change_key
+            || is_submit_key
             || is_help
         {
             if raw_start < i {
@@ -178,8 +188,16 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
                 ("r", HELP_KEY_COLOR, 1)
             } else if is_end_key {
                 ("e", PAIR_COLOR, 1)
-            } else if is_reissue_key {
+            } else if is_reissue_key || is_continue_key {
                 ("c", PAIR_COLOR, 1)
+            } else if is_run_key {
+                ("r", PAIR_COLOR, 1)
+            } else if is_test_key {
+                ("t", PAIR_COLOR, 1)
+            } else if is_change_key {
+                ("a", PAIR_COLOR, 1)
+            } else if is_submit_key {
+                ("f", ENTER_KEY_COLOR, 1)
             } else {
                 ("?", HELP_KEY_COLOR, 1)
             };

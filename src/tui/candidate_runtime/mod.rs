@@ -139,6 +139,9 @@ pub trait CandidateTransport {
     fn write_final_ack(&mut self, _session_id: &str) -> Result<(), CandidateRuntimeError> {
         Ok(())
     }
+    fn sync_tracks_workspace(&self) -> bool {
+        false
+    }
     fn flush_sync(&mut self, session_id: &str) -> Result<(), CandidateRuntimeError>;
     fn terminate_sync(&mut self, session_id: &str) -> Result<(), CandidateRuntimeError>;
 }
@@ -157,6 +160,9 @@ pub struct CandidateRuntime<T: CandidateTransport> {
     last_hb_ms: u64,
     recovery_view: Option<SnapshotRecovery>,
     last_recovery_generation: u64,
+    synced_revisions: std::collections::BTreeMap<usize, u64>,
+    synced_question: Option<usize>,
+    sync_failed: bool,
 }
 impl<T: CandidateTransport> CandidateRuntime<T> {
     pub fn new(session_id: impl Into<String>, workspace: PathBuf, transport: T) -> Self {
@@ -174,6 +180,9 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
             last_hb_ms: 0,
             recovery_view: None,
             last_recovery_generation: 0,
+            synced_revisions: std::collections::BTreeMap::new(),
+            synced_question: None,
+            sync_failed: false,
         }
     }
     pub fn new_discovering(workspace: PathBuf, transport: T) -> Self {
@@ -333,10 +342,73 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
                     self.ack_sent = true;
                     let _ = self.transport.write_final_ack(&self.session_id);
                 }
+                self.sync_snapshot_workspace(&snapshot);
                 self.last_snapshot = Some(snapshot.clone());
                 Ok(Some(snapshot))
             }
         }
+    }
+    fn sync_snapshot_workspace(&mut self, snapshot: &CandidateSnapshot) {
+        let Some(current) = &snapshot.current else {
+            return;
+        };
+        let index = current.index;
+        if self.synced_question != Some(index) {
+            self.synced_question = Some(index);
+            if self.transport.sync_tracks_workspace() {
+                let _ = self.transport.flush_sync(&self.session_id);
+            }
+        }
+        let rev = snapshot.code_revision();
+        let target_rev = if rev > 0 {
+            rev
+        } else {
+            u64::from(snapshot.selected.is_some())
+        };
+        if target_rev == 0 {
+            return;
+        }
+        let local_ok = !self.transport.sync_tracks_workspace()
+            || crate::tui::candidate_sync::has_synced_solution(&self.workspace, index);
+        if self.synced_revisions.get(&index).copied().unwrap_or(0) >= target_rev && local_ok {
+            return;
+        }
+        match self.transport.flush_sync(&self.session_id) {
+            Ok(()) => {
+                let now_local_ok = !self.transport.sync_tracks_workspace()
+                    || crate::tui::candidate_sync::has_synced_solution(&self.workspace, index);
+                if now_local_ok {
+                    self.synced_revisions.insert(index, target_rev);
+                    self.sync_failed = false;
+                }
+            }
+            Err(_) => {
+                self.sync_failed = true;
+            }
+        }
+    }
+    /// True when the solution for `index` has been synchronized to the workspace.
+    pub fn is_solution_synced(&self, index: usize) -> bool {
+        if self.sync_failed {
+            return false;
+        }
+        if self.transport.sync_tracks_workspace() {
+            crate::tui::candidate_sync::has_synced_solution(&self.workspace, index)
+                && self.last_snapshot.as_ref().is_none_or(|s| {
+                    let rev = s.code_revision();
+                    let target = if rev > 0 {
+                        rev
+                    } else {
+                        u64::from(s.selected.is_some())
+                    };
+                    target == 0 || self.synced_revisions.get(&index).copied().unwrap_or(0) >= target
+                })
+        } else {
+            true
+        }
+    }
+    pub fn sync_failed(&self) -> bool {
+        self.sync_failed
     }
     /// Reconnects with a fresh string: drops stale sync, then full connect.
     pub fn reconnect(
@@ -349,6 +421,7 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
         let _ = self.transport.terminate_sync(&self.session_id);
         self.phase = CandidateRuntimePhase::Disconnected;
         self.lost = false;
+        self.sync_failed = false;
         self.connect(connection)
     }
     /// Tells the expert the candidate is leaving, so its monitor
@@ -364,7 +437,9 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
         if self.phase != CandidateRuntimePhase::Connected {
             return Err(CandidateRuntimeError::NotConnected);
         }
-        self.transport.flush_sync(&self.session_id)
+        let result = self.transport.flush_sync(&self.session_id);
+        self.sync_failed = result.is_err();
+        result
     }
     /// Terminates sync and ends; local files are preserved.
     pub fn end(&mut self) -> Result<(), CandidateRuntimeError> {
@@ -378,6 +453,17 @@ impl<T: CandidateTransport> CandidateRuntime<T> {
     pub fn view(&self) -> CandidateView {
         let mut view = CandidateView::from_snapshot(self.last_snapshot.as_ref());
         view.recovery = self.recovery_view.clone();
+        if self.sync_failed {
+            view.sync_phase = crate::orchestration::sync_gate::SessionSyncPhase::Problem
+                .label()
+                .to_string();
+        } else if self.phase == CandidateRuntimePhase::Connected
+            && (view.sync_phase.is_empty() || view.sync_phase == "Sync: not started")
+        {
+            view.sync_phase = crate::orchestration::sync_gate::SessionSyncPhase::Active
+                .label()
+                .to_string();
+        }
         view
     }
 }

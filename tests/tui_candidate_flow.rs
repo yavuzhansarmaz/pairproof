@@ -183,12 +183,12 @@ fn solving_keys_dispatch_with_unavailable_runners_honestly() {
     let mut state = solving_state(started());
     assert_eq!(state.app.screen(), CandidateScreen::Solving);
     assert_eq!(state.focus, CandidateFocus::Work);
-    handle_candidate_key(&mut state, key(KeyCode::Char('s')));
+    handle_candidate_key(&mut state, key(KeyCode::Char('f')));
     {
         let session = state.app.session().expect("session");
         assert_eq!(
             session.slot(0).expect("slot").status,
-            QuestionStatus::Skipped
+            QuestionStatus::Finished
         );
         assert_eq!(session.current_index(), Some(1));
     }

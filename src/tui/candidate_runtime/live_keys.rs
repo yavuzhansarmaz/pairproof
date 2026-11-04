@@ -1,8 +1,9 @@
 //! Candidate live key handling: work/other/redirect/chat pane
-//! keys mapped to control-channel intents.
+//! keys mapped to control-channel intents and question lifecycle states.
 
 use super::*;
 
+use crate::tui::candidate_stage::QuestionFlowState;
 use crate::tui::shared::pop_last;
 
 /// True when the approach cursor sits on the `other` row.
@@ -37,8 +38,17 @@ fn remember_submit(
     let Some(index) = view.question_index else {
         return;
     };
-    state.pending_approach =
-        Some(crate::tui::candidate_stage::PendingApproach { index, selection });
+    state.pending_approach = Some(crate::tui::candidate_stage::PendingApproach {
+        index,
+        selection: selection.clone(),
+    });
+    state.staging.set_flow(
+        index,
+        QuestionFlowState::GeneratingInitialSolution {
+            selection,
+            base_revision: view.code_revision(),
+        },
+    );
     state.after_code = None;
 }
 
@@ -72,23 +82,23 @@ fn submit_other_row<T: CandidateTransport>(
     }
 }
 
-/// Drops the local "writing the code" line once the snapshot shows
-/// the approach that was submitted.
-pub(crate) fn settle_pending(state: &mut CandidateRunState, view: &CandidateView) {
-    let landed = state.pending_approach.as_ref().is_some_and(|pending| {
-        view.question_index == Some(pending.index)
-            && view.selected.as_ref() == Some(&pending.selection)
-    });
-    if landed {
-        if let Some(pending) = state.pending_approach.take() {
-            let n = pending.index + 1;
-            state.after_code = Some((
-                pending.index,
-                format!("code is in q{n}/. press f to submit this question."),
-            ));
-        }
-    }
+/// Settles pending operations against both the snapshot and real workspace sync.
+pub(crate) fn settle_runtime<T: CandidateTransport>(
+    state: &mut CandidateRunState,
+    runtime: &CandidateRuntime<T>,
+    view: &CandidateView,
+) {
+    let synced = view
+        .question_index
+        .is_none_or(|idx| runtime.is_solution_synced(idx));
+    crate::tui::candidate_stage::settle_with_sync(state, view, synced, runtime.sync_failed());
 }
+
+/// Settles pending operations from the view alone (used when no runtime is attached).
+pub(crate) fn settle_pending(state: &mut CandidateRunState, view: &CandidateView) {
+    crate::tui::candidate_stage::settle_with_sync(state, view, true, false);
+}
+
 /// Syncs the local staging to the snapshot's current question and
 /// returns the live view the key handler acts on.
 pub(crate) fn sync_staging(state: &mut CandidateRunState, view: &CandidateView) {
@@ -105,33 +115,96 @@ pub(crate) fn sync_staging(state: &mut CandidateRunState, view: &CandidateView) 
     }
 }
 
-/// Sends a question switch for `delta` in the navigation list; the
-/// staged choices stay saved per question and are restored when the
-/// new snapshot lands.
-fn navigate<T: CandidateTransport>(
+/// Blocks arrow-key question switching: the candidate stays on the
+/// current question until pressing `f`, and submitted questions stay locked.
+fn navigate(status: &mut Option<String>, delta: i32) {
+    if delta < 0 {
+        *status = Some("submitted questions cannot be reopened.".to_string());
+    } else if delta > 0 {
+        *status = Some("press f to submit this question and advance to the next.".to_string());
+    }
+}
+
+fn has_solution<T: CandidateTransport>(
+    runtime: &CandidateRuntime<T>,
+    view: &CandidateView,
+) -> bool {
+    view.question_index.is_none()
+        || view.selected.is_some()
+        || view.question_index.is_some_and(|i| {
+            crate::tui::candidate_sync::has_synced_solution(runtime.workspace(), i)
+        })
+}
+
+fn flush_before_action<T: CandidateTransport>(
+    runtime: &mut CandidateRuntime<T>,
+    status: &mut Option<String>,
+) -> bool {
+    match runtime.flush() {
+        Ok(()) => true,
+        Err(err) => {
+            *status = Some(crate::tui::help::candidate_error_message(&err).to_string());
+            false
+        }
+    }
+}
+
+fn guard_question_action(
+    state: &CandidateRunState,
+    view: &CandidateView,
+    status: &mut Option<String>,
+    submitting_attempt: bool,
+) -> bool {
+    let Some(index) = view.question_index else {
+        return true;
+    };
+    let flow = state.staging.flow_for(index);
+    if flow.is_submitted_or_submitting()
+        || view
+            .nav
+            .iter()
+            .any(|n| n.index == index && n.state == "Finished")
+    {
+        *status = Some("this question has already been submitted.".to_string());
+        return false;
+    }
+    if flow.is_busy() {
+        *status = Some(if submitting_attempt {
+            "wait for the current operation to finish before submitting.".to_string()
+        } else {
+            "working on the current step; wait a moment.".to_string()
+        });
+        return false;
+    }
+    true
+}
+
+fn run_solution_action<T: CandidateTransport>(
     state: &mut CandidateRunState,
     runtime: &mut CandidateRuntime<T>,
     status: &mut Option<String>,
     view: &CandidateView,
-    delta: i32,
 ) {
-    let (Some(current), false) = (view.question_index, view.nav.is_empty()) else {
-        return;
-    };
-    let Some(pos) = view.nav.iter().position(|entry| entry.index == current) else {
-        return;
-    };
-    let target_pos = pos as i32 + delta;
-    if target_pos < 0 || target_pos >= view.nav.len() as i32 {
+    if !guard_question_action(state, view, status, false) {
         return;
     }
-    let target = view.nav[target_pos as usize].index;
-    let outgoing = state.work.other_text().to_string();
-    state.staging.save_other_text(&outgoing);
-    apply(
-        status,
-        runtime.send_intent(IntentKind::Navigate { index: target }),
-    );
+    if !has_solution(runtime, view) {
+        *status = Some("select an approach and generate a solution first.".to_string());
+        return;
+    }
+    if !flush_before_action(runtime, status) {
+        return;
+    }
+    if apply(status, runtime.send_intent(IntentKind::RunSolution)) {
+        if let Some(index) = view.question_index {
+            state.staging.set_flow(
+                index,
+                QuestionFlowState::RunningSolution {
+                    base_seq: view.run_seq(),
+                },
+            );
+        }
+    }
 }
 
 pub fn handle_live_key<T: CandidateTransport>(
@@ -152,9 +225,6 @@ pub fn handle_live_key<T: CandidateTransport>(
         }
         _ => {}
     }
-    // The expert quit, or the sandbox is gone. Leave the work keys
-    // alone; Enter dismisses the notice. R is handled by the TTY loop
-    // before this, so a fresh string can still reconnect.
     if runtime.connection_lost() && !runtime.view().is_terminal() {
         if key.code == K::Enter {
             state.app.quit();
@@ -184,23 +254,27 @@ pub fn handle_live_key<T: CandidateTransport>(
     }
     let view = runtime.view();
     sync_staging(state, &view);
+    settle_runtime(state, runtime, &view);
     match state.focus {
         CandidateFocus::Work => match key.code {
             K::Tab => state.focus = next_focus(state.focus),
             K::Up => state.staging.move_cursor(-1, view.options.len()),
             K::Down => state.staging.move_cursor(1, view.options.len()),
-            K::Left => navigate(state, runtime, status, &view, -1),
-            K::Right => navigate(state, runtime, status, &view, 1),
+            K::Left => navigate(status, -1),
+            K::Right => navigate(status, 1),
             K::Char(' ') if !control => {
+                if !guard_question_action(state, &view, status, false) {
+                    return;
+                }
                 state.staging.mark_cursor(view.options.len());
-                // Selecting the other row opens its text field. The
-                // letters that follow belong to the approach, not to
-                // the redirect command.
                 if cursor_on_other(state, view.options.len()) {
                     state.focus = CandidateFocus::Other;
                 }
             }
             K::Enter => {
+                if !guard_question_action(state, &view, status, false) {
+                    return;
+                }
                 let option_count = view.options.len();
                 if option_count == 0 {
                     *status = Some("loading".to_string());
@@ -212,8 +286,6 @@ pub fn handle_live_key<T: CandidateTransport>(
                     .map(|stage| stage.cursor as u8)
                     .filter(|preset| (*preset as usize) < option_count)
                 {
-                    // Enter submits the highlighted row. Space still
-                    // marks, but the cursor alone is the selection.
                     state.staging.mark_cursor(option_count);
                     if apply(
                         status,
@@ -223,9 +295,10 @@ pub fn handle_live_key<T: CandidateTransport>(
                     }
                 }
             }
-            // The other row is a text field: `d` and the other work
-            // keys are letters of the approach, not commands.
             K::Char(c) if !control && cursor_on_other(state, view.options.len()) => {
+                if !guard_question_action(state, &view, status, false) {
+                    return;
+                }
                 state.staging.mark_cursor(view.options.len());
                 state.focus = CandidateFocus::Other;
                 let _ = other_insert(&mut state.work, &c.to_string(), false);
@@ -233,7 +306,9 @@ pub fn handle_live_key<T: CandidateTransport>(
             }
             K::Char(c) if !control => match work_key_action(c) {
                 Some(WorkKeyAction::SelectPreset(preset)) => {
-                    // Number keys only move the mark; Enter submits.
+                    if !guard_question_action(state, &view, status, false) {
+                        return;
+                    }
                     if (preset as usize) < view.options.len() {
                         state.staging.move_cursor(
                             preset as i32
@@ -248,33 +323,87 @@ pub fn handle_live_key<T: CandidateTransport>(
                     }
                 }
                 Some(WorkKeyAction::OpenOther) => {
+                    if !guard_question_action(state, &view, status, false) {
+                        return;
+                    }
                     state.staging.cursor_to_other(view.options.len());
                     state.staging.mark_cursor(view.options.len());
                     state.focus = CandidateFocus::Other;
                 }
                 Some(WorkKeyAction::Continue) => {
-                    apply(status, runtime.send_intent(IntentKind::Continue));
+                    if !guard_question_action(state, &view, status, false) {
+                        return;
+                    }
+                    if !has_solution(runtime, &view) && state.pending_approach.is_none() {
+                        *status = Some("select an approach and press enter first.".to_string());
+                        return;
+                    }
+                    if let Some(index) = view.question_index {
+                        state
+                            .staging
+                            .set_flow(index, QuestionFlowState::ContinuingInteraction);
+                    }
+                    state.focus = CandidateFocus::Redirect;
                 }
                 Some(WorkKeyAction::ChangeApproach) => {
-                    apply(status, runtime.send_intent(IntentKind::ChangeApproach));
+                    if !guard_question_action(state, &view, status, false) {
+                        return;
+                    }
+                    if apply(status, runtime.send_intent(IntentKind::ChangeApproach)) {
+                        if let Some(index) = view.question_index {
+                            state
+                                .staging
+                                .set_flow(index, QuestionFlowState::AwaitingApproach);
+                        }
+                        state.pending_approach = None;
+                        state.after_code = None;
+                    }
                 }
-                Some(WorkKeyAction::OpenRedirect) => state.focus = CandidateFocus::Redirect,
+                Some(WorkKeyAction::RunSolution) => {
+                    run_solution_action(state, runtime, status, &view);
+                }
                 Some(WorkKeyAction::RequestTests) => {
-                    apply(status, runtime.send_intent(IntentKind::RequestTests));
-                }
-                Some(WorkKeyAction::Skip) => {
-                    apply(status, runtime.send_intent(IntentKind::Skip));
-                }
-                Some(WorkKeyAction::Finish) => {
-                    if apply(status, runtime.send_intent(IntentKind::Finish)) {
-                        if let Err(err) = runtime.flush() {
-                            *status =
-                                Some(crate::tui::help::candidate_error_message(&err).to_string());
+                    if !guard_question_action(state, &view, status, false) {
+                        return;
+                    }
+                    if !has_solution(runtime, &view) {
+                        *status =
+                            Some("select an approach and generate a solution first.".to_string());
+                        return;
+                    }
+                    if !flush_before_action(runtime, status) {
+                        return;
+                    }
+                    if apply(status, runtime.send_intent(IntentKind::RequestTests)) {
+                        if let Some(index) = view.question_index {
+                            state.staging.set_flow(
+                                index,
+                                QuestionFlowState::RunningTests {
+                                    base_seq: view.run_seq(),
+                                },
+                            );
                         }
                     }
                 }
-                Some(WorkKeyAction::RequestReQuestion) => {
-                    apply(status, runtime.send_intent(IntentKind::RequestReQuestion));
+                Some(WorkKeyAction::Finish) => {
+                    if !guard_question_action(state, &view, status, true) {
+                        return;
+                    }
+                    if !has_solution(runtime, &view) {
+                        *status =
+                            Some("select an approach and generate a solution first.".to_string());
+                        return;
+                    }
+                    if !flush_before_action(runtime, status) {
+                        return;
+                    }
+                    if apply(status, runtime.send_intent(IntentKind::Finish)) {
+                        if let Some(index) = view.question_index {
+                            state.staging.set_flow(index, QuestionFlowState::Submitting);
+                        }
+                        state.pending_approach = None;
+                        state.after_code = None;
+                    }
                 }
                 None => {}
             },
@@ -283,7 +412,9 @@ pub fn handle_live_key<T: CandidateTransport>(
         CandidateFocus::Other => match key.code {
             K::Tab => state.focus = next_focus(state.focus),
             K::Enter => {
-                // A blank `Other` is a valid submission.
+                if !guard_question_action(state, &view, status, false) {
+                    return;
+                }
                 let text = state.work.other_text().to_string();
                 if apply(
                     status,
@@ -308,12 +439,59 @@ pub fn handle_live_key<T: CandidateTransport>(
             _ => {}
         },
         CandidateFocus::Redirect => match key.code {
-            K::Tab => state.focus = next_focus(state.focus),
+            K::Tab => {
+                if let Some(index) = view.question_index {
+                    if state.staging.flow_for(index) == QuestionFlowState::ContinuingInteraction {
+                        state
+                            .staging
+                            .set_flow(index, QuestionFlowState::SolutionReady);
+                    }
+                }
+                state.focus = next_focus(state.focus);
+            }
             K::Enter => {
-                let text = state.work.redirect_text().to_string();
-                if text.trim().is_empty() {
-                    *status = Some("type additional notes first, then press enter.".to_string());
-                } else if apply(status, runtime.send_intent(IntentKind::Redirect { text })) {
+                if !guard_question_action(state, &view, status, false) {
+                    return;
+                }
+                if !flush_before_action(runtime, status) {
+                    return;
+                }
+                let text = state.work.redirect_text().trim().to_string();
+                let base_revision = view.code_revision();
+                if text.is_empty() {
+                    if apply(status, runtime.send_intent(IntentKind::Continue)) {
+                        if let Some(index) = view.question_index {
+                            state.staging.set_flow(
+                                index,
+                                QuestionFlowState::UpdatingSolution {
+                                    instruction: None,
+                                    base_revision,
+                                },
+                            );
+                        }
+                        state.after_code = None;
+                        state.focus = CandidateFocus::Work;
+                    }
+                } else if apply(
+                    status,
+                    runtime.send_intent(IntentKind::Redirect { text: text.clone() }),
+                ) {
+                    if let Some(index) = view.question_index {
+                        let next_flow =
+                            if crate::orchestration::coding::instruction_wants_tests(&text) {
+                                QuestionFlowState::UpdatingTests {
+                                    instruction: text,
+                                    base_revision,
+                                }
+                            } else {
+                                QuestionFlowState::UpdatingSolution {
+                                    instruction: Some(text),
+                                    base_revision,
+                                }
+                            };
+                        state.staging.set_flow(index, next_flow);
+                    }
+                    state.after_code = None;
                     state.work.set_redirect_text("");
                     state.focus = CandidateFocus::Work;
                 }

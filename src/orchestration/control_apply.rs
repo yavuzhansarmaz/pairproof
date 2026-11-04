@@ -4,7 +4,6 @@
 
 use std::time::Duration;
 
-use crate::orchestration::coding::{CodingStepOutcome, SandboxIo};
 use crate::orchestration::control::{Intent, IntentKind};
 use crate::orchestration::control_server::{
     publish_snapshot, ControlExecutor, ControlIo, ControlTransports,
@@ -12,48 +11,36 @@ use crate::orchestration::control_server::{
 use crate::orchestration::pipeline::{PipelineError, QuestionPipeline};
 use crate::orchestration::session::Orchestrator;
 
-/// Runs the written file when it compiles. The question stays open:
-/// the candidate submits it with Finish, and only that opens the next one.
-async fn advance_solved_question(
-    pipe: &mut QuestionPipeline,
-    orch: &mut Orchestrator,
-    sandbox: &dyn SandboxIo,
-    now_ms: u64,
-    outcome: &CodingStepOutcome,
-) -> Result<(), PipelineError> {
-    if !outcome.runnable {
-        return Ok(());
-    }
-    pipe.request_tests(orch, sandbox, now_ms).await?;
-    Ok(())
-}
-
 impl ControlExecutor {
     #[rustfmt::skip] #[allow(unused_assignments)]
     pub(crate) async fn apply_one(&mut self, io: &dyn ControlIo, intent: &Intent, orch: &mut Orchestrator,
         pipe: &mut QuestionPipeline, t: &ControlTransports<'_>, now_ms: u64) -> Result<(), PipelineError> {
         match &intent.kind {
             IntentKind::SelectPreset { preset } => {
-                let outcome = pipe.select_preset(orch, *preset, t.coding, t.sandbox, now_ms).await?;
-                advance_solved_question(pipe, orch, t.sandbox, now_ms, &outcome).await
+                pipe.select_preset(orch, *preset, t.coding, t.sandbox, now_ms).await?;
+                Ok(())
             }
             IntentKind::SelectOther { text } => {
-                let outcome = pipe.select_other(orch, text, t.generator, t.coding, t.sandbox, now_ms).await?;
-                advance_solved_question(pipe, orch, t.sandbox, now_ms, &outcome).await
+                pipe.select_other(orch, text, t.generator, t.coding, t.sandbox, now_ms).await?;
+                Ok(())
             }
             IntentKind::Continue => {
-                let outcome = pipe.continue_coding(orch, t.coding, t.sandbox, now_ms).await?;
-                advance_solved_question(pipe, orch, t.sandbox, now_ms, &outcome).await
+                pipe.continue_coding(orch, t.coding, t.sandbox, now_ms).await?;
+                Ok(())
             }
             IntentKind::Redirect { text } => {
-                let outcome = pipe.redirect_coding(orch, text, t.coding, t.sandbox, now_ms).await?;
-                advance_solved_question(pipe, orch, t.sandbox, now_ms, &outcome).await
+                pipe.redirect_coding(orch, text, t.coding, t.sandbox, now_ms).await?;
+                Ok(())
+            }
+            IntentKind::RunSolution => {
+                pipe.run_solution(orch, t.sandbox, now_ms).await?;
+                Ok(())
             }
             IntentKind::RequestTests => {
                 pipe.request_tests(orch, t.sandbox, now_ms).await?;
                 Ok(())
             }
-            IntentKind::Finish => pipe.finish_question(orch, now_ms),
+            IntentKind::Finish => pipe.finish_question_with_sandbox(orch, t.sandbox, now_ms).await,
             IntentKind::Skip => pipe.skip_question(orch, now_ms),
             IntentKind::RequestReQuestion => orch.request_requestion(now_ms).map_err(PipelineError::from),
             IntentKind::ChangeApproach => pipe.change_approach(orch, now_ms),

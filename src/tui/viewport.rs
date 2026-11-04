@@ -293,38 +293,57 @@ pub fn summary_table(lines: &[String]) -> Vec<String> {
     ]
 }
 
-/// Inner width of the centred final panel for a document whose
-/// longest line is `longest` columns, on a terminal `area_width` wide.
-/// Matches [`crate::tui::render::panel_area`] so the rating table can
-/// sit in the middle of the same box the screen actually draws.
-fn final_inner_width(area_width: u16, longest: usize) -> usize {
-    let wanted = (longest as u16).saturating_add(4).clamp(44, 104);
+/// Line length that keeps the centred panel the same width on every
+/// scroll row. [`crate::tui::render::panel_area`] sizes the card from
+/// the longest visible line, so a long question makes it grow and a
+/// short one makes it shrink. Zero means the card is already at its
+/// minimum and short rows cannot change it.
+fn panel_lock_len(area_width: u16, longest: usize) -> usize {
+    let natural = (longest as u16).saturating_add(4);
+    if natural < 44 {
+        return 0;
+    }
+    let wanted = natural.min(104);
     let panel = if area_width == 0 {
         wanted
     } else {
         area_width.min(wanted)
     };
-    usize::from(panel.saturating_sub(2))
+    if area_width > 0 && area_width < 44 {
+        return 0;
+    }
+    usize::from(panel.saturating_sub(4))
 }
 
-/// Centres `line` in `inner` columns. A line that already fills the
-/// box stays as it is. Trailing spaces keep the centred row as wide
-/// as the box, so the panel does not jump narrower while scrolling.
-fn center_line(line: &str, inner: usize) -> String {
+/// Centres `line` in `width` columns and pads the row out to that
+/// width. The exit line is not passed here: it stays left-aligned,
+/// like every other screen's footer.
+fn center_line(line: &str, width: usize) -> String {
     let len = line.chars().count();
-    if inner == 0 || len >= inner {
+    if width == 0 || len >= width {
         return line.to_string();
     }
-    let left = (inner - len) / 2;
-    let right = inner - len - left;
+    let left = (width - len) / 2;
+    let right = width - len - left;
     format!("{}{line}{}", " ".repeat(left), " ".repeat(right))
+}
+
+/// Pads `line` with trailing spaces out to `lock` columns. The text
+/// stays where it is; only the measured width changes.
+fn hold_width(line: &str, lock: usize) -> String {
+    let len = line.chars().count();
+    if lock <= len {
+        return line.to_string();
+    }
+    format!("{line}{}", " ".repeat(lock - len))
 }
 
 /// Scrolls a final breakdown as one page. Rating lines become a
 /// table centred in the panel, placed after the questions, and the
-/// whole page moves one row at a time with `scroll`. `area_width` is
-/// the terminal width. Zero means "no terminal yet": the table is
-/// still centred in the natural panel.
+/// whole page moves one row at a time with `scroll`. The exit line
+/// stays left-aligned. Every row is padded to the same measured
+/// width so the card does not grow or shrink while scrolling.
+/// `area_width` is the terminal width. Zero means "no terminal yet".
 pub fn final_frame(lines: &[String], height: usize, scroll: usize, area_width: u16) -> FinalFrame {
     if height == 0 {
         return FinalFrame {
@@ -347,29 +366,35 @@ pub fn final_frame(lines: &[String], height: usize, scroll: usize, area_width: u
         }
     }
     collapse_blanks(&mut body);
-    let mut pinned = summary_table(&summary);
-    if footer.is_some() || !summary.is_empty() {
-        pinned.push(footer.unwrap_or_else(|| "enter to exit".to_string()));
-    }
+    let mut table = summary_table(&summary);
+    let exit = if footer.is_some() || !summary.is_empty() {
+        Some(footer.unwrap_or_else(|| "enter to exit".to_string()))
+    } else {
+        None
+    };
     let longest = body
         .iter()
-        .chain(pinned.iter())
+        .chain(table.iter())
+        .chain(exit.iter())
         .map(|line| line.chars().count())
         .max()
         .unwrap_or(0);
-    let inner = final_inner_width(area_width, longest);
-    for line in &mut pinned {
-        *line = center_line(line, inner);
+    let lock = panel_lock_len(area_width, longest);
+    for line in &mut table {
+        *line = center_line(line, lock);
     }
     // One document: the questions and the centred rating move
-    // together. A short page keeps the title on the first row and
-    // the rating on the last, with the gap between them.
+    // together. `enter to exit` stays on the left. A short page keeps
+    // the title on the first row and the rating on the last.
     let mut doc = body;
-    doc.extend(pinned);
+    doc.extend(table);
+    if let Some(exit) = exit {
+        doc.push(exit);
+    }
     let max_scroll = doc.len().saturating_sub(height);
     let scroll = scroll.min(max_scroll);
     let window: Vec<String> = doc.into_iter().skip(scroll).take(height).collect();
-    let visible = if window.len() < height && !window.is_empty() {
+    let mut visible = if window.len() < height && !window.is_empty() {
         let pad = height - window.len();
         let mut out = Vec::with_capacity(height);
         out.push(window[0].clone());
@@ -379,6 +404,11 @@ pub fn final_frame(lines: &[String], height: usize, scroll: usize, area_width: u
     } else {
         window
     };
+    if lock > 0 {
+        if let Some(first) = visible.first_mut() {
+            *first = hold_width(first, lock);
+        }
+    }
     FinalFrame {
         lines: visible,
         scroll,

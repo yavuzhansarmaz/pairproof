@@ -89,4 +89,16 @@ pub fn heartbeat_bytes(session_id: &str, at_ms: u64) -> Vec<u8> { serde_json::to
 pub fn parse_heartbeat(data: &[u8], expected_session: &str) -> Result<Heartbeat, ControlError> { if data.len() > MAX_CONTROL_READ_BYTES { return Err(ControlError::Oversized); } let hb: Heartbeat = serde_json::from_slice(data)?; if hb.v != HEARTBEAT_VERSION { Err(ControlError::WrongVersion(u64::from(hb.v))) } else if hb.session_id != expected_session { Err(ControlError::WrongSession) } else { Ok(hb) } }
 /// Parses a snapshot and rejects a wrong version or session binding.
 #[rustfmt::skip]
-pub fn parse_snapshot(data: &[u8], expected_session: &str) -> Result<CandidateSnapshot, ControlError> { if data.len() > MAX_CONTROL_READ_BYTES { return Err(ControlError::Oversized); } let snap: CandidateSnapshot = serde_json::from_slice(data)?; if snap.v != SNAPSHOT_VERSION { Err(ControlError::WrongVersion(u64::from(snap.v))) } else if snap.session_id != expected_session { Err(ControlError::WrongSession) } else { Ok(snap) } }
+pub fn parse_snapshot(data: &[u8], expected_session: &str) -> Result<CandidateSnapshot, ControlError> {
+    if data.len() > MAX_CONTROL_READ_BYTES { return Err(ControlError::Oversized); }
+    let snap: CandidateSnapshot = serde_json::from_slice(data)?;
+    if snap.v != SNAPSHOT_VERSION { return Err(ControlError::WrongVersion(u64::from(snap.v))); }
+    if snap.session_id != expected_session { return Err(ControlError::WrongSession); }
+    if let Some(current) = &snap.current {
+        let run = serde_json::from_slice::<serde_json::Value>(data).ok()
+            .and_then(|v| v.get("latest_run").cloned())
+            .and_then(|v| serde_json::from_value(v).ok());
+        crate::orchestration::control_snapshot::record_snapshot_run(&snap.session_id, current.index, &current.title, run);
+    }
+    Ok(snap)
+}

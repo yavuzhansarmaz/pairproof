@@ -36,12 +36,10 @@ pub enum WorkKeyAction {
     SelectPreset(u8),
     OpenOther,
     Continue,
-    OpenRedirect,
     ChangeApproach,
+    RunSolution,
     RequestTests,
     Finish,
-    Skip,
-    RequestReQuestion,
 }
 
 /// Classifies a typed work-pane character; `None` is not a work key.
@@ -50,12 +48,10 @@ pub fn work_key_action(c: char) -> Option<WorkKeyAction> {
         '1'..='4' => Some(WorkKeyAction::SelectPreset(c as u8 - b'1')),
         '5' | 'o' => Some(WorkKeyAction::OpenOther),
         'c' => Some(WorkKeyAction::Continue),
-        'd' => Some(WorkKeyAction::OpenRedirect),
         'a' => Some(WorkKeyAction::ChangeApproach),
+        'r' => Some(WorkKeyAction::RunSolution),
         't' => Some(WorkKeyAction::RequestTests),
         'f' => Some(WorkKeyAction::Finish),
-        's' => Some(WorkKeyAction::Skip),
-        'r' => Some(WorkKeyAction::RequestReQuestion),
         _ => None,
     }
 }
@@ -162,24 +158,17 @@ fn handle_work_key(state: &mut CandidateRunState, key: KeyEvent, control: bool) 
                 });
             }
             Some(WorkKeyAction::OpenOther) => state.focus = CandidateFocus::Other,
-            Some(WorkKeyAction::Continue) => state.with_session(|work, session| {
-                let _ = work.continue_work(session, &mut UnavailableCodingRunner, now_ms());
-            }),
-            Some(WorkKeyAction::OpenRedirect) => state.focus = CandidateFocus::Redirect,
+            Some(WorkKeyAction::Continue) => state.focus = CandidateFocus::Redirect,
             Some(WorkKeyAction::ChangeApproach) => state.with_session(|work, session| {
                 let _ = work.change_approach(session, now_ms());
             }),
-            Some(WorkKeyAction::RequestTests) => state.with_session(|work, session| {
-                let _ = work.request_tests(session, &mut UnavailableTestRunner, now_ms());
-            }),
+            Some(WorkKeyAction::RunSolution | WorkKeyAction::RequestTests) => {
+                state.with_session(|work, session| {
+                    let _ = work.request_tests(session, &mut UnavailableTestRunner, now_ms());
+                })
+            }
             Some(WorkKeyAction::Finish) => state.with_session(|work, session| {
                 let _ = work.finish_question(session, now_ms());
-            }),
-            Some(WorkKeyAction::Skip) => state.with_session(|work, session| {
-                let _ = work.skip_question(session, now_ms());
-            }),
-            Some(WorkKeyAction::RequestReQuestion) => state.with_session(|work, session| {
-                let _ = work.request_requestion(session, now_ms());
             }),
             None => {}
         },
@@ -220,8 +209,13 @@ fn handle_redirect_key(state: &mut CandidateRunState, key: KeyEvent, control: bo
     match key.code {
         K::Tab => state.focus = next_focus(state.focus),
         K::Enter => {
+            let empty = state.work.redirect_text().trim().is_empty();
             state.with_session(|work, session| {
-                let _ = work.redirect(session, &mut UnavailableCodingRunner, now_ms());
+                if empty {
+                    let _ = work.continue_work(session, &mut UnavailableCodingRunner, now_ms());
+                } else {
+                    let _ = work.redirect(session, &mut UnavailableCodingRunner, now_ms());
+                }
             });
             if state.work.redirect_text().is_empty() {
                 state.focus = CandidateFocus::Work;

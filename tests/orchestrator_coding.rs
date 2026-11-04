@@ -383,3 +383,160 @@ async fn coding_step_books_tokens_once_on_real_session() {
         .unwrap();
     assert_eq!(orch.session().current_slot().unwrap().actual_tokens, 74);
 }
+
+#[tokio::test]
+async fn full_iterative_question_lifecycle_and_final_submission_boundary() {
+    use pairproof::core::QuestionStatus;
+
+    let (mut orch, mut pipe, _coding, sandbox) = setup(DRAFT_JSON, 10).await;
+    let step_coding = FakeCoding::new(
+        r#"{"code":"def solve(nums):\n    return sum(nums)","ready":false,"summary":"iter"}"#,
+        15,
+    );
+
+    // 1-4. Select approach and generate initial solution; not auto-executed or submitted.
+    let initial = pipe
+        .select_preset(&mut orch, 1, &step_coding, &sandbox, 10)
+        .await
+        .unwrap();
+    assert_eq!(initial.code, "def solve(nums):\n    return sum(nums)");
+    assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(orch.current_index(), Some(0));
+    assert_eq!(
+        orch.session().slot(0).unwrap().status,
+        QuestionStatus::Active
+    );
+    assert_eq!(pipe.code_revision(0), 1);
+
+    // 5-6. Request additional changes (`c` / redirect); question & context are retained.
+    let iter2_coding = FakeCoding::new(
+        r#"{"code":"def solve(nums):\n    if not nums:\n        return 0\n    return sum(nums)","ready":false,"summary":"edge case"}"#,
+        15,
+    );
+    pipe.redirect_coding(
+        &mut orch,
+        "handle empty list edge case",
+        &iter2_coding,
+        &sandbox,
+        20,
+    )
+    .await
+    .unwrap();
+    {
+        let inputs = iter2_coding.inputs.lock().unwrap();
+        assert_eq!(inputs[0].question_statement, "Statement for e0");
+        assert!(!inputs[0].approach_text.is_empty());
+        assert_eq!(
+            inputs[0].current_code,
+            "def solve(nums):\n    return sum(nums)"
+        );
+        assert_eq!(
+            inputs[0].instruction.as_deref(),
+            Some("handle empty list edge case")
+        );
+        assert!(!inputs[0].tests_requested);
+    }
+    assert_eq!(pipe.code_revision(0), 2);
+    assert_eq!(orch.current_index(), Some(0));
+
+    // 7. Request test generation; `tests_requested` becomes true and stays sticky for slot 0.
+    let test_gen_coding = FakeCoding::new(
+        r#"{"code":"def solve(nums):\n    return sum(nums)\nif __name__ == '__main__':\n    assert solve([]) == 0","ready":true,"summary":"with tests"}"#,
+        15,
+    );
+    pipe.redirect_coding(
+        &mut orch,
+        "generate unit tests for empty list",
+        &test_gen_coding,
+        &sandbox,
+        30,
+    )
+    .await
+    .unwrap();
+    assert!(test_gen_coding.inputs.lock().unwrap()[0].tests_requested);
+    assert_eq!(pipe.code_revision(0), 3);
+
+    // 8-9. Run solution and execute tests independently.
+    let run_rec = pipe.run_solution(&mut orch, &sandbox, 40).await.unwrap();
+    assert!(run_rec.outcome.success);
+    assert_eq!(pipe.run_records().len(), 1);
+    assert_eq!(pipe.test_records().len(), 0);
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })),
+        0
+    );
+
+    let test_rec = pipe.request_tests(&mut orch, &sandbox, 50).await.unwrap();
+    assert!(test_rec.outcome.success);
+    assert_eq!(pipe.test_records().len(), 1);
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })),
+        1
+    );
+    assert_eq!(
+        orch.current_index(),
+        Some(0),
+        "passing tests must not auto-submit"
+    );
+
+    // 10-13. Candidate edits file in workspace, then continues with agent; edits and test flag are preserved.
+    sandbox
+        .write_solution(
+            0,
+            Language::Python,
+            "def solve(nums):\n    # candidate manual edit\n    return sum(nums)\n",
+        )
+        .await
+        .unwrap();
+    let iter3_coding = FakeCoding::new(
+        r#"{"code":"def solve(nums):\n    # candidate manual edit + refactored\n    return sum(nums)","ready":true,"summary":"refactored"}"#,
+        15,
+    );
+    pipe.redirect_coding(
+        &mut orch,
+        "refactor implementation",
+        &iter3_coding,
+        &sandbox,
+        60,
+    )
+    .await
+    .unwrap();
+    {
+        let inputs = iter3_coding.inputs.lock().unwrap();
+        assert!(
+            inputs[0].current_code.contains("# candidate manual edit"),
+            "agent must read candidate's workspace edit: {}",
+            inputs[0].current_code
+        );
+        assert!(
+            inputs[0].tests_requested,
+            "test generation flag must remain preserved across iterations"
+        );
+    }
+
+    // Candidate makes one final manual tweak in workspace before pressing `f`.
+    let final_candidate_code =
+        "def solve(nums):\n    return sum(nums)  # final candidate solution\n";
+    sandbox
+        .write_solution(0, Language::Python, final_candidate_code)
+        .await
+        .unwrap();
+
+    // 14-17. Final submission (`f`) captures workspace solution, marks Q0 Finished, advances to Q1, and locks Q0.
+    pipe.finish_question_with_sandbox(&mut orch, &sandbox, 70)
+        .await
+        .unwrap();
+    assert!(pipe.is_submitted(0));
+    assert_eq!(pipe.current_code(0), Some(final_candidate_code));
+    assert_eq!(
+        orch.session().slot(0).unwrap().status,
+        QuestionStatus::Finished
+    );
+    assert_eq!(orch.current_index(), Some(1));
+
+    // Previous question (slot 0) cannot be reopened or modified.
+    assert!(pipe.navigate_question(&mut orch, 0, 71).is_err());
+    assert!(orch.navigate_to(0, 72).is_err());
+    assert_eq!(orch.current_index(), Some(1));
+    assert_eq!(pipe.current_code(0), Some(final_candidate_code));
+}

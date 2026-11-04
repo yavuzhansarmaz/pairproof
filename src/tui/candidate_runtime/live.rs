@@ -65,6 +65,9 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut scrolled_question: Option<usize> = None;
     let mut last_snapshot_poll = std::time::Instant::now() - Duration::from_secs(2);
     let mut breakdown_open = false;
+    let mut final_scrolling = false;
+    let mut held_view = None;
+    let mut final_doc: Option<Vec<String>> = None;
     while state.app.screen() != CandidateScreen::Exited {
         // Apply a finished background connection, if one landed; while
         // it runs the loop keeps drawing the animated loading screen.
@@ -96,21 +99,24 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             }
             Some(Err(std::sync::mpsc::TryRecvError::Empty)) | None => {}
         }
-        // While the divider is held, or the final breakdown is on
-        // screen, keep the last snapshot. A poll spawns askpass and
-        // ssh before the paint. The breakdown refreshes at most once
-        // a second, which is inside the 30s heartbeat timeout, so
-        // scrolling paints without waiting on that process.
+        // A poll spawns askpass and ssh before the paint. Skip it
+        // while the divider is held, and for the whole time the final
+        // page is being scrolled: the next idle frame polls again.
+        // The breakdown also refreshes at most once a second.
         let final_hold = breakdown_open && last_snapshot_poll.elapsed() < Duration::from_secs(1);
-        if live && !dragging_split && !final_hold {
-            if let Some(active) = runtime.as_mut() {
-                if let Err(err) = active.poll_snapshot() {
-                    status = Some(crate::tui::help::candidate_error_message(&err).to_string());
+        if !final_scrolling {
+            final_doc = None;
+            if live && !dragging_split && !final_hold {
+                if let Some(active) = runtime.as_mut() {
+                    if let Err(err) = active.poll_snapshot() {
+                        status = Some(crate::tui::help::candidate_error_message(&err).to_string());
+                    }
                 }
+                last_snapshot_poll = std::time::Instant::now();
             }
-            last_snapshot_poll = std::time::Instant::now();
+            held_view = runtime.as_ref().map(|active| active.view());
         }
-        let tick_view = runtime.as_ref().map(|active| active.view());
+        let tick_view = held_view.as_ref();
         let connection_lost = runtime
             .as_ref()
             .map(|active| active.connection_lost())
@@ -118,7 +124,11 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
         if live {
             if let Some(view) = &tick_view {
                 super::live_keys::sync_staging(state, view);
-                super::live_keys::settle_pending(state, view);
+                if let Some(active) = runtime.as_ref() {
+                    super::live_keys::settle_runtime(state, active, view);
+                } else {
+                    super::live_keys::settle_pending(state, view);
+                }
                 // A new question starts at the top of the pane.
                 let current = view.question_index;
                 if current != scrolled_question {
@@ -175,11 +185,15 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                 }
                 _ => right,
             };
+            let current_flow = state.staging.current_flow();
             let status_rows = tick_view
                 .as_ref()
                 .map(|view| {
-                    view.status_lines_with_pending(state.pending_approach.as_ref())
-                        .len()
+                    view.status_lines_with_flow(
+                        state.pending_approach.as_ref(),
+                        Some(&current_flow),
+                    )
+                    .len()
                 })
                 .unwrap_or(0);
             coach_visible = coach_scroll_rows(height, status_rows);
@@ -196,13 +210,23 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
         }
         if waiting {
             breakdown_open = false;
+            final_scrolling = false;
+            final_doc = None;
             let visible = crate::tui::render::loading_lines(loading_tick);
             let _ = terminal.draw(|frame| crate::tui::render::draw_loading_screen(frame, &visible));
         } else if let Some((left, right, chat_focused)) = &panes {
             breakdown_open = false;
+            final_scrolling = false;
+            final_doc = None;
+            let current_flow = state.staging.current_flow();
             let status_lines = tick_view
                 .as_ref()
-                .map(|view| view.status_lines_with_pending(state.pending_approach.as_ref()))
+                .map(|view| {
+                    view.status_lines_with_flow(
+                        state.pending_approach.as_ref(),
+                        Some(&current_flow),
+                    )
+                })
                 .unwrap_or_default();
             let _ = terminal.draw(|frame| {
                 crate::tui::render::draw_candidate_screen_with_status(
@@ -226,7 +250,13 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                                 state.focus,
                             )
                         } else if view.is_terminal() {
-                            view.final_screen_lines()
+                            if let Some(doc) = final_doc.clone() {
+                                doc
+                            } else {
+                                let built = view.final_screen_lines();
+                                final_doc = Some(built.clone());
+                                built
+                            }
                         } else if connection_lost {
                             CandidateView::expert_closed_lines()
                         } else {
@@ -245,6 +275,10 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             let inner_height = height.saturating_sub(2);
             let breakdown = lines.first().is_some_and(|line| line == "Final breakdown");
             breakdown_open = breakdown;
+            if !breakdown {
+                final_scrolling = false;
+                final_doc = None;
+            }
             let visible = if breakdown {
                 let frame = crate::tui::viewport::final_frame(
                     &lines,
@@ -321,6 +355,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                                 K::End => final_scroll = final_max_scroll,
                                 _ => {}
                             }
+                            final_scrolling = true;
                             break;
                         }
                         // Arrow/page keys scroll the question pane
@@ -484,6 +519,9 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                     }
                     _ => {}
                 }
+                if step_final {
+                    final_scrolling = true;
+                }
                 if step_final
                     || state.app.screen() == CandidateScreen::Exited
                     || !crossterm::event::poll(Duration::ZERO).unwrap_or(false)
@@ -491,6 +529,8 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                     break;
                 }
             }
+        } else {
+            final_scrolling = false;
         }
     }
     if let Some(active) = runtime.as_mut() {

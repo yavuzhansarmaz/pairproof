@@ -199,6 +199,9 @@ impl CandidateTransport for SshCandidateTransport {
         let started = run_mutagen(&env, &["daemon", "start"], Duration::from_secs(20))
             .map(|o| o.success())
             .unwrap_or(false);
+        if started {
+            let _ = run_mutagen(&env, &["sync", "terminate", &name], Duration::from_secs(15));
+        }
         let beta = crate::sync::beta_url(conn.endpoint(), conn.username());
         let created = if started {
             run_mutagen(
@@ -226,9 +229,13 @@ impl CandidateTransport for SshCandidateTransport {
             feeder.stop();
             return Err(CandidateRuntimeError::SyncFailed);
         }
+        let _ = run_mutagen(&env, &["sync", "flush", &name], Duration::from_secs(30));
         self.sync_env = Some(env);
         self.feeder = Some(feeder);
         Ok(())
+    }
+    fn sync_tracks_workspace(&self) -> bool {
+        true
     }
     fn send_intent(&mut self, intent: &Intent) -> Result<(), CandidateRuntimeError> {
         let client = self
@@ -257,9 +264,26 @@ impl CandidateTransport for SshCandidateTransport {
         };
         let name = sync_name(session_id)?;
         match run_mutagen(env, &["sync", "flush", &name], Duration::from_secs(30)) {
-            Ok(o) if o.success() => Ok(()),
-            _ => Err(CandidateRuntimeError::SyncFailed),
+            Ok(o) if o.success() => {}
+            _ => return Err(CandidateRuntimeError::SyncFailed),
         }
+        if let Ok(list) = run_mutagen(
+            env,
+            &["sync", "list", "--template", crate::sync::STATUS_TEMPLATE],
+            Duration::from_secs(10),
+        ) {
+            if list.success() {
+                if let Some(info) = crate::sync::parse_sync_template(&list.stdout)
+                    .into_iter()
+                    .find(|s| s.name == name)
+                {
+                    if info.conflicts > 0 || info.paused {
+                        return Err(CandidateRuntimeError::SyncFailed);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
     fn terminate_sync(&mut self, session_id: &str) -> Result<(), CandidateRuntimeError> {
         let mut result = Ok(());
