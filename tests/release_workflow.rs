@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn manifest_path(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
@@ -67,10 +68,22 @@ fn release_workflow_triggers_on_version_tags() {
         text.contains("startsWith(github.ref, 'refs/tags/v')"),
         "publish must be gated to tag refs"
     );
+    assert!(
+        text.contains("branches:") && text.contains("- main"),
+        "workflow must also run on a push to main"
+    );
+    assert!(
+        text.contains("scripts/plan_release_version.sh"),
+        "a main push must plan the version from Cargo.toml and the latest release"
+    );
     let publish = publish_section(&text);
     assert!(
         publish.contains("startsWith(github.ref, 'refs/tags/v')"),
-        "publish job must only run on tag refs"
+        "publish must run for tag refs"
+    );
+    assert!(
+        publish.contains("github.ref == 'refs/heads/main'"),
+        "publish must also run for a push to main"
     );
 }
 
@@ -244,8 +257,8 @@ fn release_workflow_publish_requires_all_builds() {
     let publish = publish_section(&text);
 
     assert!(
-        publish.contains("needs: [validate, build]"),
-        "publish must need both validate and build"
+        publish.contains("needs: [validate, build, prepare]"),
+        "publish must need validate, the builds, and the version plan"
     );
     assert!(
         publish.contains("contents: write"),
@@ -321,4 +334,30 @@ fn release_workflow_pins_third_party_actions() {
         text.contains("actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"),
         "download-artifact must be pinned to the v4.3.0 SHA"
     );
+}
+
+fn plan(current: &str, latest: &str) -> String {
+    let output = Command::new("sh")
+        .arg(manifest_path("scripts/plan_release_version.sh"))
+        .arg(current)
+        .arg(latest)
+        .output()
+        .expect("plan_release_version.sh runs");
+    assert!(
+        output.status.success(),
+        "planner failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("planner output is utf-8")
+        .trim()
+        .to_string()
+}
+
+#[test]
+fn main_push_bumps_patch_unless_cargo_version_changed() {
+    assert_eq!(plan("0.1.1", "0.1.1"), "0.1.2 bump");
+    assert_eq!(plan("0.2.0", "0.1.1"), "0.2.0 keep");
+    assert_eq!(plan("0.1.2", "0.1.1"), "0.1.2 keep");
+    assert_eq!(plan("0.1.1", ""), "0.1.1 keep");
 }
