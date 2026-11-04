@@ -2,7 +2,7 @@
 
 How to run and understand the PairProof test suites. Every command below is verified against [Cargo.toml](../../Cargo.toml) and [.github/workflows/ci.yml](../../.github/workflows/ci.yml). User-facing build instructions are in [README.md](../../README.md).
 
-## Standard gates (hermetic, run on every push/PR)
+## Standard gates (hermetic, run on pull requests and pushes to main)
 
 ```sh
 cargo build
