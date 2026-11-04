@@ -329,6 +329,47 @@ async fn run_solution_records_expected_vs_actual_counts() {
     );
 }
 #[tokio::test]
+async fn run_solution_counts_per_case_passed_lines() {
+    let (mut orch, mut pipe, coding, _) = setup(DRAFT_JSON, 10).await;
+    let raw = TestOutcome {
+        success: true,
+        exit_code: Some(0),
+        stdout: "\
+Test 1: PASSED - nums=[0, 1, 1, 0] -> [0, 1]
+Test 2: PASSED - nums=[0, 3, 2, 1, 3, 2] -> [2, 3]
+Test 3: PASSED - nums=[7, 1, 5, 4, 3, 4, 6, 0, 9, 5, 8, 2] -> [4, 5]
+Test 4: PASSED - nums=[1, 0, 1, 0] -> [0, 1]
+Test 5: PASSED - nums=[0, 0, 1, 2, 2] -> [0, 2]
+Test 6: PASSED - nums=[3, 0, 1, 2, 3, 0] -> [0, 3]
+Test 7: PASSED - nums=[0, 1, 2, 3, 1, 2] -> [1, 2]
+Test 8: PASSED - nums=[9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9, 0] -> [0, 9]
+"
+        .into(),
+        stderr: String::new(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+    };
+    let sandbox = FakeSandbox {
+        outcome: Some(raw.clone()),
+        ..Default::default()
+    };
+    pipe.select_preset(&mut orch, 0, &coding, &sandbox, 10)
+        .await
+        .unwrap();
+    let record = pipe.run_solution(&mut orch, &sandbox, 20).await.unwrap();
+    assert_eq!(record.outcome.stdout, raw.stdout);
+    assert!(!record.outcome.stdout.contains("no tests ran"));
+    let latest = orch
+        .session()
+        .current_slot()
+        .unwrap()
+        .latest_test
+        .map(|t| (t.passed, t.failed));
+    assert_eq!(latest, Some((8, 0)));
+    let snap = build_snapshot(&orch, &pipe, SessionSyncPhase::Active, &[], None);
+    assert_eq!(snap.latest_test.map(|t| (t.passed, t.failed)), Some((8, 0)));
+}
+#[tokio::test]
 async fn run_solution_without_tests_does_not_record_counts() {
     let (mut orch, mut pipe, coding, sandbox) = setup(DRAFT_JSON, 10).await;
     pipe.select_preset(&mut orch, 0, &coding, &sandbox, 10)

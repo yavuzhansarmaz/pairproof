@@ -110,7 +110,7 @@ fn chat_enter_keeps_the_sent_message_and_clears_the_box() {
     handle_live_key(&mut state, &mut runtime, key(K::Enter), &mut status);
     assert!(state.chat.input_text().is_empty());
     assert_eq!(
-        state.chat.sent_messages(),
+        state.chat.sent_messages(None),
         vec!["where do I start?".to_string()]
     );
     assert_eq!(runtime.transport().sent.len(), 1);

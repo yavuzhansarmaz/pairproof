@@ -20,8 +20,11 @@ use crate::sandbox::{
 };
 
 const SANDBOX_TIMEOUT: Duration = Duration::from_secs(30);
-const WRITE_TESTS_INSTRUCTION: &str =
-    "generate unit tests for the question examples and edge cases";
+const WRITE_TESTS_INSTRUCTION: &str = concat!(
+    "generate unit tests for the question examples and edge cases. ",
+    "Print one line per case as `Test N: PASSED` or `Test N: FAILED`, ",
+    "and finish with exactly: TESTS: <passed> passed, <failed> failed"
+);
 
 /// Outcome of one coding step plus its runnability check.
 #[derive(Debug, Clone, PartialEq, Eq)]

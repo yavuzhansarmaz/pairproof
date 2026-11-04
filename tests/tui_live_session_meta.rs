@@ -231,6 +231,7 @@ async fn flow(
         .cloned()
         .unwrap_or_default();
     chk(!reply.trim().is_empty(), "real chat reply is empty")?;
+    let q0_reply = reply.clone();
     println!("livemeta real chat reply in snapshot: {reply:?}");
     if expert.orchestrator().current_index() == Some(0) {
         candidate
@@ -253,6 +254,19 @@ async fn flow(
         "livemeta question advanced current_index={}",
         expert.orchestrator().current_index().unwrap_or(0)
     );
+    let _ = candidate.poll_snapshot();
+    chk(
+        candidate.view().question_index == Some(1),
+        "candidate snapshot did not follow Finish onto Q1",
+    )?;
+    chk(
+        candidate.view().chat_replies.is_empty()
+            && !candidate.view().chat_replies.contains(&q0_reply),
+        &format!(
+            "Q1 coach leaked Q0 replies: {:?}",
+            candidate.view().chat_replies
+        ),
+    )?;
     let poller = std::thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(600);
         let mut polls = 0u32;
@@ -307,7 +321,10 @@ async fn flow(
     );
     let rating = rating.ok_or("candidate never polled final snapshot with rating")?;
     chk(rating.is_finite(), "final rating not finite")?;
-    chk(chats > 0, "final snapshot lost the real chat reply")?;
+    chk(
+        chats == 0,
+        &format!("final snapshot carried Q0 coach onto the next question, chats={chats}"),
+    )?;
     chk(
         lines.iter().any(|l| l.contains("final rating")),
         "candidate view lacks final rating line",

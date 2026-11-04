@@ -225,7 +225,8 @@ pub struct TestOutcome {
 }
 
 /// Reads passed/failed counts from test-run output.
-/// `TESTS: N passed, M failed` wins; otherwise unittest-style `Ran N tests`.
+/// `TESTS: N passed, M failed` wins; otherwise unittest-style `Ran N tests`,
+/// then per-case `Test N: PASSED` / `FAILED` lines.
 /// An empty successful run is `(0, 0)` — no tests executed.
 pub fn parse_test_counts(stdout: &str, stderr: &str, success: bool) -> (u32, u32) {
     let text = format!("{stdout}\n{stderr}");
@@ -238,6 +239,9 @@ pub fn parse_test_counts(stdout: &str, stderr: &str, success: bool) -> (u32, u32
     if let Some(pair) = parse_unittest(&text) {
         return pair;
     }
+    if let Some(pair) = parse_per_case_results(&text) {
+        return pair;
+    }
     let lower = text.to_ascii_lowercase();
     if lower.contains("assertionerror") {
         return (0, 1);
@@ -247,6 +251,12 @@ pub fn parse_test_counts(stdout: &str, stderr: &str, success: bool) -> (u32, u32
     } else {
         (0, 1)
     }
+}
+
+/// Parsed counts when the output actually executed at least one test.
+pub fn counted_test_counts(stdout: &str, stderr: &str, success: bool) -> Option<(u32, u32)> {
+    let (passed, failed) = parse_test_counts(stdout, stderr, success);
+    (passed + failed > 0).then_some((passed, failed))
 }
 
 fn parse_tests_prefix(text: &str) -> Option<(u32, u32)> {
@@ -281,6 +291,33 @@ fn number_before(s: &str, marker: &str) -> Option<u32> {
     } else {
         digits.parse().ok()
     }
+}
+
+fn parse_per_case_results(text: &str) -> Option<(u32, u32)> {
+    let mut passed = 0u32;
+    let mut failed = 0u32;
+    let mut found = false;
+    for line in text.lines() {
+        let lower = line.trim().to_ascii_lowercase();
+        let Some(after_test) = lower.strip_prefix("test ") else {
+            continue;
+        };
+        let after_num = after_test.trim_start();
+        let digits = after_num.chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 {
+            continue;
+        }
+        let rest = after_num[digits..].trim_start();
+        let rest = rest.strip_prefix(':').unwrap_or(rest).trim_start();
+        if rest.starts_with("passed") {
+            passed = passed.saturating_add(1);
+            found = true;
+        } else if rest.starts_with("failed") {
+            failed = failed.saturating_add(1);
+            found = true;
+        }
+    }
+    found.then_some((passed, failed))
 }
 
 fn parse_unittest(text: &str) -> Option<(u32, u32)> {
@@ -443,6 +480,23 @@ mod tests {
         );
         assert_eq!(parse_test_counts("", "", true), (0, 0));
         assert_eq!(parse_test_counts("boom", "traceback", false), (0, 1));
+        let per_case = "\
+Test 1: PASSED - nums=[0, 1, 1, 0] -> [0, 1]
+Test 2: PASSED - nums=[0, 3, 2, 1, 3, 2] -> [2, 3]
+Test 3: FAILED - nums=[1, 0], expected [0, 1]
+Test 4: PASSED - nums=[0, 0, 1, 2, 2] -> [0, 2]
+no tests ran. press t to write tests.";
+        assert_eq!(parse_test_counts(per_case, "", true), (3, 1));
+        assert_eq!(counted_test_counts(per_case, "", true), Some((3, 1)));
+        assert_eq!(counted_test_counts("", "", true), None);
+        assert_eq!(
+            parse_test_counts(
+                "Test 1: PASSED\nTest 2: PASSED\nTESTS: 2 passed, 0 failed\n",
+                "",
+                true
+            ),
+            (2, 0)
+        );
     }
 
     #[test]

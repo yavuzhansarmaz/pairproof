@@ -1,5 +1,7 @@
 //! Candidate chat controller with paste guard; no terminal I/O.
 
+use std::collections::BTreeMap;
+
 use crate::core::{CoreError, Session};
 use crate::llm::chat::{assemble_chat_messages, log_boundary_violation_if_present, ChatState};
 use crate::llm::common::LlmError;
@@ -137,6 +139,7 @@ pub enum ChatError {
 pub struct ChatController {
     service: Box<dyn ChatService>,
     history: Vec<Message>,
+    sent_by_question: BTreeMap<Option<usize>, Vec<String>>,
     input: ChatInput,
     busy: bool,
     last_error: Option<ChatServiceError>,
@@ -149,6 +152,7 @@ impl ChatController {
         Self {
             service: Box::new(service),
             history: Vec::new(),
+            sent_by_question: BTreeMap::new(),
             input: ChatInput::new(),
             busy: false,
             last_error: None,
@@ -231,21 +235,23 @@ impl ChatController {
 
     /// Keeps a message the candidate just sent, so the coach pane
     /// can show it on the right after the input is cleared.
-    pub fn remember_sent(&mut self, text: &str) {
+    pub fn remember_sent(&mut self, index: Option<usize>, text: &str) {
         let text = text.trim();
         if text.is_empty() {
             return;
         }
-        self.history.push(Message::new("user", text));
+        self.sent_by_question
+            .entry(index)
+            .or_default()
+            .push(text.to_string());
     }
 
-    /// Texts the candidate has sent, in order.
-    pub fn sent_messages(&self) -> Vec<String> {
-        self.history
-            .iter()
-            .filter(|message| message.role == "user")
-            .map(|message| message.content.clone())
-            .collect()
+    /// Texts the candidate has sent on `index`, in order.
+    pub fn sent_messages(&self, index: Option<usize>) -> Vec<String> {
+        self.sent_by_question
+            .get(&index)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Returns the last generic service error, if any.

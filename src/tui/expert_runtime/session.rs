@@ -8,11 +8,25 @@ impl ExpertRuntime {
     /// Uses the pause-adjusted clock so elapsed freezes during recovery
     /// and excludes recovery duration after resume.
     pub fn monitor_view(&self, now_ms: u64) -> MonitorView {
-        monitor_view(
+        let mut view = monitor_view(
             self.orch.session(),
             &self.pipeline.approach_qualities(&self.orch),
             self.adjusted_now_ms(now_ms),
-        )
+        );
+        if view.latest_test.is_none() {
+            if let Some(index) = self.orch.current_index() {
+                if let Some(record) = self.pipeline.latest_test_record(index) {
+                    if let Some((passed, failed)) = crate::sandbox::counted_test_counts(
+                        &record.outcome.stdout,
+                        &record.outcome.stderr,
+                        record.outcome.success,
+                    ) {
+                        view.latest_test = Some(format!("{passed} passed, {failed} failed"));
+                    }
+                }
+            }
+        }
+        view
     }
     /// Final breakdown lines for the expert Final screen, built from
     /// the grades stored by `end_session_with_ack_deadline`.

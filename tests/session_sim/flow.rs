@@ -250,17 +250,41 @@ pub(super) async fn flow(
         SYNC_WAIT_SECS,
     )
     .await?;
-    chk(
-        candidate.view().latest_run().is_some() || candidate.view().latest_test.is_some(),
-        "Docker run recorded neither latest_run nor latest_test",
-    )?;
-    let counted_tests = candidate.view().latest_test.is_some();
+    pump_until(
+        &mut expert,
+        &mut candidate,
+        &mut state,
+        SYNC_WAIT_SECS,
+        |_, candidate, _| candidate.view().latest_test.is_some(),
+        "t then r never recorded latest_test counts",
+    )
+    .await?;
+    assert_counted_tests(&expert, &candidate, now_ms())?;
     println!(
-        "livesim Q0 run latest_test={:?} latest_run={:?} counted={counted_tests}",
+        "livesim Q0 run latest_test={:?} latest_run={:?}",
         candidate.view().latest_test,
-        candidate.view().latest_run().map(|r| (r.kind, r.success))
+        candidate
+            .view()
+            .latest_run()
+            .map(|r| (r.kind.clone(), r.success))
     );
     key_chat(&mut expert, &mut candidate, &mut state, "hint please").await?;
+    let q0_replies = candidate.view().chat_replies.clone();
+    chk(
+        !q0_replies.is_empty(),
+        "Q0 coach reply missing before finish",
+    )?;
+    chk(
+        state
+            .chat
+            .sent_messages(Some(0))
+            .iter()
+            .any(|m| m.contains("hint please")),
+        &format!(
+            "Q0 sent chat missing: {:?}",
+            state.chat.sent_messages(Some(0))
+        ),
+    )?;
     key_work(
         &mut expert,
         &mut candidate,
@@ -272,6 +296,49 @@ pub(super) async fn flow(
     .await?;
     wait_options(&mut expert, &mut candidate, &mut state, 1).await?;
     println!("livesim Q0 finished");
+    assert_coach_is_question_local(&candidate, &state, 1, &q0_replies)?;
+    key_chat(
+        &mut expert,
+        &mut candidate,
+        &mut state,
+        "what is the invariant?",
+    )
+    .await?;
+    chk(
+        candidate
+            .view()
+            .chat_replies
+            .iter()
+            .all(|reply| !q0_replies.contains(reply)),
+        &format!(
+            "Q1 coach still showing Q0 replies: q1={:?} q0={q0_replies:?}",
+            candidate.view().chat_replies
+        ),
+    )?;
+    chk(
+        state
+            .chat
+            .sent_messages(Some(1))
+            .iter()
+            .any(|m| m.contains("invariant")),
+        &format!(
+            "Q1 sent chat missing: {:?}",
+            state.chat.sent_messages(Some(1))
+        ),
+    )?;
+    chk(
+        state
+            .chat
+            .sent_messages(Some(0))
+            .iter()
+            .any(|m| m.contains("hint please")),
+        "Q0 coach messages were dropped after switching questions",
+    )?;
+    println!(
+        "livesim Q1 coach replies={:?} q0_kept={}",
+        candidate.view().chat_replies,
+        state.chat.sent_messages(Some(0)).len()
+    );
 
     key_preset(&mut expert, &mut candidate, &mut state, 1).await?;
     apply_kind(
@@ -609,15 +676,13 @@ pub(super) async fn flow(
             &format!("missing event {name}: {:?}", event_kinds(session)),
         )?;
     }
-    if counted_tests {
-        chk(
-            has_kind(session, "TestRunCompleted"),
-            &format!(
-                "missing TestRunCompleted after a counted run: {:?}",
-                event_kinds(session)
-            ),
-        )?;
-    }
+    chk(
+        has_kind(session, "TestRunCompleted"),
+        &format!(
+            "missing TestRunCompleted after t then r: {:?}",
+            event_kinds(session)
+        ),
+    )?;
 
     let report_md =
         std::fs::read_to_string(expert.layout().report_path()).map_err(|e| e.to_string())?;
@@ -640,5 +705,85 @@ pub(super) async fn flow(
         "final rating missing from report",
     )?;
     let _ = std::fs::remove_dir_all(&base);
+    Ok(())
+}
+
+fn assert_counted_tests(
+    expert: &ExpertRuntime,
+    candidate: &CandidateRuntime<SshCandidateTransport>,
+    now: u64,
+) -> Result<(), String> {
+    let view = candidate.view();
+    let latest = view.latest_test;
+    let run = view.latest_run();
+    let parsed = run.as_ref().and_then(|r| r.counted_tests());
+    chk(
+        latest.is_some(),
+        &format!(
+            "t then r left latest_test empty; parsed={parsed:?} run={:?} stdout={:?} stderr={:?}",
+            run.as_ref()
+                .map(|r| (r.kind.clone(), r.success, r.exit_code)),
+            run.as_ref().map(|r| r.stdout.clone()),
+            run.as_ref().map(|r| r.stderr.clone()),
+        ),
+    )?;
+    if let (Some(test), Some((passed, failed))) = (latest, parsed) {
+        chk(
+            test.passed == passed && test.failed == failed,
+            &format!(
+                "snapshot latest_test {} passed {} failed != parsed ({passed}, {failed})",
+                test.passed, test.failed
+            ),
+        )?;
+    }
+    let status = view.status_lines();
+    chk(
+        status
+            .iter()
+            .any(|line| line.starts_with("latest test:") && !line.contains("no test run yet")),
+        &format!("candidate status still says no test run yet: {status:?}"),
+    )?;
+    let monitor = expert.monitor_view(now);
+    chk(
+        monitor.latest_test.is_some(),
+        "expert monitor still says no test run yet after t then r",
+    )?;
+    Ok(())
+}
+
+fn assert_coach_is_question_local(
+    candidate: &CandidateRuntime<SshCandidateTransport>,
+    state: &CandidateRunState,
+    index: usize,
+    prior_replies: &[String],
+) -> Result<(), String> {
+    chk(
+        candidate.view().chat_replies.is_empty(),
+        &format!(
+            "Q{} coach must start empty, got {:?}",
+            index + 1,
+            candidate.view().chat_replies
+        ),
+    )?;
+    chk(
+        candidate
+            .view()
+            .chat_replies
+            .iter()
+            .all(|reply| !prior_replies.contains(reply)),
+        &format!(
+            "Q{} coach leaked prior replies: current={:?} prior={prior_replies:?}",
+            index + 1,
+            candidate.view().chat_replies
+        ),
+    )?;
+    chk(
+        state.chat.sent_messages(Some(index)).is_empty(),
+        &format!(
+            "Q{} sent chat leaked {:?}",
+            index + 1,
+            state.chat.sent_messages(Some(index))
+        ),
+    )?;
     Ok(())
 }

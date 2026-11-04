@@ -509,7 +509,7 @@ pub fn handle_live_key<T: CandidateTransport>(
                 if text.trim().is_empty() {
                     *status = Some("type a message first, then press enter.".to_string());
                 } else if apply(status, runtime.send_chat(&text)) {
-                    state.chat.remember_sent(&text);
+                    state.chat.remember_sent(view.question_index, &text);
                     state.chat.clear_input();
                 }
             }

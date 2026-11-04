@@ -232,7 +232,7 @@ pub(crate) fn live_panes(
         left.push(banner);
     }
     left.push(question_hint(state, view.options.len()));
-    let mut right = view.chat_transcript(&state.chat.sent_messages());
+    let mut right = view.chat_transcript(&state.chat.sent_messages(view.question_index));
     right.push(sanitize_display(&format!(
         "message: {}",
         state.chat.input_text()
