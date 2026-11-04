@@ -2,14 +2,49 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+
+# A main push and a tag push for the same release must not overlap.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  prepare:
+    name: Plan version
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      bump: ${{ steps.plan.outputs.bump }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Plan release version
+        id: plan
+        shell: sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          CURRENT="$(awk -F '"' '/^version[[:space:]]*=/ { print $2; exit }' Cargo.toml)"
+          LATEST=""
+          if TAG="$(gh release view --json tagName --jq .tagName 2>/dev/null)"; then
+            LATEST="${TAG#v}"
+          fi
+          PLAN="$(sh scripts/plan_release_version.sh "$CURRENT" "$LATEST")"
+          VERSION="$(printf '%s' "$PLAN" | awk '{ print $1 }')"
+          BUMP="$(printf '%s' "$PLAN" | awk '{ print $2 }')"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "cargo=$CURRENT latest=${LATEST:-none} version=$VERSION bump=$BUMP"
+
   validate:
     name: Validate
     runs-on: ubuntu-22.04
@@ -62,7 +97,11 @@ jobs:
 
   build:
     name: Build (${{ matrix.target }})
-    needs: validate
+    needs: [validate, prepare]
+    if: >-
+      always() &&
+      needs.validate.result == 'success' &&
+      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -82,6 +121,10 @@ jobs:
             asset: pairproof-darwin-aarch64-apple-darwin.tar.gz
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Apply planned version
+        if: needs.prepare.outputs.bump == 'true'
+        shell: sh
+        run: sh scripts/set_cargo_version.sh "${{ needs.prepare.outputs.version }}"
       - name: Install Rust toolchain
         shell: sh
         run: |
@@ -129,13 +172,21 @@ jobs:
 
   publish:
     name: Publish
-    needs: [validate, build]
-    if: "startsWith(github.ref, 'refs/tags/v')"
+    needs: [validate, build, prepare]
+    if: >-
+      always() &&
+      needs.validate.result == 'success' &&
+      needs.build.result == 'success' &&
+      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') &&
+      (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+          fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
@@ -150,8 +201,31 @@ jobs:
         shell: sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG_NAME: ${{ github.ref_name }}
+          PLANNED_VERSION: ${{ needs.prepare.outputs.version }}
+          PLANNED_BUMP: ${{ needs.prepare.outputs.bump }}
         run: |
           set -eu
           sh scripts/check_release_assets.sh dist
+          if [ "$PLANNED_BUMP" = "true" ]; then
+            sh scripts/set_cargo_version.sh "$PLANNED_VERSION"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add Cargo.toml Cargo.lock
+            git commit -m "Release v$PLANNED_VERSION"
+            git push origin HEAD:main
+            TAG="v$PLANNED_VERSION"
+            git tag "$TAG"
+            git push origin "$TAG"
+          elif [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            TAG="v$PLANNED_VERSION"
+            git tag "$TAG"
+            git push origin "$TAG"
+          else
+            TAG="$TAG_NAME"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists"
+            exit 0
+          fi
           gh release create "$TAG" --title "pairproof $TAG" --notes "pairproof $TAG" dist/pairproof-linux-x86_64-unknown-linux-musl.tar.gz dist/pairproof-linux-x86_64-unknown-linux-musl.tar.gz.sha256 dist/pairproof-linux-aarch64-unknown-linux-musl.tar.gz dist/pairproof-linux-aarch64-unknown-linux-musl.tar.gz.sha256 dist/pairproof-darwin-x86_64-apple-darwin.tar.gz dist/pairproof-darwin-x86_64-apple-darwin.tar.gz.sha256 dist/pairproof-darwin-aarch64-apple-darwin.tar.gz dist/pairproof-darwin-aarch64-apple-darwin.tar.gz.sha256
