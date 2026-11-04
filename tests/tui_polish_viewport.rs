@@ -70,7 +70,7 @@ fn graded(slot: usize, grade: f64) -> GradeOutcome {
 }
 
 #[test]
-fn final_breakdown_scrolls_with_the_rating_table_pinned() {
+fn final_breakdown_scrolls_as_one_page() {
     let mut lines = vec!["Final breakdown".to_string(), String::new()];
     for i in 0..30 {
         lines.push(format!("question detail {i}"));
@@ -83,21 +83,8 @@ fn final_breakdown_scrolls_with_the_rating_table_pinned() {
         "skipped: 0".to_string(),
         "enter to exit".to_string(),
     ]);
-    let top = final_frame(&lines, 12, 0);
+    let top = final_frame(&lines, 12, 0, 100);
     assert!(top.lines.len() <= 12, "{:?}", top.lines);
-    assert_eq!(top.lines.last().map(String::as_str), Some("enter to exit"));
-    assert!(
-        top.lines
-            .iter()
-            .any(|line| line.contains('┌') && line.contains('┐')),
-        "rating table: {:?}",
-        top.lines
-    );
-    assert!(
-        top.lines.iter().any(|line| line.contains("7.50 / 10")),
-        "{:?}",
-        top.lines
-    );
     assert!(
         top.lines
             .iter()
@@ -105,15 +92,29 @@ fn final_breakdown_scrolls_with_the_rating_table_pinned() {
         "{:?}",
         top.lines
     );
+    assert!(
+        !top.lines.iter().any(|line| line.contains('┌')),
+        "the rating follows the questions: {:?}",
+        top.lines
+    );
     assert!(top.max_scroll > 0, "the breakdown should scroll");
-    let bottom = final_frame(&lines, 12, top.max_scroll);
+    let stepped = final_frame(&lines, 12, 1, 100);
+    assert_eq!(stepped.lines[0], top.lines[1], "{:?}", stepped.lines);
+    let bottom = final_frame(&lines, 12, top.max_scroll, 100);
     assert_eq!(
-        bottom.lines.last().map(String::as_str),
+        bottom.lines.last().map(|line| line.trim()),
         Some("enter to exit")
     );
+    let rule = bottom
+        .lines
+        .iter()
+        .find(|line| line.contains('┌') && line.contains('┐'))
+        .expect("rating table");
+    let box_at = rule.chars().position(|c| c == '┌').expect("box start");
+    assert!(box_at > 0, "the rating table is centred: {rule:?}");
     assert!(
         bottom.lines.iter().any(|line| line.contains("7.50 / 10")),
-        "the table stays put: {:?}",
+        "{:?}",
         bottom.lines
     );
     assert!(
@@ -121,14 +122,6 @@ fn final_breakdown_scrolls_with_the_rating_table_pinned() {
             .lines
             .iter()
             .any(|line| line.contains("question detail 29")),
-        "scrolling reaches the last detail: {:?}",
-        bottom.lines
-    );
-    assert!(
-        !bottom
-            .lines
-            .iter()
-            .any(|line| line.contains("question detail 0")),
         "{:?}",
         bottom.lines
     );

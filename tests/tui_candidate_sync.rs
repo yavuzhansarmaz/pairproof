@@ -8,7 +8,7 @@ use pairproof::tui::candidate::candidate_sync_message;
 use pairproof::tui::candidate_sync::{
     candidate_ensure_sync, candidate_sync_status, candidate_terminate_sync, map_sync_error,
     phase_for, read_local_solution, solution_progress, solution_snapshot, sync_lines, sync_view,
-    CandidateSyncError, SolutionProgress, SyncPhase,
+    workspace_preview, CandidateSyncError, SolutionProgress, SyncPhase,
 };
 
 /// Returns a unique temp alpha dir for one test.
@@ -243,4 +243,19 @@ fn candidate_sync_missing_backend_is_generic() {
         CandidateSyncError::Failed.to_string(),
         candidate_sync_message()
     );
+}
+
+#[test]
+fn workspace_preview_shows_the_synced_solution_and_how_to_run_it() {
+    let alpha = fresh_alpha("preview");
+    write_solution(&alpha, "q1/question.md", b"# Two Sum\n");
+    write_solution(&alpha, "q1/solution.py", b"def solve():\n    return 1\n");
+    let lines = workspace_preview(&alpha, 0);
+    let text = lines.join("\n");
+    assert!(text.contains("q1/solution.py"), "{text}");
+    assert!(text.contains("q1/question.md"), "{text}");
+    assert!(text.contains("run: python3 q1/solution.py"), "{text}");
+    assert!(text.contains("def solve():"), "{text}");
+    assert!(workspace_preview(&alpha, 1).is_empty());
+    let _ = std::fs::remove_dir_all(&alpha);
 }

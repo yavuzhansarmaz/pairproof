@@ -158,10 +158,12 @@ fn interactive_loop(
             while let Ok(event) = crossterm::event::read() {
                 let size = terminal.size().unwrap_or_default();
                 let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                let step_final = expert_frame::is_final_scroll_event(app.screen(), &event);
                 if let Some(token) = state.handle_event(app, event, area, &plan.visible) {
                     expert_tty::copy_to_clipboard(&token);
                 }
-                if app.screen() == app::AppScreen::Exited
+                if step_final
+                    || app.screen() == app::AppScreen::Exited
                     || !crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false)
                 {
                     break;

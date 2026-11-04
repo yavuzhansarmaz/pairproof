@@ -105,6 +105,11 @@ impl ApproachStaging {
         }
     }
 
+    /// Index of the question currently on screen, if one is staged.
+    pub fn current_index(&self) -> Option<usize> {
+        self.current
+    }
+
     /// Stage of the current question, if one is being staged.
     pub fn current_stage(&self) -> Option<&QuestionStage> {
         self.current.and_then(|index| self.stages.get(&index))

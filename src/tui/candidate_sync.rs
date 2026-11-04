@@ -128,6 +128,71 @@ fn line_count(bytes: &[u8]) -> u64 {
     }
 }
 
+/// Lines for the files Mutagen has synced into `qN/`: the names,
+/// how to run the solution, and a short preview of that file.
+/// An empty directory, or one that is not there yet, yields nothing.
+pub fn workspace_preview(root: &Path, index: usize) -> Vec<String> {
+    let n = index + 1;
+    let dir = root.join(format!("q{n}"));
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| !name.starts_with('.'))
+        .collect();
+    names.sort();
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![String::new(), "Workspace".to_string()];
+    for name in &names {
+        lines.push(sanitize_display(&format!("q{n}/{name}")));
+    }
+    let Some(solution) = names.iter().find(|name| name.starts_with("solution.")) else {
+        return lines;
+    };
+    if let Some(hint) = run_hint(n, solution) {
+        lines.push(hint);
+    }
+    lines.push(String::new());
+    lines.extend(file_preview(&dir.join(solution)));
+    lines
+}
+
+fn run_hint(question: usize, file: &str) -> Option<String> {
+    let path = format!("q{question}/{file}");
+    let hint = if file.ends_with(".py") {
+        format!("run: python3 {path}")
+    } else if file.ends_with(".js") {
+        format!("run: node {path}")
+    } else if file.ends_with(".sql") {
+        format!("solution file: {path}")
+    } else {
+        return None;
+    };
+    Some(sanitize_display(&hint))
+}
+
+/// First lines of a synced file, capped so a long solution cannot
+/// take over the question pane.
+fn file_preview(path: &Path) -> Vec<String> {
+    const MAX_LINES: usize = 36;
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    if bytes.is_empty() || bytes.len() as u64 > MAX_SOLUTION_BYTES {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<String> = text.lines().take(MAX_LINES).map(sanitize_display).collect();
+    if text.lines().nth(MAX_LINES).is_some() {
+        lines.push("...".to_string());
+    }
+    lines
+}
+
 /// Reports local solution progress without modifying the file.
 pub fn solution_progress(alpha: &Path, index: usize, language: Language) -> SolutionProgress {
     let Some(path) = solution_path(alpha, index, language) else {

@@ -350,9 +350,7 @@ fn smoke_candidate_navigates_by_keyboard_and_mouse_and_resizes() {
     runtime.poll_snapshot().expect("poll").expect("snapshot");
     let mut state = CandidateRunState::new();
     let mut status = None;
-    for _ in 0..3 {
-        press(&mut state, &mut runtime, K::Tab, &mut status);
-    }
+    press(&mut state, &mut runtime, K::Tab, &mut status);
     assert_eq!(state.focus, CandidateFocus::Chat);
     press(&mut state, &mut runtime, K::Tab, &mut status);
     assert_eq!(state.focus, CandidateFocus::Work);

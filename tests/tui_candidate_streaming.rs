@@ -111,7 +111,7 @@ fn coach_stream_does_not_block_question_navigation() {
     let before = state.focus;
     handle_candidate_key(&mut state, key(KeyCode::Tab));
     assert_ne!(state.focus, before);
-    assert_eq!(state.focus, CandidateFocus::Other);
+    assert_eq!(state.focus, CandidateFocus::Chat);
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn coach_whitespace_only_partial_renders_no_blank_line() {
     view.chat_partial = Some("   ".to_string());
     let lines = view.chat_lines();
     assert!(!lines.iter().any(|l| l.trim() == ">"), "{lines:?}");
-    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines.len(), 2, "{lines:?}");
     view.chat_partial = Some(" hi".to_string());
     let lines = view.chat_lines();
     assert!(lines.iter().any(|l| l.contains("hi")), "{lines:?}");

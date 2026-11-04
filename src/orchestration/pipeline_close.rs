@@ -18,6 +18,20 @@ impl QuestionPipeline {
         self.approaches_index = None;
     }
 
+    /// Puts the cached approach set for the active question back on
+    /// the live slot. Finish, skip, and navigate clear the live set
+    /// so a stale selection cannot be reused, but a question the
+    /// candidate returns to must still show its options.
+    fn restore_cached_approaches(&mut self, orch: &Orchestrator) {
+        let Some(index) = orch.current_index() else {
+            return;
+        };
+        if let Some(set) = self.approach_sets.get(&index).cloned() {
+            self.approaches = Some(set);
+            self.approaches_index = Some(index);
+        }
+    }
+
     /// Finishes the active question via the orchestrator and clears the
     /// stored approaches so a stale set can never be selected again.
     pub fn finish_question(
@@ -29,6 +43,7 @@ impl QuestionPipeline {
         orch.finish_question(now_ms)?;
         self.record_current_selection(selected);
         self.clear_approaches();
+        self.restore_cached_approaches(orch);
         Ok(())
     }
 
@@ -45,6 +60,7 @@ impl QuestionPipeline {
         orch.navigate_to(index, now_ms)?;
         self.record_current_selection(selected);
         self.clear_approaches();
+        self.restore_cached_approaches(orch);
         Ok(())
     }
 
@@ -58,6 +74,7 @@ impl QuestionPipeline {
         orch.skip_question(now_ms)?;
         self.record_current_selection(selected);
         self.clear_approaches();
+        self.restore_cached_approaches(orch);
         Ok(())
     }
 

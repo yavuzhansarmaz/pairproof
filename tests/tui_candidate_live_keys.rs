@@ -158,8 +158,8 @@ fn shared_work_key_classifier_maps_both_paths() {
     assert_eq!(work_key_action('s'), Some(WorkKeyAction::Skip));
     assert_eq!(work_key_action('r'), Some(WorkKeyAction::RequestReQuestion));
     assert_eq!(work_key_action('x'), None);
-    assert_eq!(next_focus(CandidateFocus::Work), CandidateFocus::Other);
-    assert_eq!(next_focus(CandidateFocus::Other), CandidateFocus::Redirect);
+    assert_eq!(next_focus(CandidateFocus::Work), CandidateFocus::Chat);
+    assert_eq!(next_focus(CandidateFocus::Other), CandidateFocus::Chat);
     assert_eq!(next_focus(CandidateFocus::Redirect), CandidateFocus::Chat);
     assert_eq!(next_focus(CandidateFocus::Chat), CandidateFocus::Work);
 }

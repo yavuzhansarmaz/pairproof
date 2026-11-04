@@ -12,9 +12,8 @@ use crate::orchestration::control_server::{
 use crate::orchestration::pipeline::{PipelineError, QuestionPipeline};
 use crate::orchestration::session::Orchestrator;
 
-/// Closes the question when the file compiles and the run exits
-/// cleanly. `finish_question` opens the next one. A file that does
-/// not compile, or a run that fails, leaves the question open.
+/// Runs the written file when it compiles. The question stays open:
+/// the candidate submits it with Finish, and only that opens the next one.
 async fn advance_solved_question(
     pipe: &mut QuestionPipeline,
     orch: &mut Orchestrator,
@@ -25,10 +24,7 @@ async fn advance_solved_question(
     if !outcome.runnable {
         return Ok(());
     }
-    let record = pipe.request_tests(orch, sandbox, now_ms).await?;
-    if record.outcome.success {
-        pipe.finish_question(orch, now_ms)?;
-    }
+    pipe.request_tests(orch, sandbox, now_ms).await?;
     Ok(())
 }
 
@@ -54,10 +50,7 @@ impl ControlExecutor {
                 advance_solved_question(pipe, orch, t.sandbox, now_ms, &outcome).await
             }
             IntentKind::RequestTests => {
-                let record = pipe.request_tests(orch, t.sandbox, now_ms).await?;
-                if record.outcome.success {
-                    pipe.finish_question(orch, now_ms)?;
-                }
+                pipe.request_tests(orch, t.sandbox, now_ms).await?;
                 Ok(())
             }
             IntentKind::Finish => pipe.finish_question(orch, now_ms),

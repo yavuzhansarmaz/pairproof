@@ -84,7 +84,7 @@ pub fn panel_area(area: Rect, lines: &[String], centered: bool) -> Rect {
 }
 
 /// Splits a line into spans, colouring standalone key tokens:
-/// `enter`, `space` (in `space choose`/`space select` hints),
+/// `enter`, `backspace` (pastel purple), `space` (in `space choose`/`space select` hints),
 /// `[PASS]` and the disclosure `d` pastel green,
 /// `b`, `m`, `up/down`, `left/right`, `tab`, and the monitor
 /// `e` (end) / `c` (reissue) keys pastel navy,
@@ -105,6 +105,7 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
         let is_pass =
             text[i..].starts_with("[PASS]") && (i == 0 || bytes[i - 1] == b' ') && next_ok(i + 6);
         let is_enter = text[i..].starts_with("enter") && prev_ok(i) && next_ok(i + 5);
+        let is_backspace = text[i..].starts_with("backspace") && prev_ok(i) && next_ok(i + 9);
         let is_esc = text[i..].starts_with("esc")
             && prev_ok(i)
             && (i + 3 == bytes.len() || matches!(bytes[i + 3], b' ' | b','));
@@ -132,6 +133,7 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
         if is_copy
             || is_pass
             || is_enter
+            || is_backspace
             || is_esc
             || is_back
             || is_meta
@@ -154,6 +156,8 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
                 ("[PASS]", ENTER_KEY_COLOR, 6)
             } else if is_enter {
                 ("enter", ENTER_KEY_COLOR, 5)
+            } else if is_backspace {
+                ("backspace", PROOF_COLOR, 9)
             } else if is_esc {
                 ("esc", ESC_KEY_COLOR, 3)
             } else if is_back {

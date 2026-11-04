@@ -84,7 +84,7 @@ pub(crate) fn settle_pending(state: &mut CandidateRunState, view: &CandidateView
             let n = pending.index + 1;
             state.after_code = Some((
                 pending.index,
-                format!("code written in q{n}. this question is still open."),
+                format!("code is in q{n}/. press f to submit this question."),
             ));
         }
     }
@@ -186,12 +186,7 @@ pub fn handle_live_key<T: CandidateTransport>(
     sync_staging(state, &view);
     match state.focus {
         CandidateFocus::Work => match key.code {
-            K::Tab => {
-                // Tab on the `Other` row (or from anywhere in Work)
-                // opens the own-approach editor.
-                state.staging.cursor_to_other(view.options.len());
-                state.focus = CandidateFocus::Other;
-            }
+            K::Tab => state.focus = next_focus(state.focus),
             K::Up => state.staging.move_cursor(-1, view.options.len()),
             K::Down => state.staging.move_cursor(1, view.options.len()),
             K::Left => navigate(state, runtime, status, &view, -1),

@@ -83,13 +83,10 @@ fn missing_statement_is_waiting_and_panes_split() {
     assert!(left.contains("1: Sort first - Sort then sweep"), "{left}");
     assert!(!left.contains("Talking with me"), "{left}");
     let right = view.chat_lines();
-    assert_eq!(
-        right[0],
-        "> Talking with me won't affect your score. \
-         You can ask me anything about the question on the left, in any language you like."
-    );
-    assert_eq!(right[1], "");
-    assert_eq!(right[2], "> Try sorting first.");
+    assert_eq!(right[0], "> Talking with me won't affect your score.");
+    assert!(right[1].contains("in any language you like"), "{right:?}");
+    assert_eq!(right[2], "");
+    assert_eq!(right[3], "> Try sorting first.");
 }
 
 #[test]
@@ -231,10 +228,34 @@ fn candidate_message_draws_on_the_right_with_a_navy_marker() {
 fn coach_welcome_is_first_even_before_any_reply() {
     let view = CandidateView::from_snapshot(None);
     let lines = view.chat_lines();
-    assert_eq!(lines.len(), 1);
+    assert_eq!(lines.len(), 2, "{lines:?}");
     assert!(lines[0].starts_with("> Talking with me"), "{lines:?}");
     assert!(lines[0].contains("won't affect your score"), "{lines:?}");
-    assert!(lines[0].contains("in any language you like"), "{lines:?}");
+    assert!(lines[1].contains("in any language you like"), "{lines:?}");
+}
+
+#[test]
+fn coach_reply_breaks_a_paragraph_into_sentences() {
+    let mut view = CandidateView::from_snapshot(None);
+    view.chat_replies = vec!["Look at the bounds. The array can be empty.\n\nWhat if every value is the same? Try a tiny example. 3.14 stays one token.".to_string()];
+    let lines = view.chat_transcript(&[]);
+    let reply: Vec<_> = lines
+        .iter()
+        .skip_while(|line| !line.contains("Look at the bounds"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        reply,
+        vec![
+            "> Look at the bounds.".to_string(),
+            "> The array can be empty.".to_string(),
+            String::new(),
+            "> What if every value is the same?".to_string(),
+            "> Try a tiny example.".to_string(),
+            "> 3.14 stays one token.".to_string(),
+        ],
+        "{reply:?}"
+    );
 }
 
 #[test]
@@ -275,7 +296,7 @@ fn final_exit_line_draws_enter_in_green() {
         "solved: 1".to_string(),
         "enter to exit".to_string(),
     ];
-    let frame = final_frame(&source, 20, 0);
+    let frame = final_frame(&source, 20, 0, 80);
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
@@ -293,6 +314,37 @@ fn final_exit_line_draws_enter_in_green() {
     let col = column_of(&buffer, y, "enter to exit").expect("column");
     assert_eq!(buffer[(col, y)].symbol(), "e");
     assert_eq!(buffer[(col, y)].fg, ENTER_KEY_COLOR);
+}
+
+#[test]
+fn question_hint_draws_backspace_in_purple() {
+    use pairproof::tui::render::{PROOF_COLOR, TEXT_COLOR};
+    let left = vec![
+        "Q1".to_string(),
+        "focus: enter submit, backspace delete, tab panel, esc quit".to_string(),
+    ];
+    let right = vec!["message: ".to_string()];
+    let backend = TestBackend::new(100, 16);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| draw_candidate_screen(frame, &left, &right, false, 60, 0, 0))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let mut found = None;
+    for y in 0..buffer.area.height {
+        if column_of(&buffer, y, "backspace delete").is_some() {
+            found = Some(y);
+            break;
+        }
+    }
+    let y = found.expect("hint line");
+    let col = column_of(&buffer, y, "backspace delete").expect("column");
+    assert_eq!(buffer[(col, y)].symbol(), "b");
+    assert_eq!(buffer[(col, y)].fg, PROOF_COLOR);
+    assert_eq!(buffer[(col + 8, y)].symbol(), "e");
+    assert_eq!(buffer[(col + 8, y)].fg, PROOF_COLOR);
+    assert_eq!(buffer[(col + 10, y)].symbol(), "d");
+    assert_eq!(buffer[(col + 10, y)].fg, TEXT_COLOR);
 }
 
 #[test]

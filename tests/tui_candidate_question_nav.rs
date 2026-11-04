@@ -439,3 +439,30 @@ fn final_screen_shows_only_candidate_safe_results() {
         "no question text: {joined}"
     );
 }
+
+#[test]
+fn tab_from_approaches_switches_to_the_coach_panel() {
+    let mut runtime = connected_runtime();
+    let mut state = CandidateRunState::new();
+    state.focus = CandidateFocus::Work;
+    press(&mut state, &mut runtime, K::Down);
+    press(&mut state, &mut runtime, K::Tab);
+    assert_eq!(state.focus, CandidateFocus::Chat);
+    assert_eq!(
+        state.staging.current_stage().map(|stage| stage.cursor),
+        Some(1)
+    );
+    assert!(runtime.transport().sent.is_empty());
+    press(&mut state, &mut runtime, K::Tab);
+    assert_eq!(state.focus, CandidateFocus::Work);
+    assert_eq!(
+        state.staging.current_stage().map(|stage| stage.cursor),
+        Some(1)
+    );
+    state.focus = CandidateFocus::Other;
+    press(&mut state, &mut runtime, K::Tab);
+    assert_eq!(state.focus, CandidateFocus::Chat);
+    state.focus = CandidateFocus::Redirect;
+    press(&mut state, &mut runtime, K::Tab);
+    assert_eq!(state.focus, CandidateFocus::Chat);
+}

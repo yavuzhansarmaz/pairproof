@@ -120,7 +120,7 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
             "on other: type your approach, enter submits it",
             "5 or o opens that approach field",
             "c continue, d additional notes for the code, a change approach",
-            "t run tests, f finish the question, s skip the question",
+            "t run tests, f submit this question and open the next",
             "r request a new question",
             "tab or click a panel to switch pane",
             "esc quit",

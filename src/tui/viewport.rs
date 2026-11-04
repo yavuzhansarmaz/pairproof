@@ -176,13 +176,13 @@ pub fn wrapped_window(
     }
 }
 
-/// A final-breakdown frame: the question text scrolls, and the
-/// rating table plus the exit line stay pinned at the bottom.
+/// A final-breakdown frame. The questions and the centred rating
+/// table are one page; `scroll` is the first visible row.
 pub struct FinalFrame {
     pub lines: Vec<String>,
     pub scroll: usize,
     pub max_scroll: usize,
-    /// Body rows visible above the pinned table, used as a page step.
+    /// Rows in one page, used as the page-up / page-down step.
     pub page: usize,
 }
 
@@ -293,9 +293,39 @@ pub fn summary_table(lines: &[String]) -> Vec<String> {
     ]
 }
 
-/// Scrolls a final breakdown. Rating lines become a table pinned
-/// above `enter to exit`; everything else moves with `scroll`.
-pub fn final_frame(lines: &[String], height: usize, scroll: usize) -> FinalFrame {
+/// Inner width of the centred final panel for a document whose
+/// longest line is `longest` columns, on a terminal `area_width` wide.
+/// Matches [`crate::tui::render::panel_area`] so the rating table can
+/// sit in the middle of the same box the screen actually draws.
+fn final_inner_width(area_width: u16, longest: usize) -> usize {
+    let wanted = (longest as u16).saturating_add(4).clamp(44, 104);
+    let panel = if area_width == 0 {
+        wanted
+    } else {
+        area_width.min(wanted)
+    };
+    usize::from(panel.saturating_sub(2))
+}
+
+/// Centres `line` in `inner` columns. A line that already fills the
+/// box stays as it is. Trailing spaces keep the centred row as wide
+/// as the box, so the panel does not jump narrower while scrolling.
+fn center_line(line: &str, inner: usize) -> String {
+    let len = line.chars().count();
+    if inner == 0 || len >= inner {
+        return line.to_string();
+    }
+    let left = (inner - len) / 2;
+    let right = inner - len - left;
+    format!("{}{line}{}", " ".repeat(left), " ".repeat(right))
+}
+
+/// Scrolls a final breakdown as one page. Rating lines become a
+/// table centred in the panel, placed after the questions, and the
+/// whole page moves one row at a time with `scroll`. `area_width` is
+/// the terminal width. Zero means "no terminal yet": the table is
+/// still centred in the natural panel.
+pub fn final_frame(lines: &[String], height: usize, scroll: usize, area_width: u16) -> FinalFrame {
     if height == 0 {
         return FinalFrame {
             lines: Vec::new(),
@@ -321,19 +351,39 @@ pub fn final_frame(lines: &[String], height: usize, scroll: usize) -> FinalFrame
     if footer.is_some() || !summary.is_empty() {
         pinned.push(footer.unwrap_or_else(|| "enter to exit".to_string()));
     }
-    if pinned.len() > height {
-        pinned = pinned.split_off(pinned.len() - height);
+    let longest = body
+        .iter()
+        .chain(pinned.iter())
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    let inner = final_inner_width(area_width, longest);
+    for line in &mut pinned {
+        *line = center_line(line, inner);
     }
-    let body_rows = height.saturating_sub(pinned.len());
-    let max_scroll = body.len().saturating_sub(body_rows);
+    // One document: the questions and the centred rating move
+    // together. A short page keeps the title on the first row and
+    // the rating on the last, with the gap between them.
+    let mut doc = body;
+    doc.extend(pinned);
+    let max_scroll = doc.len().saturating_sub(height);
     let scroll = scroll.min(max_scroll);
-    let mut visible: Vec<String> = body.into_iter().skip(scroll).take(body_rows).collect();
-    visible.extend(pinned);
+    let window: Vec<String> = doc.into_iter().skip(scroll).take(height).collect();
+    let visible = if window.len() < height && !window.is_empty() {
+        let pad = height - window.len();
+        let mut out = Vec::with_capacity(height);
+        out.push(window[0].clone());
+        out.extend(std::iter::repeat_n(String::new(), pad));
+        out.extend(window.into_iter().skip(1));
+        out
+    } else {
+        window
+    };
     FinalFrame {
         lines: visible,
         scroll,
         max_scroll,
-        page: body_rows.max(1),
+        page: height.max(1),
     }
 }
 

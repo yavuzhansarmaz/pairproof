@@ -350,9 +350,7 @@ fn help_key_ignored_while_typing() {
     assert!(state.show_help, "? must not close help any more");
     handle_candidate_key(&mut state, key(KeyCode::Char('b')));
     assert!(!state.show_help);
-    for _ in 0..3 {
-        handle_candidate_key(&mut state, key(KeyCode::Tab));
-    }
+    handle_candidate_key(&mut state, key(KeyCode::Tab));
     assert_eq!(state.focus, CandidateFocus::Chat);
     handle_candidate_key(&mut state, key(KeyCode::Char('?')));
     assert!(!state.show_help);

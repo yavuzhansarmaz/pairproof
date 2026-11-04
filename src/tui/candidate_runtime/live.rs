@@ -63,6 +63,8 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
     let mut final_page = 1usize;
     let mut coach_following = true;
     let mut scrolled_question: Option<usize> = None;
+    let mut last_snapshot_poll = std::time::Instant::now() - Duration::from_secs(2);
+    let mut breakdown_open = false;
     while state.app.screen() != CandidateScreen::Exited {
         // Apply a finished background connection, if one landed; while
         // it runs the loop keeps drawing the animated loading screen.
@@ -94,12 +96,19 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             }
             Some(Err(std::sync::mpsc::TryRecvError::Empty)) | None => {}
         }
-        if live {
+        // While the divider is held, or the final breakdown is on
+        // screen, keep the last snapshot. A poll spawns askpass and
+        // ssh before the paint. The breakdown refreshes at most once
+        // a second, which is inside the 30s heartbeat timeout, so
+        // scrolling paints without waiting on that process.
+        let final_hold = breakdown_open && last_snapshot_poll.elapsed() < Duration::from_secs(1);
+        if live && !dragging_split && !final_hold {
             if let Some(active) = runtime.as_mut() {
                 if let Err(err) = active.poll_snapshot() {
                     status = Some(crate::tui::help::candidate_error_message(&err).to_string());
                 }
             }
+            last_snapshot_poll = std::time::Instant::now();
         }
         let tick_view = runtime.as_ref().map(|active| active.view());
         let connection_lost = runtime
@@ -138,7 +147,11 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                 if view.is_terminal() {
                     None
                 } else {
-                    let (mut left, right) = live_panes(state, view, connection_lost, &status);
+                    let workspace = runtime
+                        .as_ref()
+                        .map(|active| active.workspace().to_path_buf());
+                    let (mut left, right) =
+                        live_panes(state, view, connection_lost, &status, workspace.as_deref());
                     animate_loading(&mut left, loading_tick);
                     Some((left, right, state.focus == CandidateFocus::Chat))
                 }
@@ -182,9 +195,11 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                 clamp_scroll(question_scroll, question_total_wrapped, question_visible);
         }
         if waiting {
+            breakdown_open = false;
             let visible = crate::tui::render::loading_lines(loading_tick);
             let _ = terminal.draw(|frame| crate::tui::render::draw_loading_screen(frame, &visible));
         } else if let Some((left, right, chat_focused)) = &panes {
+            breakdown_open = false;
             let status_lines = tick_view
                 .as_ref()
                 .map(|view| view.status_lines_with_pending(state.pending_approach.as_ref()))
@@ -229,8 +244,14 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
             };
             let inner_height = height.saturating_sub(2);
             let breakdown = lines.first().is_some_and(|line| line == "Final breakdown");
+            breakdown_open = breakdown;
             let visible = if breakdown {
-                let frame = crate::tui::viewport::final_frame(&lines, inner_height, final_scroll);
+                let frame = crate::tui::viewport::final_frame(
+                    &lines,
+                    inner_height,
+                    final_scroll,
+                    term_width,
+                );
                 final_scroll = frame.scroll;
                 final_max_scroll = frame.max_scroll;
                 final_page = frame.page;
@@ -245,10 +266,12 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                 terminal.draw(|frame| crate::tui::render::draw_screen(frame, &visible, centered));
         }
         if crossterm::event::poll(Duration::from_millis(250)).unwrap_or(false) {
-            // Drain every queued event before the next snapshot/draw:
-            // mouse drags emit many events, and processing only one
-            // per snapshot makes pane resizing trail far behind.
+            // Drag events are drained together so the split follows
+            // the cursor. A final-breakdown scroll paints after one
+            // step, so a wheel burst moves row by row instead of
+            // jumping.
             while let Ok(event) = crossterm::event::read() {
+                let mut step_final = false;
                 match event {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
                         if connect_rx.is_some() {
@@ -298,7 +321,7 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                                 K::End => final_scroll = final_max_scroll,
                                 _ => {}
                             }
-                            continue;
+                            break;
                         }
                         // Arrow/page keys scroll the question pane
                         // while the two panes are up; they were
@@ -409,10 +432,12 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                             MouseEventKind::ScrollDown
                                 if panes.is_none() && final_max_scroll > 0 =>
                             {
-                                final_scroll = final_scroll.saturating_add(3).min(final_max_scroll);
+                                final_scroll = final_scroll.saturating_add(1).min(final_max_scroll);
+                                step_final = true;
                             }
                             MouseEventKind::ScrollUp if panes.is_none() && final_max_scroll > 0 => {
-                                final_scroll = final_scroll.saturating_sub(3);
+                                final_scroll = final_scroll.saturating_sub(1);
+                                step_final = true;
                             }
                             MouseEventKind::ScrollDown if panes.is_some() => {
                                 match pane_side_for_column(mouse.column, width, question_pct) {
@@ -459,7 +484,8 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                     }
                     _ => {}
                 }
-                if state.app.screen() == CandidateScreen::Exited
+                if step_final
+                    || state.app.screen() == CandidateScreen::Exited
                     || !crossterm::event::poll(Duration::ZERO).unwrap_or(false)
                 {
                     break;

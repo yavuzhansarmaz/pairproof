@@ -204,9 +204,7 @@ fn solving_keys_dispatch_with_unavailable_runners_honestly() {
     }
     let lines = candidate_screen_lines(&state).join("\n");
     assert!(lines.contains("tests are not available yet"), "{lines}");
-    for _ in 0..3 {
-        handle_candidate_key(&mut state, key(KeyCode::Tab));
-    }
+    handle_candidate_key(&mut state, key(KeyCode::Tab));
     assert_eq!(state.focus, CandidateFocus::Chat);
     handle_candidate_key(&mut state, key(KeyCode::Char('h')));
     handle_candidate_key(&mut state, key(KeyCode::Char('i')));

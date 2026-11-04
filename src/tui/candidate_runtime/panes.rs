@@ -74,14 +74,10 @@ pub fn pane_click_target(column: u16, width: u16, pct: u16) -> PaneSide {
 /// Focus after clicking a panel. A click anywhere on a pane
 /// selects it; the divider column still starts a resize drag
 /// instead (handled by the caller checking `divider_hit` first).
-/// Coach selects Chat; Question selects Work only when leaving
-/// Chat, otherwise the current sub-focus (Work/Other/Redirect)
-/// is kept so typed text and its pane stay intact. This is the
-/// single panel-switch transition used by mouse; Tab keeps the
-/// existing `next_focus` cycle. Both routes cross panels through
-/// the same Work<->Chat boundary: Tab from Chat lands on Work and
-/// the cycle reaches Chat from the question sub-focuses, while a
-/// panel click jumps directly across that same boundary.
+/// Coach selects Chat. Question selects Work only when leaving
+/// Chat, so an open approach field or additional notes stay put.
+/// Tab from any question-side focus opens the coach, and Tab from
+/// the coach returns to the approach list.
 pub fn focus_for_pane(focus: CandidateFocus, side: PaneSide) -> CandidateFocus {
     match side {
         PaneSide::Coach => CandidateFocus::Chat,
@@ -190,8 +186,12 @@ pub(crate) fn live_panes(
     view: &CandidateView,
     connection_lost: bool,
     status: &Option<String>,
+    workspace: Option<&std::path::Path>,
 ) -> (Vec<String>, Vec<String>) {
     let mut left = view.question_lines_staged(state.staging.current_stage());
+    if let (Some(root), Some(index)) = (workspace, view.question_index) {
+        left.extend(crate::tui::candidate_sync::workspace_preview(root, index));
+    }
     if connection_lost {
         left.push(CONNECTION_LOST.to_string());
         left.push("press R to reconnect with a fresh string.".to_string());
@@ -303,18 +303,25 @@ fn question_hint(state: &CandidateRunState, option_count: usize) -> String {
     // it and colours the key names like the other screens.
     match state.focus {
         CandidateFocus::Other => {
-            "focus: enter submit, backspace delete, tab next, esc quit".to_string()
+            "focus: enter submit, backspace delete, tab panel, esc quit".to_string()
         }
         CandidateFocus::Redirect => {
-            "focus: enter send, backspace delete, tab next, esc quit".to_string()
+            "focus: enter send, backspace delete, tab panel, esc quit".to_string()
         }
         CandidateFocus::Chat => {
             "focus: enter send, backspace delete, up/down scroll, tab panel, esc quit".to_string()
         }
         _ if cursor_on_other(state, option_count) => {
-            "focus: enter submit, backspace delete, tab next, esc quit".to_string()
+            "focus: enter submit, backspace delete, tab panel, esc quit".to_string()
         }
-        _ => "focus: up/down move, enter submit, left/right question, tab panel, esc quit"
+        _ if state.after_code.as_ref().is_some_and(|(index, _)| {
+            state.staging.current_index() == Some(*index)
+        }) =>
+        {
+            "focus: f submit question, t run tests, left/right question, tab panel, esc quit"
+                .to_string()
+        }
+        _ => "focus: up/down move, space select, enter submit, left/right question, tab panel, esc quit"
             .to_string(),
     }
 }
