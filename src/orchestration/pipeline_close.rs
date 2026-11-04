@@ -7,7 +7,9 @@ use crate::orchestration::coding::SandboxIo;
 use crate::orchestration::control_snapshot::SnapshotRun;
 use crate::orchestration::pipeline::{PipelineError, QuestionPipeline, TestRunRecord};
 use crate::orchestration::session::Orchestrator;
-use crate::sandbox::RunnabilityReport;
+use crate::sandbox::{parse_test_counts, RunnabilityReport};
+
+const NO_TESTS_HINT: &str = "no tests ran. press t to write tests.";
 
 impl QuestionPipeline {
     /// Returns every raw test-run record stored verbatim, in run order.
@@ -80,8 +82,8 @@ impl QuestionPipeline {
         );
     }
 
-    /// Executes the active question's solution in the sandbox without
-    /// emitting a test-request event or advancing the question.
+    /// Runs the solution's tests in the sandbox and compares actual vs
+    /// expected. Does not emit a test-request event or advance the question.
     pub async fn run_solution(
         &mut self,
         orch: &mut Orchestrator,
@@ -111,14 +113,27 @@ impl QuestionPipeline {
                 self.codes.insert(index, disk_code);
             }
         }
-        let outcome = sandbox.run_requested_tests(index, language).await?;
+        let mut outcome = sandbox.run_requested_tests(index, language).await?;
+        let (passed, failed) = parse_test_counts(&outcome.stdout, &outcome.stderr, outcome.success);
+        if passed == 0 && failed == 0 {
+            let already = outcome.stdout.to_ascii_lowercase().contains("no tests ran");
+            if outcome.stdout.trim().is_empty() {
+                outcome.stdout = NO_TESTS_HINT.to_string();
+            } else if !already {
+                outcome.stdout = format!("{}\n{NO_TESTS_HINT}", outcome.stdout.trim_end());
+            }
+        }
         let record = TestRunRecord {
             index,
             at_ms: now_ms,
             outcome,
         };
         self.run_records.push(record.clone());
-        self.record_exec_run("run", &record);
+        self.test_records.push(record.clone());
+        self.record_exec_run("test", &record);
+        if passed + failed > 0 {
+            self.record_counted_test_result(orch, passed, failed, now_ms)?;
+        }
         Ok(record)
     }
 

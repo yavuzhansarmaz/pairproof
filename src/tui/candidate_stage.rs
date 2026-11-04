@@ -128,7 +128,7 @@ impl QuestionFlowState {
             Self::ContinuingInteraction => Some("continuing with agent"),
             Self::UpdatingSolution { .. } => Some("updating solution"),
             Self::UpdatingTests { .. } => Some("updating tests"),
-            Self::RunningSolution { .. } => Some("running solution"),
+            Self::RunningSolution { .. } => Some("running tests"),
             Self::RunningTests { .. } => Some("running tests"),
             Self::Submitting => Some("submitting question"),
             Self::Submitted => Some("submitted"),
@@ -162,7 +162,7 @@ impl QuestionFlowState {
             Self::UpdatingTests { .. } => Some(format!(
                 "working: generating/updating tests in q{n}/. this takes a moment"
             )),
-            Self::RunningSolution { .. } => Some(format!("working: running solution in q{n}/")),
+            Self::RunningSolution { .. } => Some(format!("working: running tests in q{n}/")),
             Self::RunningTests { .. } => Some(format!("working: running tests in q{n}/")),
             Self::Submitting => Some(format!("working: submitting q{n}/")),
             Self::Submitted => Some(format!("ready: q{n}/ submitted.")),
@@ -307,7 +307,7 @@ pub(crate) fn settle_with_sync(
     let n = index + 1;
     let rev = view.code_revision();
     let run_seq = view.run_seq();
-    let ready_msg = format!("code is in q{n}/. c continue, r run, t run tests, or f submit.");
+    let ready_msg = format!("code is in q{n}/. c continue, r run, t write tests, or f submit.");
     let flow = state.staging.flow_for(index);
     let was_updating_tests = matches!(flow, QuestionFlowState::UpdatingTests { .. });
     match flow {
@@ -375,7 +375,7 @@ pub(crate) fn settle_with_sync(
                     };
                     state.after_code = Some((
                         index,
-                        format!("updated {target} in q{n}/. c continue, r run, t run tests, or f submit."),
+                        format!("updated {target} in q{n}/. c continue, r run, t write tests, or f submit."),
                     ));
                 }
             }
@@ -392,7 +392,9 @@ pub(crate) fn settle_with_sync(
                 };
                 state.after_code = Some((
                     index,
-                    format!("run {label} in q{n}/. c continue, r run, t run tests, or f submit."),
+                    format!(
+                        "tests {label} in q{n}/. c continue, r run, t write tests, or f submit."
+                    ),
                 ));
             }
         }
@@ -412,7 +414,9 @@ pub(crate) fn settle_with_sync(
                 };
                 state.after_code = Some((
                     index,
-                    format!("tests {label} in q{n}/. c continue, r run, t run tests, or f submit."),
+                    format!(
+                        "tests {label} in q{n}/. c continue, r run, t write tests, or f submit."
+                    ),
                 ));
             }
         }
@@ -443,7 +447,7 @@ pub(crate) fn settle_with_sync(
                 .set_flow(pending.index, QuestionFlowState::SolutionReady);
             state.after_code = Some((
                 pending.index,
-                format!("code is in q{n}/. c continue, r run, t run tests, or f submit."),
+                format!("code is in q{n}/. c continue, r run, t write tests, or f submit."),
             ));
         }
     }

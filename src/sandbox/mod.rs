@@ -14,8 +14,8 @@ pub mod workspace;
 
 pub use error::{bounded_stderr, SandboxError};
 pub use exec::{
-    check_runnability, run_in_container, run_tests, runnability_argv, test_argv, timeout_argv,
-    RunnabilityReport, TestOutcome,
+    check_runnability, parse_test_counts, run_in_container, run_tests, runnability_argv, test_argv,
+    timeout_argv, RunnabilityReport, TestOutcome, RUN_TIMEOUT,
 };
 pub use image::{
     check_docker_available, effective_image_tag, embedded_build_context, ensure_image,

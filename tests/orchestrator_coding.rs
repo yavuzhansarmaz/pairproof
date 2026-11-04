@@ -257,14 +257,46 @@ async fn coding_loop_stops_on_expert_end() {
     assert_eq!(sandbox.files.lock().unwrap().len(), 1);
 }
 #[tokio::test]
-async fn request_tests_runs_real_sandbox_test_wrapper() {
+async fn request_tests_writes_tests_without_executing() {
+    let (mut orch, mut pipe, coding, sandbox) = setup(DRAFT_JSON, 10).await;
+    pipe.select_preset(&mut orch, 0, &coding, &sandbox, 10)
+        .await
+        .unwrap();
+    assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 0);
+    let before = coding.calls.load(Ordering::SeqCst);
+    let outcome = pipe
+        .request_tests(&mut orch, &coding, &sandbox, 20)
+        .await
+        .unwrap();
+    assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(coding.calls.load(Ordering::SeqCst), before + 1);
+    assert!(
+        coding
+            .inputs
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .tests_requested
+    );
+    assert_eq!(outcome.code, "def solve():\n    return 1");
+    assert!(pipe.test_records().is_empty());
+    let n = count(&orch, |k| matches!(k, EventKind::TestsRequested { .. }));
+    assert_eq!(n, 1);
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. })),
+        0
+    );
+}
+#[tokio::test]
+async fn run_solution_records_expected_vs_actual_counts() {
     let (mut orch, mut pipe, coding, _) = setup(DRAFT_JSON, 10).await;
     let raw = TestOutcome {
         success: false,
         exit_code: Some(1),
-        stdout: "1 passed, 1 failed in output text".into(),
-        stderr: "assert boom".into(),
-        stdout_truncated: true,
+        stdout: "case ok\nTESTS: 2 passed, 1 failed".into(),
+        stderr: String::new(),
+        stdout_truncated: false,
         stderr_truncated: false,
     };
     let sandbox = FakeSandbox {
@@ -275,43 +307,41 @@ async fn request_tests_runs_real_sandbox_test_wrapper() {
         .await
         .unwrap();
     assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 0);
-    let record = pipe.request_tests(&mut orch, &sandbox, 20).await.unwrap();
+    let record = pipe.run_solution(&mut orch, &sandbox, 20).await.unwrap();
     assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 1);
     assert_eq!(record.outcome, raw);
-    let n = count(&orch, |k| matches!(k, EventKind::TestsRequested { .. }));
-    assert_eq!(n, 1);
+    assert_eq!(pipe.test_records(), std::slice::from_ref(&record));
+    assert_eq!(pipe.run_records(), std::slice::from_ref(&record));
+    let latest = orch
+        .session()
+        .current_slot()
+        .unwrap()
+        .latest_test
+        .map(|t| (t.passed, t.failed));
+    assert_eq!(latest, Some((2, 1)));
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })),
+        0
+    );
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. })),
+        1
+    );
 }
 #[tokio::test]
-async fn test_results_are_recorded_once_and_displayed_verbatim() {
-    let (mut orch, mut pipe, coding, _) = setup(DRAFT_JSON, 10).await;
-    let raw = TestOutcome {
-        success: true,
-        exit_code: Some(0),
-        stdout: "raw stdout: 3 ok".into(),
-        stderr: "raw stderr".into(),
-        stdout_truncated: false,
-        stderr_truncated: true,
-    };
-    let sandbox = FakeSandbox {
-        outcome: Some(raw.clone()),
-        ..Default::default()
-    };
+async fn run_solution_without_tests_does_not_record_counts() {
+    let (mut orch, mut pipe, coding, sandbox) = setup(DRAFT_JSON, 10).await;
     pipe.select_preset(&mut orch, 0, &coding, &sandbox, 10)
         .await
         .unwrap();
-    let record = pipe.request_tests(&mut orch, &sandbox, 20).await.unwrap();
-    assert_eq!(pipe.test_records(), std::slice::from_ref(&record));
-    assert_eq!(record.outcome.stdout, "raw stdout: 3 ok");
+    let record = pipe.run_solution(&mut orch, &sandbox, 20).await.unwrap();
+    assert!(record.outcome.stdout.contains("no tests ran"));
+    assert!(record.outcome.stdout.contains("press t to write tests"));
     assert_eq!(orch.session().current_slot().unwrap().latest_test, None);
-    let n = count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. }));
-    assert_eq!(n, 0);
-    pipe.record_counted_test_result(&mut orch, 3, 0, 21)
-        .unwrap();
-    let slot = orch.session().current_slot().unwrap();
-    let latest = slot.latest_test.map(|t| (t.passed, t.failed));
-    assert_eq!(latest, Some((3, 0)));
-    let n = count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. }));
-    assert_eq!(n, 1);
+    assert_eq!(
+        count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. })),
+        0
+    );
 }
 #[tokio::test]
 async fn coding_api_usage_is_booked_exactly_once_on_success_and_failure() {
@@ -439,40 +469,28 @@ async fn full_iterative_question_lifecycle_and_final_submission_boundary() {
     assert_eq!(pipe.code_revision(0), 2);
     assert_eq!(orch.current_index(), Some(0));
 
-    // 7. Request test generation; `tests_requested` becomes true and stays sticky for slot 0.
+    // 7. `t` writes tests (extra score); `tests_requested` stays sticky for slot 0.
     let test_gen_coding = FakeCoding::new(
         r#"{"code":"def solve(nums):\n    return sum(nums)\nif __name__ == '__main__':\n    assert solve([]) == 0","ready":true,"summary":"with tests"}"#,
         15,
     );
-    pipe.redirect_coding(
-        &mut orch,
-        "generate unit tests for empty list",
-        &test_gen_coding,
-        &sandbox,
-        30,
-    )
-    .await
-    .unwrap();
+    pipe.request_tests(&mut orch, &test_gen_coding, &sandbox, 30)
+        .await
+        .unwrap();
     assert!(test_gen_coding.inputs.lock().unwrap()[0].tests_requested);
+    assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 0);
     assert_eq!(pipe.code_revision(0), 3);
-
-    // 8-9. Run solution and execute tests independently.
-    let run_rec = pipe.run_solution(&mut orch, &sandbox, 40).await.unwrap();
-    assert!(run_rec.outcome.success);
-    assert_eq!(pipe.run_records().len(), 1);
-    assert_eq!(pipe.test_records().len(), 0);
-    assert_eq!(
-        count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })),
-        0
-    );
-
-    let test_rec = pipe.request_tests(&mut orch, &sandbox, 50).await.unwrap();
-    assert!(test_rec.outcome.success);
-    assert_eq!(pipe.test_records().len(), 1);
     assert_eq!(
         count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })),
         1
     );
+
+    // 8. `r` runs those tests against the solution and records expected vs actual.
+    let run_rec = pipe.run_solution(&mut orch, &sandbox, 40).await.unwrap();
+    assert!(run_rec.outcome.success);
+    assert_eq!(sandbox.test_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(pipe.run_records().len(), 1);
+    assert_eq!(pipe.test_records().len(), 1);
     assert_eq!(
         orch.current_index(),
         Some(0),

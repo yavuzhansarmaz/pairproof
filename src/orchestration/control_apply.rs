@@ -37,7 +37,7 @@ impl ControlExecutor {
                 Ok(())
             }
             IntentKind::RequestTests => {
-                pipe.request_tests(orch, t.sandbox, now_ms).await?;
+                pipe.request_tests(orch, t.coding, t.sandbox, now_ms).await?;
                 Ok(())
             }
             IntentKind::Finish => pipe.finish_question_with_sandbox(orch, t.sandbox, now_ms).await,

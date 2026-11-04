@@ -126,22 +126,23 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
         } else {
             Duration::from_millis(350)
         };
+        // Heartbeat is independent of snapshot polling so a slow
+        // Mutagen flush or SSH read cannot look like a disconnect.
+        if let Some(active) = runtime.as_ref() {
+            if last_live_hb.elapsed() >= Duration::from_secs(5) {
+                last_live_hb = std::time::Instant::now();
+                active.spawn_background_heartbeat(now_ms());
+            }
+        }
         if !live {
             held_view = None;
             poll_rx = None;
-            if let Some(active) = runtime.as_ref() {
-                if last_live_hb.elapsed() >= Duration::from_secs(5) {
-                    last_live_hb = std::time::Instant::now();
-                    active.spawn_background_heartbeat(now_ms());
-                }
-            }
         } else if !final_scrolling {
             final_doc = None;
             if !dragging_split && poll_rx.is_none() && last_snapshot_poll.elapsed() >= poll_interval
             {
                 if let Some(active) = runtime.as_mut() {
                     poll_rx = active.spawn_background_poll(now_ms());
-                    last_live_hb = std::time::Instant::now();
                 }
             }
             held_view = runtime.as_ref().map(|active| active.view());

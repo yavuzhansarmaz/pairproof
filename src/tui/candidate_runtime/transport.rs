@@ -239,25 +239,12 @@ impl CandidateTransport for SshCandidateTransport {
             let _ = run_mutagen(&env, &["sync", "terminate", &name], Duration::from_secs(15));
         }
         let beta = crate::sync::beta_url(conn.endpoint(), conn.username());
+        let create_args = crate::sync::sync_create_args(&name, &alpha_text, &beta);
+        let create_argv: Vec<&str> = create_args.iter().map(String::as_str).collect();
         let created = if started {
-            run_mutagen(
-                &env,
-                &[
-                    "sync",
-                    "create",
-                    "--name",
-                    &name,
-                    "--mode",
-                    "two-way-safe",
-                    "--symlink-mode",
-                    "ignore",
-                    &alpha_text,
-                    &beta,
-                ],
-                Duration::from_secs(60),
-            )
-            .map(|o| o.success())
-            .unwrap_or(false)
+            run_mutagen(&env, &create_argv, Duration::from_secs(60))
+                .map(|o| o.success())
+                .unwrap_or(false)
         } else {
             false
         };

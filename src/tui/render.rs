@@ -127,7 +127,7 @@ pub(crate) fn help_key_spans(text: &str) -> Vec<Span<'static>> {
         let is_reissue_key = text[i..].starts_with("c reissue") && prev_ok(i);
         let is_continue_key = text[i..].starts_with("c continue") && prev_ok(i);
         let is_run_key = text[i..].starts_with("r run") && prev_ok(i);
-        let is_test_key = text[i..].starts_with("t run tests") && prev_ok(i);
+        let is_test_key = text[i..].starts_with("t write tests") && prev_ok(i);
         let is_change_key = text[i..].starts_with("a change approach") && prev_ok(i);
         let is_submit_key = text[i..].starts_with("f submit") && prev_ok(i);
         let is_help = bytes[i] == b'?'

@@ -61,7 +61,7 @@ pub struct FetchedStatement {
     pub starter_code: String,
 }
 
-/// Raw sandbox test outcome stored verbatim; no counts are derived from it.
+/// Raw sandbox test-run outcome stored verbatim; counts are parsed at run time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestRunRecord {
     pub index: usize,
@@ -378,9 +378,9 @@ impl QuestionPipeline {
         self.codes.get(&index).map(String::as_str)
     }
 
-    /// Explicit counted path: records genuinely parsed passed and failed
-    /// counts through the core exactly once. Raw sandbox outcomes carry
-    /// no counts and never take this path implicitly.
+    /// Records parsed passed and failed counts through the core exactly
+    /// once. [`Self::run_solution`] takes this path after parsing the
+    /// sandbox output.
     pub fn record_counted_test_result(
         &self,
         orch: &mut Orchestrator,

@@ -452,19 +452,23 @@ fn iterative_question_workflow_and_submission_guards() {
     handle_live_key(&mut state, &mut runtime, key(K::Up), &mut status);
     assert_eq!(state.staging.flow_for(0), QuestionFlowState::SolutionReady);
 
-    // 8. Run solution (`r`) independently of tests.
-    handle_live_key(&mut state, &mut runtime, key(K::Char('r')), &mut status);
+    // 8. Write tests (`t`); extra score, does not execute yet.
+    handle_live_key(&mut state, &mut runtime, key(K::Char('t')), &mut status);
     assert_eq!(
         runtime.transport().sent.last().map(|i| &i.kind),
-        Some(&IntentKind::RunSolution)
+        Some(&IntentKind::RequestTests)
     );
+    assert!(matches!(
+        state.staging.flow_for(0),
+        QuestionFlowState::UpdatingTests { .. }
+    ));
     wire["latest_run"] = serde_json::to_value(SnapshotRun {
-        kind: "run".to_string(),
+        kind: "code".to_string(),
         seq: 4,
-        code_revision: 3,
+        code_revision: 4,
         success: true,
         exit_code: Some(0),
-        stdout: "ok".to_string(),
+        stdout: String::new(),
         stderr: String::new(),
         at_ms: 40,
     })
@@ -473,15 +477,15 @@ fn iterative_question_workflow_and_submission_guards() {
         pairproof::orchestration::parse_snapshot(&serde_json::to_vec(&wire).unwrap(), "s1")
             .unwrap();
     runtime.transport_mut().snapshot = Some(parsed);
-    runtime.poll_snapshot().expect("poll run");
+    runtime.poll_snapshot().expect("poll tests written");
     handle_live_key(&mut state, &mut runtime, key(K::Up), &mut status);
     assert_eq!(state.staging.flow_for(0), QuestionFlowState::SolutionReady);
 
-    // 9. Execute tests (`t`) independently of submission.
-    handle_live_key(&mut state, &mut runtime, key(K::Char('t')), &mut status);
+    // 9. Run those tests against the solution (`r`).
+    handle_live_key(&mut state, &mut runtime, key(K::Char('r')), &mut status);
     assert_eq!(
         runtime.transport().sent.last().map(|i| &i.kind),
-        Some(&IntentKind::RequestTests)
+        Some(&IntentKind::RunSolution)
     );
     let snap_tested = make_snap(
         0,
@@ -497,10 +501,10 @@ fn iterative_question_workflow_and_submission_guards() {
     wire["latest_run"] = serde_json::to_value(SnapshotRun {
         kind: "test".to_string(),
         seq: 5,
-        code_revision: 3,
+        code_revision: 4,
         success: true,
         exit_code: Some(0),
-        stdout: "1 passed".to_string(),
+        stdout: "TESTS: 1 passed, 0 failed".to_string(),
         stderr: String::new(),
         at_ms: 50,
     })

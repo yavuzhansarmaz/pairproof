@@ -16,6 +16,8 @@ use super::workspace::read_file;
 /// Programs the sandbox may execute; argv[0] must match exactly.
 const ALLOWLIST: [&str; 3] = ["python3", "node", "mariadb"];
 const TIMEOUT_GRACE: Duration = Duration::from_secs(5);
+/// How long a candidate test-run may block the expert drain.
+pub const RUN_TIMEOUT: Duration = Duration::from_secs(8);
 const PPCHECK_USER: &str = "ppcheck";
 
 fn strs(parts: &[&str]) -> Vec<String> {
@@ -211,7 +213,7 @@ async fn check_sql_runnability(handle: &SandboxHandle, user: &EphemeralUsername,
     Ok(report_from(&outcome))
 }
 
-/// Test-run outcome; passed/failed counts are NOT derived here (Phase 4 seam).
+/// Test-run outcome; passed/failed counts are parsed by [`parse_test_counts`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestOutcome {
     pub success: bool,
@@ -220,6 +222,85 @@ pub struct TestOutcome {
     pub stderr: String,
     pub stdout_truncated: bool,
     pub stderr_truncated: bool,
+}
+
+/// Reads passed/failed counts from test-run output.
+/// `TESTS: N passed, M failed` wins; otherwise unittest-style `Ran N tests`.
+/// An empty successful run is `(0, 0)` — no tests executed.
+pub fn parse_test_counts(stdout: &str, stderr: &str, success: bool) -> (u32, u32) {
+    let text = format!("{stdout}\n{stderr}");
+    if let Some(pair) = parse_tests_prefix(&text) {
+        return pair;
+    }
+    if let Some(pair) = parse_passed_failed_phrase(&text.to_ascii_lowercase()) {
+        return pair;
+    }
+    if let Some(pair) = parse_unittest(&text) {
+        return pair;
+    }
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("assertionerror") {
+        return (0, 1);
+    }
+    if success {
+        (0, 0)
+    } else {
+        (0, 1)
+    }
+}
+
+fn parse_tests_prefix(text: &str) -> Option<(u32, u32)> {
+    for line in text.lines() {
+        let rest = line.trim().strip_prefix("TESTS:")?.trim();
+        if let Some(pair) = parse_passed_failed_phrase(&rest.to_ascii_lowercase()) {
+            return Some(pair);
+        }
+    }
+    None
+}
+
+fn parse_passed_failed_phrase(s: &str) -> Option<(u32, u32)> {
+    let passed = number_before(s, " passed")?;
+    let failed = number_before(s, " failed").unwrap_or(0);
+    Some((passed, failed))
+}
+
+fn number_before(s: &str, marker: &str) -> Option<u32> {
+    let idx = s.find(marker)?;
+    let prefix = s[..idx].trim();
+    let digits: String = prefix
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse().ok()
+    }
+}
+
+fn parse_unittest(text: &str) -> Option<(u32, u32)> {
+    let lower = text.to_ascii_lowercase();
+    let idx = lower.find("ran ")?;
+    let rest = &lower[idx + 4..];
+    let n: u32 = rest.split_whitespace().next()?.parse().ok()?;
+    if !rest.contains("test") {
+        return None;
+    }
+    if let Some(after) = lower.split("failures=").nth(1) {
+        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let failed: u32 = digits.parse().ok()?;
+        return Some((n.saturating_sub(failed), failed));
+    }
+    if lower.contains("\nok") || lower.trim_end().ends_with("ok") {
+        Some((n, 0))
+    } else {
+        None
+    }
 }
 
 /// Runs a solution file; sql runs file bytes in the session db pairproof.
@@ -336,6 +417,32 @@ mod tests {
             assert_eq!(outcome_is_timeout(&outcome(Some(code)), Duration::from_millis(ms), req), want, "code {code} ms {ms}");
         }
         assert!(!outcome_is_timeout(&outcome(None), Duration::from_secs(2), req));
+    }
+
+    #[test]
+    fn parse_test_counts_reads_expected_vs_actual() {
+        assert_eq!(
+            parse_test_counts("TESTS: 2 passed, 1 failed\n", "", false),
+            (2, 1)
+        );
+        assert_eq!(
+            parse_test_counts("ok\nTESTS: 3 passed, 0 failed", "", true),
+            (3, 0)
+        );
+        assert_eq!(
+            parse_test_counts("Ran 4 tests in 0.01s\n\nOK\n", "", true),
+            (4, 0)
+        );
+        assert_eq!(
+            parse_test_counts("", "Ran 3 tests in 0.01s\nFAILED (failures=1)\n", false),
+            (2, 1)
+        );
+        assert_eq!(
+            parse_test_counts("", "AssertionError: expected 3", false),
+            (0, 1)
+        );
+        assert_eq!(parse_test_counts("", "", true), (0, 0));
+        assert_eq!(parse_test_counts("boom", "traceback", false), (0, 1));
     }
 
     #[test]

@@ -352,7 +352,7 @@ fn question_hint(state: &CandidateRunState, option_count: usize) -> String {
         }) || state.staging.current_flow()
             == crate::tui::candidate_stage::QuestionFlowState::SolutionReady =>
         {
-            "focus: c continue, r run, t run tests, a change approach, f submit, tab panel, esc quit"
+            "focus: c continue, r run, t write tests, a change approach, f submit, tab panel, esc quit"
                 .to_string()
         }
         _ => "focus: up/down move, space select, enter submit, tab panel, esc quit".to_string(),

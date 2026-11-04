@@ -9,7 +9,7 @@ use pairproof::leetcode::Difficulty;
 use pairproof::llm::coding::{CodingStepInput, CodingStepOutput};
 use pairproof::llm::extraction::ExtractionResult;
 use pairproof::llm::Message;
-use pairproof::orchestration::control::{final_ack_bytes, FinalAckOutcome};
+use pairproof::orchestration::control::{final_ack_bytes, heartbeat_bytes, FinalAckOutcome};
 use pairproof::orchestration::*;
 use pairproof::sandbox::{RunnabilityReport, TestOutcome};
 use pairproof::scoring::{ApproachGrade, ApproachQuality, ApproachSet};
@@ -117,6 +117,8 @@ fn write_hello_version(control: &std::path::Path, session_id: &str, version: &st
 }
 #[rustfmt::skip]
 fn write_ack(control: &std::path::Path, session_id: &str) { std::fs::write(control.join("inbox").join("final-ack.json"), final_ack_bytes(session_id)).unwrap(); }
+#[rustfmt::skip]
+fn write_heartbeat(control: &std::path::Path, session_id: &str, at_ms: u64) { std::fs::write(control.join("inbox").join("heartbeat.json"), heartbeat_bytes(session_id, at_ms)).unwrap(); }
 #[rustfmt::skip]
 fn write_ack_raw(control: &std::path::Path, bytes: &[u8]) { std::fs::write(control.join("inbox").join("final-ack.json"), bytes).unwrap(); }
 #[rustfmt::skip]
@@ -340,6 +342,27 @@ async fn expert_proceeds_after_ack_timeout() {
     assert_eq!(runtime.gate_phase(), GatePhase::Ended); assert!(root.join("artifacts").join("s1").join("report.md").is_file());
     let after = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap(); assert!(after.final_breakdown.is_some());
     let again = std::time::Instant::now(); runtime.end_session_with_ack_deadline(T0 + 3_000, 60).await.unwrap(); assert!(again.elapsed() < std::time::Duration::from_secs(2));
+}
+
+#[tokio::test]
+#[rustfmt::skip]
+async fn end_session_does_not_wait_full_ack_when_disconnected() {
+    let (_root, control, mut runtime) = make_runtime("end-disconnected", false).await;
+    write_hello(&control, "s1");
+    assert_eq!(runtime.poll_candidate(T0 + 1_000).await, PollOutcome::Connected);
+    runtime.set_heartbeat_timeout(1_000);
+    write_heartbeat(&control, "s1", T0 + 1_500);
+    runtime.drain_intents(T0 + 1_800).await.unwrap();
+    write_heartbeat(&control, "s1", T0 + 1_500);
+    runtime.drain_intents(T0 + 2_900).await.unwrap();
+    assert!(runtime.is_disconnected());
+    let started = std::time::Instant::now();
+    runtime.end_session(T0 + 4_000).await.unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(15),
+        "disconnected end must not wait the live ack window, elapsed {:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]

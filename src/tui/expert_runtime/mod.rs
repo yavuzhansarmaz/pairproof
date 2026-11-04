@@ -81,6 +81,10 @@ pub use crate::tui::expert_session::{format_session_id, SANDBOX_PORT_RANGE};
 
 /// Missed-liveness window before the expert marks the candidate disconnected.
 pub const HEARTBEAT_TIMEOUT_MS: u64 = 30_000;
+/// How long End waits for the candidate final-ack while the candidate is live.
+pub const FINAL_ACK_WAIT_MS: u64 = 60_000;
+/// How long End waits for that ack after the candidate is already gone.
+pub const DISCONNECTED_ACK_WAIT_MS: u64 = 2_000;
 /// Selection retry floor: one attempt per 30s per screen while failing.
 pub const SELECTION_RETRY_MS: u64 = 30_000;
 /// Selection screens with independent failure backoff.

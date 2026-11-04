@@ -1,5 +1,5 @@
 //! Coding loop: one core action, one coding step, workspace write, and a
-//! runnability check per candidate action. Tests run only on request.
+//! runnability check per candidate action. `t` writes tests; `r` runs them.
 //! Transports run on the real session, so the Phase 4 layer books usage
 //! and logs session events on it exactly once.
 
@@ -10,16 +10,18 @@ use crate::core::{ApproachChoice, CoreError, Language, Session};
 use crate::llm::coding::{run_coding_step, CodingStepInput, CodingStepOutput};
 use crate::llm::MetaClient;
 use crate::orchestration::pipeline::{
-    ApproachGenerator, PipelineError, PipelineFuture, QuestionPipeline, TestRunRecord,
+    ApproachGenerator, PipelineError, PipelineFuture, QuestionPipeline,
 };
 use crate::orchestration::session::Orchestrator;
 use crate::sandbox::validate::question_layout;
 use crate::sandbox::{
     check_runnability, read_file, run_tests, write_file, RunnabilityReport, SandboxHandle,
-    TestOutcome, WorkspacePath,
+    TestOutcome, WorkspacePath, RUN_TIMEOUT,
 };
 
 const SANDBOX_TIMEOUT: Duration = Duration::from_secs(30);
+const WRITE_TESTS_INSTRUCTION: &str =
+    "generate unit tests for the question examples and edge cases";
 
 /// Outcome of one coding step plus its runnability check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,7 +175,7 @@ impl SandboxIo for DockerSandboxIo {
     ) -> PipelineFuture<'a, TestOutcome> {
         Box::pin(async move {
             let path = solution_path(index, language)?;
-            run_tests(&self.handle, &self.user, &path, language, SANDBOX_TIMEOUT)
+            run_tests(&self.handle, &self.user, &path, language, RUN_TIMEOUT)
                 .await
                 .map_err(sandbox_err)
         })
@@ -281,30 +283,28 @@ impl QuestionPipeline {
         .await
     }
 
-    /// Records the test request, runs the sandbox test wrapper, and stores the outcome.
+    /// Records a test request (extra score), then asks the coding agent
+    /// to write tests into the solution file. Does not execute them.
     pub async fn request_tests(
         &mut self,
         orch: &mut Orchestrator,
+        coding: &dyn CodingTransport,
         sandbox: &dyn SandboxIo,
         now_ms: u64,
-    ) -> Result<TestRunRecord, PipelineError> {
+    ) -> Result<CodingStepOutcome, PipelineError> {
         let index = orch.current_index().ok_or(CoreError::NoActiveQuestion)?;
         if self.submitted_slots.contains(&index) {
             return Err(CoreError::InvalidState("question already submitted".into()).into());
         }
-        let language = orch.session().language();
-        self.refresh_code_from_sandbox(index, language, sandbox)
-            .await;
         orch.request_tests(now_ms)?;
-        let outcome = sandbox.run_requested_tests(index, language).await?;
-        let record = TestRunRecord {
-            index,
-            at_ms: now_ms,
-            outcome,
-        };
-        self.test_records.push(record.clone());
-        self.record_exec_run("test", &record);
-        Ok(record)
+        self.run_one_coding_step(
+            orch,
+            coding,
+            sandbox,
+            Some(WRITE_TESTS_INSTRUCTION.to_string()),
+            true,
+        )
+        .await
     }
 
     pub(crate) async fn refresh_code_from_sandbox(

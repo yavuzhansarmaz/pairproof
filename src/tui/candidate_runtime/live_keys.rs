@@ -199,7 +199,7 @@ fn run_solution_action<T: CandidateTransport>(
         if let Some(index) = view.question_index {
             state.staging.set_flow(
                 index,
-                QuestionFlowState::RunningSolution {
+                QuestionFlowState::RunningTests {
                     base_seq: view.run_seq(),
                 },
             );
@@ -378,8 +378,9 @@ pub fn handle_live_key<T: CandidateTransport>(
                         if let Some(index) = view.question_index {
                             state.staging.set_flow(
                                 index,
-                                QuestionFlowState::RunningTests {
-                                    base_seq: view.run_seq(),
+                                QuestionFlowState::UpdatingTests {
+                                    instruction: "generate tests".into(),
+                                    base_revision: view.code_revision(),
                                 },
                             );
                         }

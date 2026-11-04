@@ -442,7 +442,7 @@ async fn a_clean_run_keeps_the_question_open_until_submit() {
     append(&root, &line(&Intent::new("s1", 2, IntentKind::RequestTests)));
     let test_reports = ex.drain(&io, &mut orch, &mut pipe, &transports, 11).await.unwrap();
     assert_eq!(test_reports[1].outcome, ApplyOutcome::Applied, "{test_reports:?}");
-    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 0, "t writes tests, does not run them");
     assert_eq!(count(&orch, |k| matches!(k, EventKind::TestsRequested { .. })), 1);
     assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { .. })), 0);
     assert_eq!(orch.current_index(), Some(0));
@@ -463,7 +463,7 @@ async fn a_failed_run_leaves_the_solved_question_open() {
     append(&root, &line(&Intent::new("s1", 2, IntentKind::RequestTests)));
     let reports = ex.drain(&io, &mut orch, &mut pipe, &transports, 10).await.unwrap();
     assert_eq!(reports.iter().map(|r| r.outcome).collect::<Vec<_>>(), vec![ApplyOutcome::Applied, ApplyOutcome::Applied], "{reports:?}");
-    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(fakes.sandbox.test_calls.load(Ordering::SeqCst), 0, "t writes tests, does not run them");
     assert_eq!(count(&orch, |k| matches!(k, EventKind::QuestionFinished { .. })), 0);
     assert_eq!(orch.current_index(), Some(0));
     assert!(orch.session().current_slot().is_some_and(|s| s.approach.is_some()));

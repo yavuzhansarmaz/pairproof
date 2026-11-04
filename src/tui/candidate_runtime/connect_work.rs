@@ -74,6 +74,29 @@ pub(crate) struct BackgroundPollOutcome {
     pub sync_failed: Option<bool>,
 }
 
+/// Notes a locally arrived `qN/solution.*` without calling Mutagen flush.
+/// A missing file is not a sync failure: the watcher may still be catching up.
+fn record_workspace_sync(
+    workspace: &std::path::Path,
+    index: usize,
+    target_rev: u64,
+    synced_revisions: &std::collections::BTreeMap<usize, u64>,
+) -> (Option<(usize, u64)>, Option<bool>) {
+    if target_rev == 0 {
+        return (None, None);
+    }
+    if crate::tui::candidate_sync::has_synced_solution(workspace, index) {
+        let revision = if synced_revisions.get(&index).copied().unwrap_or(0) < target_rev {
+            Some((index, target_rev))
+        } else {
+            None
+        };
+        (revision, Some(false))
+    } else {
+        (None, None)
+    }
+}
+
 impl CandidateRuntime<SshCandidateTransport> {
     /// Spawns a non-blocking heartbeat write on a worker thread (e.g. while on Rules).
     pub(crate) fn spawn_background_heartbeat(&self, now_ms: u64) {
@@ -106,7 +129,7 @@ impl CandidateRuntime<SshCandidateTransport> {
         if self.phase != CandidateRuntimePhase::Connected {
             return None;
         }
-        let (conn, key_line, client, sync_env) = self.transport.poll_parts()?;
+        let (conn, key_line, client, _sync_env) = self.transport.poll_parts()?;
         let send_hb = now_ms.saturating_sub(self.last_hb_ms) > HEARTBEAT_THROTTLE_MS;
         if send_hb {
             self.last_hb_ms = now_ms;
@@ -174,33 +197,13 @@ impl CandidateRuntime<SshCandidateTransport> {
                         } else {
                             u64::from(snap.selected.is_some())
                         };
-                        if target_rev > 0 {
-                            let local_ok =
-                                crate::tui::candidate_sync::has_synced_solution(&workspace, index);
-                            if synced_revisions.get(&index).copied().unwrap_or(0) < target_rev
-                                || !local_ok
-                            {
-                                let flush_res = match sync_env.as_ref() {
-                                    Some(env) => {
-                                        super::transport::flush_sync_with_env(env, &session_id)
-                                    }
-                                    None => Ok(()),
-                                };
-                                match flush_res {
-                                    Ok(()) => {
-                                        if crate::tui::candidate_sync::has_synced_solution(
-                                            &workspace, index,
-                                        ) {
-                                            synced_revision = Some((index, target_rev));
-                                            sync_failed = Some(false);
-                                        }
-                                    }
-                                    Err(_) => {
-                                        sync_failed = Some(true);
-                                    }
-                                }
-                            }
-                        }
+                        // Mutagen already watches; a blocking flush here
+                        // stalled heartbeats and flagged "sync problem"
+                        // while the solution file was still in flight.
+                        let (revision, failed) =
+                            record_workspace_sync(&workspace, index, target_rev, &synced_revisions);
+                        synced_revision = revision;
+                        sync_failed = failed;
                     }
                 }
             }
@@ -252,5 +255,45 @@ impl CandidateRuntime<SshCandidateTransport> {
                 Ok(Some(snapshot))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::record_workspace_sync;
+    use std::collections::BTreeMap;
+
+    fn temp_workspace(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("pairproof-ws-sync-{}-{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("workspace");
+        dir
+    }
+
+    #[test]
+    fn missing_solution_is_not_a_sync_failure() {
+        let dir = temp_workspace("missing");
+        let (rev, failed) = record_workspace_sync(&dir, 0, 1, &BTreeMap::new());
+        assert_eq!(rev, None);
+        assert_eq!(failed, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn arrived_solution_clears_sync_failure() {
+        let dir = temp_workspace("arrived");
+        std::fs::create_dir_all(dir.join("q1")).expect("q1");
+        std::fs::write(dir.join("q1/solution.py"), "def solve():\n    return 1\n")
+            .expect("solution");
+        let (rev, failed) = record_workspace_sync(&dir, 0, 3, &BTreeMap::new());
+        assert_eq!(rev, Some((0, 3)));
+        assert_eq!(failed, Some(false));
+        let mut already = BTreeMap::new();
+        already.insert(0, 3);
+        let (rev, failed) = record_workspace_sync(&dir, 0, 3, &already);
+        assert_eq!(rev, None);
+        assert_eq!(failed, Some(false));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
