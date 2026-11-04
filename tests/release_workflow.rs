@@ -175,7 +175,7 @@ fn release_workflow_validates_tag_matches_cargo() {
         })
         .expect("Cargo.toml must declare a package version");
     assert_eq!(
-        cargo_version, "0.1.3",
+        cargo_version, "0.1.4",
         "Cargo.toml version must match the published release"
     );
 }
@@ -391,4 +391,78 @@ fn main_push_bumps_patch_unless_cargo_version_changed() {
     // advance past the published latest, do not re-ship the stale cargo version.
     assert_eq!(plan("0.1.2", "0.1.3"), "0.1.4 bump");
     assert_eq!(plan("0.1.1", "0.1.3"), "0.1.4 bump");
+}
+
+#[test]
+fn set_cargo_version_updates_pin_test_and_readme() {
+    let workflow_text = workflow();
+    let publish = publish_section(&workflow_text);
+    assert!(
+        publish.contains("tests/release_workflow.rs") && publish.contains("README.md"),
+        "release commit must include the version pin test and README alongside Cargo.toml"
+    );
+
+    let root = std::env::temp_dir().join(format!(
+        "pairproof-set-cargo-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("scripts")).unwrap();
+    fs::create_dir_all(root.join("tests")).unwrap();
+    fs::copy(
+        manifest_path("scripts/set_cargo_version.sh"),
+        root.join("scripts/set_cargo_version.sh"),
+    )
+    .unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"pairproof\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("Cargo.lock"),
+        "[[package]]\nname = \"pairproof\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("tests/release_workflow.rs"),
+        "assert_eq!(\n        cargo_version, \"0.1.0\",\n        \"Cargo.toml version must match the published release\"\n    );\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("README.md"),
+        "Early open-source (`0.1.0`) — started as a hackathon project.\n",
+    )
+    .unwrap();
+
+    let output = Command::new("sh")
+        .arg(root.join("scripts/set_cargo_version.sh"))
+        .arg("9.8.7")
+        .output()
+        .expect("set_cargo_version.sh runs");
+    assert!(
+        output.status.success(),
+        "set_cargo_version failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let cargo = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("version = \"9.8.7\""), "{cargo}");
+    let lock = fs::read_to_string(root.join("Cargo.lock")).unwrap();
+    assert!(lock.contains("version = \"9.8.7\""), "{lock}");
+    let pin = fs::read_to_string(root.join("tests/release_workflow.rs")).unwrap();
+    assert!(
+        pin.contains("cargo_version, \"9.8.7\","),
+        "pin test not updated: {pin}"
+    );
+    let readme = fs::read_to_string(root.join("README.md")).unwrap();
+    assert!(
+        readme.contains("Early open-source (`9.8.7`)"),
+        "README not updated: {readme}"
+    );
+    let _ = fs::remove_dir_all(&root);
 }

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Rewrite the pairproof package version in Cargo.toml and Cargo.lock.
+# Rewrite the pairproof package version in Cargo.toml, Cargo.lock, the
+# release-workflow version pin test, and the README status line.
 set -eu
 
 VERSION="${1:?version required}"
@@ -31,3 +32,43 @@ awk -v ver="$VERSION" '
   { print }
 ' "$ROOT/Cargo.lock" > "$ROOT/Cargo.lock.tmp"
 mv "$ROOT/Cargo.lock.tmp" "$ROOT/Cargo.lock"
+
+PIN_TEST="$ROOT/tests/release_workflow.rs"
+awk -v ver="$VERSION" '
+  BEGIN { updated = 0 }
+  /^[[:space:]]*cargo_version, "[0-9]+\.[0-9]+\.[0-9]+",[[:space:]]*$/ {
+    indent = $0
+    sub(/cargo_version.*/, "", indent)
+    print indent "cargo_version, \"" ver "\","
+    updated = 1
+    next
+  }
+  { print }
+  END {
+    if (!updated) {
+      print "error: did not find cargo_version pin assertion in tests/release_workflow.rs" > "/dev/stderr"
+      exit 1
+    }
+  }
+' "$PIN_TEST" > "$PIN_TEST.tmp"
+mv "$PIN_TEST.tmp" "$PIN_TEST"
+
+README="$ROOT/README.md"
+awk -v ver="$VERSION" '
+  BEGIN { updated = 0 }
+  {
+    line = $0
+    if (match(line, /Early open-source \(`[0-9]+\.[0-9]+\.[0-9]+`\)/)) {
+      line = substr(line, 1, RSTART - 1) "Early open-source (`" ver "`)" substr(line, RSTART + RLENGTH)
+      updated = 1
+    }
+    print line
+  }
+  END {
+    if (!updated) {
+      print "error: did not find Early open-source version in README.md" > "/dev/stderr"
+      exit 1
+    }
+  }
+' "$README" > "$README.tmp"
+mv "$README.tmp" "$README"
