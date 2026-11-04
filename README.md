@@ -158,7 +158,7 @@ Docs:
 
 ## Status
 
-Early open-source (`0.1.0`) — started as a hackathon project. Core flow (setup → connect → live scoring → report) is implemented and covered by a large automated suite.
+Early open-source (`0.1.1`) — started as a hackathon project. Core flow (setup → connect → live scoring → report) is implemented and covered by a large automated suite.
 
 **Known limits**
 

@@ -93,8 +93,13 @@ fn approach_steps_per_quality_and_multiplier() {
             let map = BTreeMap::from([(target, vec![quality])]);
             let b = live_rating(&s, &map);
             assert_eq!(triples(&b), vec![(target, Approach, step * mult)]);
-            close(b.rating, 6.0 + step * mult);
-            close(b.unclamped, 6.0 + step * mult);
+            let gain = if step > 0.0 {
+                step * mult * pairproof::scoring::POSITIVE_GAIN_SCALE
+            } else {
+                step * mult
+            };
+            close(b.rating, 6.0 + gain);
+            close(b.unclamped, 6.0 + gain);
         }
     }
 }
@@ -113,7 +118,7 @@ fn rating_clamps_at_bounds() {
         map.insert(i, vec![Best]);
     }
     let b = live_rating(&s, &map);
-    close(b.unclamped, 12.25);
+    close(b.unclamped, 6.0 + 6.25 * pairproof::scoring::POSITIVE_GAIN_SCALE);
     close(b.rating, 10.0);
     let mut s = started_easy();
     for i in 0..20u64 {
@@ -122,6 +127,28 @@ fn rating_clamps_at_bounds() {
     let b = live_rating(&s, &BTreeMap::new());
     close(b.unclamped, 0.0);
     close(b.rating, 3.0);
+}
+
+#[test]
+fn a_full_best_clear_stays_under_the_ceiling() {
+    let mut s = started_expert();
+    let mut map = BTreeMap::new();
+    for i in 0..10usize {
+        let at = 10 + (i as u64) * 10;
+        s.select_approach(ApproachChoice::Preset(0), 1000, at)
+            .unwrap();
+        s.add_tokens(10).unwrap();
+        s.finish_question(at + 1).unwrap();
+        map.insert(i, vec![Best]);
+    }
+    let b = live_rating(&s, &map);
+    assert!(
+        b.rating < 9.5,
+        "a clean clear of all 10 should not sit on 10, got {}",
+        b.rating
+    );
+    assert!(b.rating > 9.0, "a clean clear should still be high, got {}", b.rating);
+    assert!(b.unclamped < 10.0, "unclamped {}", b.unclamped);
 }
 
 #[test]
@@ -165,8 +192,10 @@ fn golden_scripted_session_live_rating() {
         (6, vec![Best]),
     ]);
     let b = live_rating(&s, &map);
-    close(b.rating, 6.50);
-    close(b.unclamped, 6.50);
+    // Positives 1.15 scaled, negatives -0.65 kept in full.
+    let expected_rating = 6.0 + 1.15 * pairproof::scoring::POSITIVE_GAIN_SCALE - 0.65;
+    close(b.rating, expected_rating);
+    close(b.unclamped, expected_rating);
     let expected = vec![
         (0, Approach, 0.15),
         (0, Tokens, 0.10),

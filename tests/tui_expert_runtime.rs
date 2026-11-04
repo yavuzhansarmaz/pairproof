@@ -438,12 +438,17 @@ async fn expert_scored_session_shows_approach_lines_and_rating() {
     assert_eq!(runtime.orchestrator().current_index(), Some(1));
     let done = runtime.monitor_view(T0 + 3_000);
     assert!(done.rating_lines.iter().any(|l| l.contains("approach") && l.contains("Best")), "finished lines: {:?}", done.rating_lines);
-    assert!((done.rating - 6.25).abs() < 1e-9, "finished rating: {}", done.rating);
+    let finished = 6.0 + 0.25 * pairproof::scoring::POSITIVE_GAIN_SCALE;
+    assert!((done.rating - finished).abs() < 1e-9, "finished rating: {}", done.rating);
     write_ack(&control, "s1");
     runtime.end_session(T0 + 5_000).await.unwrap();
     let after = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
     let breakdown = after.final_breakdown.expect("final breakdown published");
-    assert!((breakdown.rating - 6.25).abs() < 1e-9, "final rating: {}", breakdown.rating);
+    assert!(
+        (breakdown.rating - finished).abs() < 1e-9,
+        "final rating: {}",
+        breakdown.rating
+    );
 }
 
 #[test] #[rustfmt::skip]

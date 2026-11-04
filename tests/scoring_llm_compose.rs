@@ -94,8 +94,9 @@ fn parsed_approach_set_drives_live_rating() {
         0.30 * mult,
     );
     close(line_delta(&b.lines, 0, ScoreComponent::Tokens), 0.20 * mult);
-    close(b.rating, 6.0 + 0.30 * mult + 0.20 * mult);
-    close(b.unclamped, 6.25);
+    let gain = (0.30 + 0.20) * mult * pairproof::scoring::POSITIVE_GAIN_SCALE;
+    close(b.rating, 6.0 + gain);
+    close(b.unclamped, 6.0 + gain);
 }
 
 #[test]
@@ -121,7 +122,10 @@ fn other_grade_feeds_selection_and_scoring() {
         .lines
         .iter()
         .all(|l| l.component != ScoreComponent::Tokens));
-    close(b.rating, 6.0 + 0.10 * mult);
+    close(
+        b.rating,
+        6.0 + 0.10 * mult * pairproof::scoring::POSITIVE_GAIN_SCALE,
+    );
 }
 
 // Slot 0: Best, 700/1000. Slot 1: Workable, 1000/500 plus one redirect. Basis 6.35.
@@ -159,8 +163,9 @@ fn parsed_grades_merge_in_final_rating() {
     close(b.ai_correction_total, 0.8);
     close(b.per_question[0].correction, 0.5);
     close(b.per_question[1].correction, 0.3);
-    close(b.rating, 7.15);
-    close(b.unclamped, 7.15);
+    let scaled = 6.0 + (0.50 + 0.8) * pairproof::scoring::POSITIVE_GAIN_SCALE - 0.15;
+    close(b.rating, scaled);
+    close(b.unclamped, scaled);
     assert_eq!(b.per_question[0].grade, Some(9.0));
     assert_eq!(b.per_question[1].grade, Some(4.0));
     assert_eq!(
@@ -201,7 +206,10 @@ async fn grade_questions_failure_path_composes_with_final_rating() {
     close(b.rating, empty.rating);
     close(b.unclamped, empty.unclamped);
     close(b.ai_correction_total, 0.0);
-    close(b.rating, 6.35);
+    close(
+        b.rating,
+        6.0 + 0.50 * pairproof::scoring::POSITIVE_GAIN_SCALE - 0.15,
+    );
 }
 
 fn entries(prefix: &str, n: usize, difficulty: &str) -> Vec<CatalogEntry> {
@@ -276,8 +284,8 @@ fn golden_full_pipeline_compose() {
         assert_eq!(input.expected_tokens, Some(expected[i]), "slot {i}");
         assert_eq!(input.actual_tokens, actuals[i], "slot {i}");
     }
-    // Basis +0.25+0.10-0.10+0.05(skip approach)+0.075+0.30-0.50+0.30+0.75-0.075=+1.15 over 6.0.
-    // Parsed corrections sum +0.50 uncapped, so final is 7.65; slot 2 NotScored, slot 3 skipped.
+    // Positive points are scaled by POSITIVE_GAIN_SCALE; penalties stay whole.
+    // This scripted clear lands at 6.975. Slot 2 is NotScored, slot 3 skipped.
     let table = [
         (0usize, 9.0, 0.2),
         (1, 4.0, -0.1),
@@ -299,8 +307,8 @@ fn golden_full_pipeline_compose() {
         .collect();
     grades.push(GradeOutcome::NotScored { slot_index: 2 });
     let b = final_rating(&s, &map, &grades).expect("final rating");
-    close(b.rating, 7.65);
-    close(b.unclamped, 7.65);
+    close(b.rating, 6.975);
+    close(b.unclamped, 6.975);
     close(b.ai_correction_total, 0.5);
     assert_eq!(
         (b.solved_count, b.finished_count, b.skipped_count),

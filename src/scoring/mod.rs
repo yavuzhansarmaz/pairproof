@@ -7,7 +7,8 @@ pub mod types;
 
 pub use final_merge::{final_rating, FinalBreakdown, PerQuestionFinal};
 pub use live::{
-    acceptance_factor, difficulty_multiplier, live_rating, token_band_step, RatingBreakdown,
+    acceptance_factor, difficulty_multiplier, live_rating, rate_from_parts, token_band_step,
+    POSITIVE_GAIN_SCALE, RatingBreakdown,
     ScoreComponent, ScoreLine,
 };
 pub use shadow::{

@@ -126,9 +126,10 @@ fn scoring_consistency_reports_final_rating_delta() {
         &[graded(0, 8.0, 0.0), graded(2, 6.0, 0.0)],
     )
     .expect("compare");
-    close(report.first_rating, 6.3);
+    let scaled = 0.3 * pairproof::scoring::POSITIVE_GAIN_SCALE;
+    close(report.first_rating, 6.0 + scaled);
     close(report.second_rating, 6.0);
-    close(report.final_rating_delta, 0.3);
+    close(report.final_rating_delta, scaled);
     close(report.first_breakdown.rating, report.first_rating);
     close(report.second_breakdown.rating, report.second_rating);
 }

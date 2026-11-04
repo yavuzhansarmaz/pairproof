@@ -135,8 +135,8 @@ fn release_workflow_validates_tag_matches_cargo() {
         })
         .expect("Cargo.toml must declare a package version");
     assert_eq!(
-        cargo_version, "0.1.0",
-        "Cargo.toml version must stay at the distribution contract version"
+        cargo_version, "0.1.1",
+        "Cargo.toml version must match the version that will be tagged"
     );
 }
 
