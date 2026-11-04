@@ -210,8 +210,19 @@ fn format_run_output(
     let mut out = Vec::new();
     match run.kind.as_str() {
         "run" | "test" => {
-            let no_tests = run.stdout.to_ascii_lowercase().contains("no tests ran");
-            if no_tests {
+            let code_suffix = run
+                .exit_code
+                .map_or(String::new(), |c| format!(" (exit {c})"));
+            if let Some((passed, failed)) = run.counted_tests() {
+                let label = if run.kind == "run" {
+                    "last run"
+                } else {
+                    "last test"
+                };
+                out.push(sanitize_display(&format!(
+                    "{label}: {passed} passed, {failed} failed{code_suffix}"
+                )));
+            } else if run.stdout.to_ascii_lowercase().contains("no tests ran") {
                 out.push("last run: no tests (press t to write tests)".to_string());
             } else {
                 let label = if run.kind == "run" {
@@ -220,9 +231,6 @@ fn format_run_output(
                     "last test"
                 };
                 let status = if run.success { "passed" } else { "failed" };
-                let code_suffix = run
-                    .exit_code
-                    .map_or(String::new(), |c| format!(" (exit {c})"));
                 out.push(sanitize_display(&format!("{label}: {status}{code_suffix}")));
             }
         }
@@ -231,9 +239,28 @@ fn format_run_output(
         }
         _ => return Vec::new(),
     }
-    for line in run.stdout.lines().take(8) {
-        if !line.trim().is_empty() {
+    let mut shown = 0usize;
+    let mut saw_summary = false;
+    for line in run.stdout.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if line.trim().starts_with("TESTS:") {
+            saw_summary = true;
+        }
+        if shown < 8 {
             out.push(sanitize_display(&format!("stdout: {line}")));
+            shown += 1;
+        }
+    }
+    if !saw_summary {
+        if let Some(summary) = run
+            .stdout
+            .lines()
+            .rev()
+            .find(|line| line.trim().starts_with("TESTS:"))
+        {
+            out.push(sanitize_display(&format!("stdout: {summary}")));
         }
     }
     for line in run.stderr.lines().take(8) {

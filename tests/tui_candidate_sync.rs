@@ -319,6 +319,36 @@ fn workspace_preview_handles_languages_and_refreshes_on_modification() {
     );
     assert!(!empty.contains("last test: passed"), "{empty}");
 
+    let per_case = SnapshotRun {
+        kind: "test".to_string(),
+        seq: 3,
+        code_revision: 1,
+        success: true,
+        exit_code: Some(0),
+        stdout: "\
+Test 1: PASSED - nums=[0, 1, 1, 0] -> [0, 1]
+Test 2: PASSED - nums=[0, 3, 2, 1, 3, 2] -> [2, 3]
+Test 3: PASSED - nums=[7, 1, 5, 4, 3, 4, 6, 0, 9, 5, 8, 2] -> [4, 5]
+Test 4: PASSED - nums=[1, 0, 1, 0] -> [0, 1]
+Test 5: PASSED - nums=[0, 0, 1, 2, 2] -> [0, 2]
+Test 6: PASSED - nums=[3, 0, 1, 2, 3, 0] -> [0, 3]
+Test 7: PASSED - nums=[0, 1, 2, 3, 1, 2] -> [1, 2]
+Test 8: PASSED - nums=[9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9, 0] -> [0, 9]
+no tests ran. press t to write tests."
+            .to_string(),
+        stderr: String::new(),
+        at_ms: 120,
+    };
+    let counted = workspace_preview_with_run(&alpha, 0, Some(&per_case)).join("\n");
+    assert!(
+        counted.contains("last test: 8 passed, 0 failed (exit 0)"),
+        "{counted}"
+    );
+    assert!(
+        !counted.contains("last run: no tests (press t to write tests)"),
+        "{counted}"
+    );
+
     // JavaScript and SQL paths and run hints.
     write_solution(
         &alpha,

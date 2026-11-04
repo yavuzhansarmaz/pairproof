@@ -34,15 +34,17 @@ fn script(chunks: &[&str], fail: bool) -> Script { Script { chunks: chunks.iter(
 struct StreamingChat {
     scripts: Mutex<VecDeque<Script>>,
     calls: AtomicU32,
+    history_lens: Mutex<Vec<usize>>,
 }
 #[rustfmt::skip]
-impl StreamingChat { fn new(scripts: Vec<Script>) -> Self { Self { scripts: Mutex::new(scripts.into()), calls: AtomicU32::new(0) } } }
+impl StreamingChat { fn new(scripts: Vec<Script>) -> Self { Self { scripts: Mutex::new(scripts.into()), calls: AtomicU32::new(0), history_lens: Mutex::new(Vec::new()) } } }
 #[rustfmt::skip]
 impl ChatTransport for StreamingChat {
     fn chat<'a>(&'a self, _s: &'a mut Session, _st: &'a ChatState, _h: &'a [Message], _m: &'a str, _at: u64) -> PF<'a, String> { Box::pin(async move { Ok("fallback".to_string()) }) }
-    fn chat_streaming<'a>(&'a self, _s: &'a mut Session, _st: &'a ChatState, _h: &'a [Message], _m: &'a str, _at: u64, on_chunk: &'a mut (dyn FnMut(&str) + Send)) -> PF<'a, String> {
+    fn chat_streaming<'a>(&'a self, _s: &'a mut Session, _st: &'a ChatState, history: &'a [Message], _m: &'a str, _at: u64, on_chunk: &'a mut (dyn FnMut(&str) + Send)) -> PF<'a, String> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            self.history_lens.lock().expect("history").push(history.len());
             let next = self.scripts.lock().expect("scripts").pop_front().unwrap_or_else(|| script(&[], true));
             for chunk in &next.chunks { on_chunk(chunk); tokio::task::yield_now().await; }
             tokio::task::yield_now().await; tokio::task::yield_now().await;
@@ -372,4 +374,50 @@ async fn coach_stream_does_not_expose_hidden_runtime_state() {
         let text = serde_json::to_string(&snap).expect("snap json");
         assert!(!text.contains("424242"), "{text}");
     }
+}
+
+#[tokio::test]
+async fn coach_replies_are_scoped_to_the_active_question() {
+    let (io, mut ex, mut orch, mut pipe, fakes) = setup(vec![
+        script(&["Q1 hint"], false),
+        script(&["Q2 hint"], false),
+    ])
+    .await;
+    run_chat(&io, &mut ex, &mut orch, &mut pipe, &fakes, 1, "c1").await;
+    assert_eq!(ex.chat_replies(), ["Q1 hint".to_string()]);
+    assert_eq!(ex.chat_replies_for(0), ["Q1 hint".to_string()]);
+
+    io.append(&Intent::new("s1", 2, IntentKind::Navigate { index: 1 }));
+    ex.set_snapshot_base(build_snapshot(
+        &orch,
+        &pipe,
+        SessionSyncPhase::Active,
+        ex.chat_replies(),
+        None,
+    ));
+    let reports = ex
+        .drain(&io, &mut orch, &mut pipe, &fakes.transports(), 12)
+        .await
+        .expect("navigate");
+    assert!(
+        reports.iter().any(|r| r.outcome == ApplyOutcome::Applied),
+        "{reports:?}"
+    );
+    assert_eq!(orch.current_index(), Some(1));
+    assert!(
+        ex.chat_replies().is_empty(),
+        "q2 coach must start empty, got {:?}",
+        ex.chat_replies()
+    );
+    assert_eq!(ex.chat_replies_for(0), ["Q1 hint".to_string()]);
+
+    run_chat(&io, &mut ex, &mut orch, &mut pipe, &fakes, 3, "c2").await;
+    assert_eq!(ex.chat_replies(), ["Q2 hint".to_string()]);
+    assert_eq!(ex.chat_replies_for(0), ["Q1 hint".to_string()]);
+    assert_eq!(ex.chat_replies_for(1), ["Q2 hint".to_string()]);
+    assert_eq!(
+        fakes.chat.history_lens.lock().expect("history").as_slice(),
+        &[0, 0],
+        "q2 must not inherit q1 coach history"
+    );
 }

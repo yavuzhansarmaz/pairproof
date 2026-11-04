@@ -4,6 +4,7 @@
 //! Residual window: a crash between core apply and ledger persist could
 //! redeliver once; the window is closed before the next intent is read.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -73,8 +74,9 @@ impl ApplyReport {
 pub struct ControlExecutor {
     session_id: String,
     processed: ProcessedState,
-    pub(crate) chat_history: Vec<Message>,
-    pub(crate) chat_replies: Vec<String>,
+    pub(crate) histories_by_question: BTreeMap<usize, Vec<Message>>,
+    pub(crate) replies_by_question: BTreeMap<usize, Vec<String>>,
+    active_chat: Option<usize>,
     reconnects_seen: Option<usize>,
     pub(crate) snapshot_base: Option<CandidateSnapshot>,
     pub(crate) chat_partial: String,
@@ -88,15 +90,29 @@ impl ControlExecutor {
             Some(_) => return Err(ControlError::WrongSession),
             None => ProcessedState::new(session_id),
         };
-        Ok(Self { session_id: session_id.into(), processed, chat_history: Vec::new(), chat_replies: Vec::new(), reconnects_seen: None, snapshot_base: None, chat_partial: String::new() })
+        Ok(Self { session_id: session_id.into(), processed, histories_by_question: BTreeMap::new(), replies_by_question: BTreeMap::new(), active_chat: None, reconnects_seen: None, snapshot_base: None, chat_partial: String::new() })
     }
     /// Returns the durable processed ledger.
     pub fn processed(&self) -> &ProcessedState {
         &self.processed
     }
-    /// Returns candidate chat replies in arrival order.
+    /// Returns coach replies for the active question, in arrival order.
     pub fn chat_replies(&self) -> &[String] {
-        &self.chat_replies
+        self.chat_replies_for_slot(self.active_chat)
+    }
+    /// Returns coach replies stored for `index`.
+    pub fn chat_replies_for(&self, index: usize) -> &[String] {
+        self.chat_replies_for_slot(Some(index))
+    }
+    fn chat_replies_for_slot(&self, index: Option<usize>) -> &[String] {
+        index
+            .and_then(|index| self.replies_by_question.get(&index))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+    /// Points `chat_replies()` at `index` so snapshots follow the live question.
+    pub fn bind_chat(&mut self, index: Option<usize>) {
+        self.active_chat = index;
     }
     /// Sets the base snapshot used for in-progress partial publications.
     #[rustfmt::skip]
@@ -116,6 +132,7 @@ impl ControlExecutor {
         pipe: &mut QuestionPipeline, transports: &ControlTransports<'_>, now_ms: u64)
         -> Result<Vec<ApplyReport>, ControlError> {
         self.reset_sequence_on_reconnect(io, orch).await?;
+        self.bind_chat(orch.current_index());
         let raw = io.read_intents().await?;
         let parsed = parse_intent_bytes(&raw, &self.session_id);
         let mut reports: Vec<ApplyReport> = parsed.rejected.iter()
@@ -145,6 +162,7 @@ impl ControlExecutor {
                     reports.push(ApplyReport::rejected(intent, err.to_string()));
                 }
             }
+            self.bind_chat(orch.current_index());
         }
         Ok(reports)
     }

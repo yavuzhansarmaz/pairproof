@@ -92,7 +92,10 @@ impl CandidateView {
         };
         let test = match self.latest_test {
             Some(t) => format!("{} passed, {} failed", t.passed, t.failed),
-            None => "no test run yet".to_string(),
+            None => match self.latest_run().and_then(|run| run.counted_tests()) {
+                Some((passed, failed)) => format!("{passed} passed, {failed} failed"),
+                None => "no test run yet".to_string(),
+            },
         };
         let sync = if self.sync_phase.is_empty() {
             "sync: unknown".to_string()

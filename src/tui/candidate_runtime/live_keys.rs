@@ -233,7 +233,11 @@ pub fn handle_live_key<T: CandidateTransport>(
     }
     if key.code == K::Char('?')
         && !control
-        && !crate::tui::help::candidate_is_typing(CandidateScreen::Solving, state.focus)
+        && crate::tui::help::candidate_opens_help(
+            CandidateScreen::Solving,
+            state.focus,
+            state.typing_field_empty(),
+        )
     {
         if !state.show_help {
             state.show_help = true;
@@ -509,7 +513,7 @@ pub fn handle_live_key<T: CandidateTransport>(
                 if text.trim().is_empty() {
                     *status = Some("type a message first, then press enter.".to_string());
                 } else if apply(status, runtime.send_chat(&text)) {
-                    state.chat.remember_sent(&text);
+                    state.chat.remember_sent(view.question_index, &text);
                     state.chat.clear_input();
                 }
             }

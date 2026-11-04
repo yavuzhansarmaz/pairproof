@@ -306,7 +306,7 @@ pub(crate) fn settle_with_sync(
     let n = index + 1;
     let rev = view.code_revision();
     let run_seq = view.run_seq();
-    let ready_msg = format!("code is in q{n}/. c continue, r run, t write tests, or f submit.");
+    let ready_msg = format!("code is in q{n}/.");
     let flow = state.staging.flow_for(index);
     let was_updating_tests = matches!(flow, QuestionFlowState::UpdatingTests { .. });
     match flow {
@@ -372,10 +372,7 @@ pub(crate) fn settle_with_sync(
                     } else {
                         "solution"
                     };
-                    state.after_code = Some((
-                        index,
-                        format!("updated {target} in q{n}/. c continue, r run, t write tests, or f submit."),
-                    ));
+                    state.after_code = Some((index, format!("updated {target} in q{n}/.")));
                 }
             }
         }
@@ -389,12 +386,7 @@ pub(crate) fn settle_with_sync(
                     Some(_) => "failed",
                     None => "completed",
                 };
-                state.after_code = Some((
-                    index,
-                    format!(
-                        "tests {label} in q{n}/. c continue, r run, t write tests, or f submit."
-                    ),
-                ));
+                state.after_code = Some((index, format!("tests {label} in q{n}/.")));
             }
         }
         QuestionFlowState::RunningTests { base_seq } => {
@@ -411,12 +403,7 @@ pub(crate) fn settle_with_sync(
                         None => "completed",
                     },
                 };
-                state.after_code = Some((
-                    index,
-                    format!(
-                        "tests {label} in q{n}/. c continue, r run, t write tests, or f submit."
-                    ),
-                ));
+                state.after_code = Some((index, format!("tests {label} in q{n}/.")));
             }
         }
         QuestionFlowState::AwaitingApproach
@@ -444,10 +431,7 @@ pub(crate) fn settle_with_sync(
             state
                 .staging
                 .set_flow(pending.index, QuestionFlowState::SolutionReady);
-            state.after_code = Some((
-                pending.index,
-                format!("code is in q{n}/. c continue, r run, t write tests, or f submit."),
-            ));
+            state.after_code = Some((pending.index, format!("code is in q{n}/.")));
         }
     }
 }

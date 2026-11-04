@@ -68,13 +68,25 @@ fn key(code: K) -> KeyEvent {
 }
 
 #[test]
-fn question_mark_types_in_chat_focus() {
+fn question_mark_opens_help_in_empty_chat_focus() {
     let mut state = CandidateRunState::new();
     state.focus = CandidateFocus::Chat;
     let mut runtime = connected_runtime();
     let mut status = None;
     handle_live_key(&mut state, &mut runtime, key(K::Char('?')), &mut status);
-    assert_eq!(state.chat.input_text(), "?");
+    assert!(state.show_help);
+    assert_eq!(state.chat.input_text(), "");
+}
+
+#[test]
+fn question_mark_types_in_nonempty_chat_focus() {
+    let mut state = CandidateRunState::new();
+    state.focus = CandidateFocus::Chat;
+    state.chat.type_char('h');
+    let mut runtime = connected_runtime();
+    let mut status = None;
+    handle_live_key(&mut state, &mut runtime, key(K::Char('?')), &mut status);
+    assert_eq!(state.chat.input_text(), "h?");
     assert!(!state.show_help);
 }
 
@@ -110,7 +122,7 @@ fn chat_enter_keeps_the_sent_message_and_clears_the_box() {
     handle_live_key(&mut state, &mut runtime, key(K::Enter), &mut status);
     assert!(state.chat.input_text().is_empty());
     assert_eq!(
-        state.chat.sent_messages(),
+        state.chat.sent_messages(None),
         vec!["where do I start?".to_string()]
     );
     assert_eq!(runtime.transport().sent.len(), 1);
@@ -398,7 +410,10 @@ fn iterative_question_workflow_and_submission_guards() {
     runtime.poll_snapshot().expect("poll after file arrives");
     handle_live_key(&mut state, &mut runtime, key(K::Up), &mut status);
     assert_eq!(state.staging.flow_for(0), QuestionFlowState::SolutionReady);
-    assert!(state.after_code.is_some());
+    let ready = state.after_code.as_ref().expect("ready banner");
+    assert!(ready.1.contains("code is in q1/"), "{}", ready.1);
+    assert!(!ready.1.contains("c continue"), "{}", ready.1);
+    assert!(!ready.1.contains("t write tests"), "{}", ready.1);
 
     // 5. Press `c` to continue with additional instructions ("handle empty input").
     handle_live_key(&mut state, &mut runtime, key(K::Char('c')), &mut status);

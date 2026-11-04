@@ -155,6 +155,7 @@ impl ExpertRuntime {
             generator: &*self.generator,
             chat: &*self.chat,
         };
+        self.executor.bind_chat(self.orch.current_index());
         let base = build_snapshot_with_recovery(
             &self.orch,
             &self.pipeline,
@@ -193,6 +194,7 @@ impl ExpertRuntime {
         if reports.iter().any(|r| r.outcome == ApplyOutcome::Applied) {
             self.last_seen_ms = self.fresh_now(now_ms);
         }
+        self.executor.bind_chat(self.orch.current_index());
         let mut snapshot = build_snapshot_with_recovery(
             &self.orch,
             &self.pipeline,

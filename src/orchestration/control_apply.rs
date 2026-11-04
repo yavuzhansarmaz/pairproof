@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use crate::core::CoreError;
 use crate::orchestration::control::{Intent, IntentKind};
 use crate::orchestration::control_server::{
     publish_snapshot, ControlExecutor, ControlIo, ControlTransports,
@@ -53,6 +54,8 @@ impl ControlExecutor {
                 }
             }
             IntentKind::ChatRequest { text, .. } => {
+                let index = orch.current_index().ok_or(CoreError::NoActiveQuestion)?;
+                self.bind_chat(Some(index));
                 // Bounded publication: ~10/s ticker + first-chunk wakeup + completion flush;
                 // memory is bounded by the partial reply text itself — no delta queue.
                 let shared: std::sync::Arc<std::sync::Mutex<String>> = std::sync::Arc::new(std::sync::Mutex::new(String::new())); let notify = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -63,8 +66,9 @@ impl ControlExecutor {
                 };
                 self.chat_partial.clear(); let mut last_published = String::new();
                 macro_rules! publish_if_changed { () => {{ let current = shared.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                    if !current.is_empty() && current != last_published { if let Some(mut snap) = self.snapshot_base.clone() { snap.chat_replies.clone_from(&self.chat_replies); snap.chat_partial = Some(current.clone()); let _ = publish_snapshot(io, &snap).await; } self.chat_partial.clone_from(&current); last_published = current; } }}; }
-                let submit = pipe.submit_chat_streaming(orch, t.chat, &mut self.chat_history, text, now_ms, &mut on_chunk);
+                    if !current.is_empty() && current != last_published { if let Some(mut snap) = self.snapshot_base.clone() { snap.chat_replies = self.replies_by_question.get(&index).cloned().unwrap_or_default(); snap.chat_partial = Some(current.clone()); let _ = publish_snapshot(io, &snap).await; } self.chat_partial.clone_from(&current); last_published = current; } }}; }
+                let history = self.histories_by_question.entry(index).or_default();
+                let submit = pipe.submit_chat_streaming(orch, t.chat, history, text, now_ms, &mut on_chunk);
                 tokio::pin!(submit);
                 let mut ticker = tokio::time::interval(Duration::from_millis(100)); ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 // Biased polling checks wakeup/ticker before submit, so a ready stream cannot starve first-chunk publication.
@@ -75,8 +79,8 @@ impl ControlExecutor {
                 } };
                 let full = shared.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 self.chat_partial.clear();
-                match result { Ok(reply) => { self.chat_replies.push(reply); Ok(()) } Err(err) => {
-                    if !full.is_empty() { self.chat_replies.push(format!("{full} [response interrupted]")); } Err(err) } }
+                match result { Ok(reply) => { self.replies_by_question.entry(index).or_default().push(reply); Ok(()) } Err(err) => {
+                    if !full.is_empty() { self.replies_by_question.entry(index).or_default().push(format!("{full} [response interrupted]")); } Err(err) } }
             }
         }
     }

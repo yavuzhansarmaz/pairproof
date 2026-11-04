@@ -26,6 +26,13 @@ pub struct SnapshotRun {
     pub stdout: String, pub stderr: String, pub at_ms: u64,
 }
 
+impl SnapshotRun {
+    /// Passed/failed counts when this run actually executed tests.
+    pub fn counted_tests(&self) -> Option<(u32, u32)> {
+        crate::sandbox::counted_test_counts(&self.stdout, &self.stderr, self.success)
+    }
+}
+
 static SNAPSHOT_RUNS: OnceLock<Mutex<BTreeMap<(String, usize), SnapshotRun>>> = OnceLock::new();
 static VIEW_RUNS: OnceLock<Mutex<BTreeMap<(usize, String), SnapshotRun>>> = OnceLock::new();
 

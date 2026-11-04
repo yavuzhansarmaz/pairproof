@@ -272,3 +272,20 @@ fn chat_last_error_tracks_generic_service_failure() {
     assert_eq!(chat.last_error(), Some(ChatServiceError::Unavailable));
     assert_eq!(chat.input_text(), "hello coach");
 }
+
+#[test]
+fn sent_messages_are_kept_per_question() {
+    let mut chat = ChatController::default();
+    chat.remember_sent(Some(0), "about the first question");
+    chat.remember_sent(Some(1), "about the second question");
+    assert_eq!(
+        chat.sent_messages(Some(0)),
+        vec!["about the first question".to_string()]
+    );
+    assert_eq!(
+        chat.sent_messages(Some(1)),
+        vec!["about the second question".to_string()]
+    );
+    assert!(chat.sent_messages(Some(2)).is_empty());
+    assert!(chat.sent_messages(None).is_empty());
+}

@@ -15,7 +15,7 @@ use crate::tui::candidate_actions::{
 use crate::tui::candidate_chat::{other_insert, ChatController};
 use crate::tui::candidate_final::{candidate_final, candidate_final_lines};
 use crate::tui::candidate_work::{work_lines, CandidateWork};
-use crate::tui::help::{candidate_help_lines_for, candidate_is_typing};
+use crate::tui::help::{candidate_help_lines_for, candidate_opens_help};
 pub use crate::tui::shared::now_ms;
 
 /// Focus while solving. Work, Other, and Redirect are the question
@@ -84,7 +84,7 @@ pub struct CandidateRunState {
     /// Approach just submitted, until the snapshot shows it.
     pub pending_approach: Option<crate::tui::candidate_stage::PendingApproach>,
     /// Shown after the code for a question has landed: the question
-    /// index, then what the candidate can do next.
+    /// index, then a short status line. Command keys live on `?`.
     pub after_code: Option<(usize, String)>,
 }
 
@@ -111,6 +111,16 @@ impl CandidateRunState {
             staging: crate::tui::candidate_stage::ApproachStaging::default(),
             pending_approach: None,
             after_code: None,
+        }
+    }
+
+    /// True when the focused Solving text field has no typed content.
+    pub fn typing_field_empty(&self) -> bool {
+        match self.focus {
+            CandidateFocus::Chat => self.chat.input_text().is_empty(),
+            CandidateFocus::Other => self.work.other_text().is_empty(),
+            CandidateFocus::Redirect => self.work.redirect_text().is_empty(),
+            CandidateFocus::Work => true,
         }
     }
 
@@ -254,7 +264,9 @@ pub fn handle_candidate_key(state: &mut CandidateRunState, key: KeyEvent) {
         }
         _ => {}
     }
-    if key.code == K::Char('?') && !control && !candidate_is_typing(state.app.screen(), state.focus)
+    if key.code == K::Char('?')
+        && !control
+        && candidate_opens_help(state.app.screen(), state.focus, state.typing_field_empty())
     {
         if !state.show_help {
             state.show_help = true;
@@ -337,7 +349,7 @@ pub fn candidate_screen_lines(state: &CandidateRunState) -> Vec<String> {
                 lines.push("pasting is blocked here; type instead.".to_string());
             }
             lines.extend(state.chat.chat_lines());
-            lines.push("tab panel, esc quit".to_string());
+            lines.push("tab panel, ? help, esc quit".to_string());
             lines
         }
         CandidateScreen::Final => match state.app.session() {

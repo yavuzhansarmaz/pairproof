@@ -165,6 +165,8 @@ pub fn candidate_loop(state: &mut CandidateRunState) -> Result<(), Box<dyn Error
                 if current != scrolled_question {
                     scrolled_question = current;
                     question_scroll = 0;
+                    coach_scroll = 0;
+                    coach_following = true;
                 }
             }
         }
