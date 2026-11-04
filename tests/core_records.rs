@@ -3,7 +3,7 @@ use pairproof::core::{
 };
 use pairproof::leetcode::Difficulty;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::{q, qs};
 
 fn new_session() -> Session {

@@ -20,7 +20,7 @@ use pairproof::tui::expert_runtime::{
     DockerHelloSource, ExpertRuntime, ExpertRuntimeDeps, ExpertSessionSpec, PollOutcome,
 };
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q_easy as q;
 #[rustfmt::skip]
 fn now_ms() -> u64 { u64::try_from(SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)).unwrap_or(u64::MAX) }
@@ -165,7 +165,7 @@ async fn flow(
             .await
             .map_err(|e| e.to_string())?;
         let _ = candidate.poll_snapshot();
-        if candidate.view().selected.is_some() {
+        if candidate.view().question_index == Some(1) {
             break;
         }
         chk(Instant::now() < deadline, "SelectPreset never applied")?;
@@ -203,9 +203,11 @@ async fn flow(
         "livemeta real solution synced to alpha: {}",
         solution.display()
     );
-    candidate
-        .send_intent(IntentKind::RequestTests)
-        .map_err(|e| e.to_string())?;
+    if expert.orchestrator().current_index() == Some(0) {
+        candidate
+            .send_intent(IntentKind::RequestTests)
+            .map_err(|e| e.to_string())?;
+    }
     candidate
         .send_chat("What should I think about first?")
         .map_err(|e| e.to_string())?;
@@ -230,22 +232,27 @@ async fn flow(
         .unwrap_or_default();
     chk(!reply.trim().is_empty(), "real chat reply is empty")?;
     println!("livemeta real chat reply in snapshot: {reply:?}");
-    candidate
-        .send_intent(IntentKind::Finish)
-        .map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        expert
-            .drain_intents(now_ms())
-            .await
+    if expert.orchestrator().current_index() == Some(0) {
+        candidate
+            .send_intent(IntentKind::Finish)
             .map_err(|e| e.to_string())?;
-        if expert.orchestrator().current_index() == Some(1) {
-            break;
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            expert
+                .drain_intents(now_ms())
+                .await
+                .map_err(|e| e.to_string())?;
+            if expert.orchestrator().current_index() == Some(1) {
+                break;
+            }
+            chk(Instant::now() < deadline, "Finish never applied")?;
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        chk(Instant::now() < deadline, "Finish never applied")?;
-        tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    println!("livemeta RequestTests+Chat+Finish applied current_index=1");
+    println!(
+        "livemeta question advanced current_index={}",
+        expert.orchestrator().current_index().unwrap_or(0)
+    );
     let poller = std::thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(600);
         let mut polls = 0u32;

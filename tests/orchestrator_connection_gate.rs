@@ -8,7 +8,7 @@ use pairproof::orchestration::connection::{
 use pairproof::orchestration::Orchestrator;
 use std::sync::{Arc, Mutex};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::{easy_five as easy, endpoint, fingerprint, username};
 const T0: u64 = 1_730_000_000_000;
 #[derive(Debug)]

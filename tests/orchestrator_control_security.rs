@@ -1,7 +1,7 @@
 use pairproof::orchestration::*;
 use std::path::PathBuf;
 
-mod common_mod;
+use crate::common_mod;
 
 fn tmp(name: &str) -> PathBuf {
     common_mod::tmp("ctrlsec", name)

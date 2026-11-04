@@ -9,7 +9,7 @@ use pairproof::orchestration::lifecycle::{
 };
 use pairproof::orchestration::Orchestrator;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q_easy as q;
 
 struct DropFlag(Arc<AtomicBool>);

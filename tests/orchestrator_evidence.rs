@@ -14,7 +14,7 @@ use pairproof::scoring::{
     ScoreLine,
 };
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 fn line_for(b: &FinalBreakdown, c: ScoreComponent) -> &ScoreLine {
     b.lines.iter().find(|l| l.component == c).expect("line")

@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::types::Difficulty;
 use crate::core::{QuestionStatus, Session, TestSummary};
 use crate::scoring::live::{
-    live_rating, multiplier_and_detail, token_band_step, ScoreComponent, ScoreLine,
+    live_rating, multiplier_and_detail, rate_from_parts, token_band_step, ScoreComponent, ScoreLine,
 };
 use crate::scoring::types::{ApproachQuality, GradeOutcome, QuestionGrade, ScoringError};
 
@@ -134,7 +134,20 @@ pub fn final_rating(
         .collect();
     let ai_correction_total: f64 = scaled.values().sum();
     let lines = basis_lines(session, approach_qualities);
-    let unclamped = 6.0 + lines.iter().map(|l| l.delta).sum::<f64>() + ai_correction_total;
+    let (mut positive, mut negative) = (0.0, 0.0);
+    for line in &lines {
+        if line.delta > 0.0 {
+            positive += line.delta;
+        } else {
+            negative += line.delta;
+        }
+    }
+    if ai_correction_total > 0.0 {
+        positive += ai_correction_total;
+    } else {
+        negative += ai_correction_total;
+    }
+    let (rating, unclamped) = rate_from_parts(positive, negative);
     let mut per_question = Vec::new();
     let mut not_scored = Vec::new();
     let mut total_time_ms: u64 = 0;
@@ -193,7 +206,7 @@ pub fn final_rating(
     }
     let count = |st: QuestionStatus| session.slots().iter().filter(|s| s.status == st).count();
     Ok(FinalBreakdown {
-        rating: unclamped.clamp(3.0, 10.0),
+        rating,
         unclamped,
         lines,
         ai_correction_total,
@@ -242,7 +255,7 @@ mod tests {
         close(b.ai_correction_total, 0.8);
         close(b.per_question[0].correction, 0.5);
         close(b.per_question[1].correction, 0.3);
-        close(b.rating, 6.8);
+        close(b.rating, 6.0 + 0.8 * crate::scoring::POSITIVE_GAIN_SCALE);
         let empty = final_rating(&s, &BTreeMap::new(), &[]).unwrap();
         close(empty.ai_correction_total, 0.0);
         close(empty.rating, 6.0);

@@ -2,7 +2,7 @@
 
 How to run and understand the PairProof test suites. Every command below is verified against [Cargo.toml](../../Cargo.toml) and [.github/workflows/ci.yml](../../.github/workflows/ci.yml). User-facing build instructions are in [README.md](../../README.md).
 
-## Standard gates (hermetic, run on every push/PR)
+## Standard gates (hermetic, run on pull requests and pushes to main)
 
 ```sh
 cargo build
@@ -11,13 +11,13 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 ```
 
-`cargo test` runs the unit tests embedded in `src/` plus the integration suites in [tests/](../../tests/) (93 files at the time of writing, including the `tests/common_mod.rs` helper module, so 92 test suites). The default run is hermetic: it needs no network, Docker daemon, Meta API key, or LeetCode access. CI's `check` job runs exactly `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` on stable Rust, after installing Mutagen v0.18.1 (three hermetic `orchestrator_sync` tests shell out to the real `mutagen` binary for absent-session paths). The release workflow's validate job installs that same Mutagen build before `cargo test`, then builds `cargo build --release --target <target> --locked` for the four release targets.
+`cargo test` runs the unit tests embedded in `src/` plus the integration suites in [tests/](../../tests/). Those suites are modules of one `integration` test binary (`tests/common_mod.rs` is a shared helper, not a suite). Cargo would otherwise compile every file as its own crate, which dominated CI. The default run is hermetic: it needs no network, Docker daemon, Meta API key, or LeetCode access. CI's `check` job runs exactly `cargo test`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` on stable Rust, after installing Mutagen v0.18.1 (three hermetic `orchestrator_sync` tests shell out to the real `mutagen` binary for absent-session paths). The release workflow's validate job installs that same Mutagen build before `cargo test`, then builds `cargo build --release --target <target> --locked` for the four release targets.
 
-Run a single suite by name, for example:
+Run a single suite by its module name, for example:
 
 ```sh
-cargo test --test scoring_live
-cargo test --test tui_expert_recovery
+cargo test scoring_live
+cargo test tui_expert_recovery
 ```
 
 ## Test structure

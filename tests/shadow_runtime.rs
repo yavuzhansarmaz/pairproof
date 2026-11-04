@@ -17,7 +17,7 @@ use pairproof::scoring::{
     Confidence, DimensionScores, EvalLevel, OptionEvaluation, OptionVerdict, ShadowReport,
 };
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::{qs, tmp};
 
 fn opt(title: &str, summary: &str, quality: ApproachQuality) -> ApproachOption {

@@ -7,7 +7,7 @@ use pairproof::scoring::{
 };
 use ApproachQuality::*;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::{q, qs};
 
 fn q_acceptance(slug: &str, difficulty: Difficulty, acceptance_pct: Option<u32>) -> QuestionRef {
@@ -78,7 +78,10 @@ fn not_scored_contributes_zero_and_is_listed() {
         graded(1, 8.0, "solid work", 0.2),
     ];
     let b = final_rating(&s, &BTreeMap::new(), &grades).unwrap();
-    close(b.rating, 6.2);
+    close(
+        b.rating,
+        6.0 + 0.2 * pairproof::scoring::POSITIVE_GAIN_SCALE,
+    );
     close(b.ai_correction_total, 0.2);
     assert_eq!(b.not_scored, vec![0]);
     close(b.per_question[0].correction, 0.0);
@@ -99,7 +102,10 @@ fn missing_grade_entry_treated_not_scored() {
     close(b.per_question[1].correction, 0.0);
     assert_eq!(b.per_question[1].grade, None);
     assert_eq!(b.per_question[1].rationale, None);
-    close(b.rating, 6.3);
+    close(
+        b.rating,
+        6.0 + 0.3 * pairproof::scoring::POSITIVE_GAIN_SCALE,
+    );
 }
 
 #[test]
@@ -262,8 +268,8 @@ fn golden_final_rating_over_scripted_session() {
         graded(9, 7.0, "good hard solution", 0.2),
     ];
     let b = final_rating(&s, &map, &grades).unwrap();
-    close(b.rating, 7.55);
-    close(b.unclamped, 7.55);
+    close(b.rating, 6.8);
+    close(b.unclamped, 6.8);
     close(b.ai_correction_total, 0.5);
     assert_eq!(b.solved_count, 5);
     assert_eq!(b.finished_count, 8);

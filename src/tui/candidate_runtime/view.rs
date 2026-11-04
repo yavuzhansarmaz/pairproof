@@ -257,7 +257,8 @@ impl CandidateView {
     }
 
     /// Coach pane as a conversation. `>` lines are the coach, drawn
-    /// on the left. `<` lines are the candidate, drawn on the right.
+    /// on the left. `<` lines are the candidate: the text is drawn on
+    /// the right and the `<` sits at the right edge.
     /// A blank line separates turns. `sent` is what the candidate
     /// already submitted, in order, paired with each coach reply.
     pub fn chat_transcript(&self, sent: &[String]) -> Vec<String> {

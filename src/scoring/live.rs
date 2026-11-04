@@ -74,6 +74,37 @@ pub fn token_band_step(ratio: f64) -> f64 {
     }
 }
 
+/// Positive points are kept at this fraction. A full clear of the
+/// standard 10 questions on the best approach is about +4.25 before
+/// this scale, which used to sit on the cap of 10. At 0.75 that clear
+/// lands near 9.2. Penalties are not scaled, so a weak session still
+/// drops by the full amount. The displayed rating stays inside 3..=10.
+pub const POSITIVE_GAIN_SCALE: f64 = 0.75;
+
+/// Turns positive and negative point totals into `(rating, unclamped)`.
+/// Only the positive total is scaled. `negative` is zero or below.
+pub fn rate_from_parts(positive: f64, negative: f64) -> (f64, f64) {
+    let unclamped = 6.0 + positive.max(0.0) * POSITIVE_GAIN_SCALE + negative.min(0.0);
+    (unclamped.clamp(3.0, 10.0), unclamped)
+}
+
+fn split_deltas(deltas: impl Iterator<Item = f64>, ai_correction: f64) -> (f64, f64) {
+    let (mut positive, mut negative) = (0.0, 0.0);
+    for delta in deltas {
+        if delta > 0.0 {
+            positive += delta;
+        } else {
+            negative += delta;
+        }
+    }
+    if ai_correction > 0.0 {
+        positive += ai_correction;
+    } else {
+        negative += ai_correction;
+    }
+    (positive, negative)
+}
+
 fn line(slot_index: usize, component: ScoreComponent, delta: f64, detail: String) -> ScoreLine {
     ScoreLine {
         slot_index,
@@ -174,9 +205,10 @@ pub fn live_rating(
             ));
         }
     }
-    let unclamped = 6.0 + lines.iter().map(|l| l.delta).sum::<f64>();
+    let (positive, negative) = split_deltas(lines.iter().map(|l| l.delta), 0.0);
+    let (rating, unclamped) = rate_from_parts(positive, negative);
     RatingBreakdown {
-        rating: unclamped.clamp(3.0, 10.0),
+        rating,
         unclamped,
         lines,
     }
@@ -207,14 +239,17 @@ mod tests {
         s.select_approach(ApproachChoice::Preset(0), 100, 20)
             .unwrap();
         let map = BTreeMap::from([(5, vec![Workable])]);
-        close(live_rating(&s, &map).rating, 6.10);
+        close(
+            live_rating(&s, &map).rating,
+            6.0 + 0.10 * POSITIVE_GAIN_SCALE,
+        );
         s.navigate_to(6, 21).unwrap();
         assert_eq!(
             s.slot(5).expect("left behind").status,
             crate::core::types::QuestionStatus::Pending
         );
         let after = live_rating(&s, &map);
-        close(after.rating, 6.10);
+        close(after.rating, 6.0 + 0.10 * POSITIVE_GAIN_SCALE);
         assert_eq!(find(&after, 5, Approach).len(), 1);
         let unopened = BTreeMap::from([(7, vec![Workable])]);
         close(live_rating(&at_expert(), &unopened).rating, 6.0);

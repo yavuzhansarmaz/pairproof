@@ -3,7 +3,7 @@ use pairproof::connection::{
     Secret, SecretRotator, ROTATION_WINDOW_MS,
 };
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::{endpoint, fingerprint, username};
 const T0: u64 = 1_730_000_000_000;
 

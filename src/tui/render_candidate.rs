@@ -3,7 +3,8 @@
 //! navy section headings, a two-column reading padding, a pinned
 //! key hint, and its own scroll offset. The Coach pane keeps its
 //! own scroll offset. Coach lines stay on the left with a navy `>`.
-//! Candidate lines sit on the right with a navy `<`, like a chat.
+//! Candidate lines sit on the right, and the navy `<` is the last
+//! glyph on the row, like a sent message in a chat.
 //! The green `>` input sits under a rule that stays put while the
 //! transcript scrolls. Pane focus,
 //! the draggable split, and every key action are unchanged — this
@@ -93,18 +94,18 @@ fn question_line(line: &str, first: bool) -> Line<'static> {
 }
 
 /// One coach-pane row. The coach stays on the left with a navy
-/// `>`. The candidate sits on the right with a navy `<`. The
-/// message text itself is white.
+/// `>`. The candidate sits on the right, text first, with the navy
+/// `<` flush against the right edge. The message text itself is white.
 fn coach_bubble(line: &str) -> Line<'static> {
     if let Some(text) = line.strip_prefix("< ") {
         return Line::from(vec![
+            Span::styled(text.to_string(), Style::default().fg(TEXT_COLOR)),
             Span::styled(
-                "< ".to_string(),
+                " <".to_string(),
                 Style::default()
                     .fg(HEADING_COLOR)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(text.to_string(), Style::default().fg(TEXT_COLOR)),
         ])
         .alignment(Alignment::Right);
     }

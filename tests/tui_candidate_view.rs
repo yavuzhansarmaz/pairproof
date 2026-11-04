@@ -176,20 +176,28 @@ fn candidate_message_draws_on_the_right_with_a_navy_marker() {
     let buffer = terminal.backend().buffer().clone();
     let mut found = None;
     for y in 0..buffer.area.height {
-        if column_of(&buffer, y, "< hello").is_some() {
+        if column_of(&buffer, y, "hello <").is_some() {
             found = Some(y);
             break;
         }
     }
     let y = found.expect("candidate line on screen");
-    let col = column_of(&buffer, y, "< hello").expect("column");
-    // Coach pane starts at 60% of 80. A right-aligned `< hello`
-    // sits against the right padding, well past the pane's left edge.
-    assert!(col > 65, "hello should stick to the right, col {col}");
-    assert_eq!(buffer[(col, y)].symbol(), "<");
-    assert_eq!(buffer[(col, y)].fg, HEADING_COLOR);
-    assert_eq!(buffer[(col + 2, y)].fg, TEXT_COLOR);
-    assert_eq!(buffer[(col - 1, y)].symbol(), " ");
+    let col = column_of(&buffer, y, "hello <").expect("column");
+    let marker = col + 6;
+    // Coach pane starts at 60% of 80. `hello <` is right-aligned, so
+    // the `<` is the last glyph in the coach text area.
+    assert_eq!(buffer[(marker, y)].symbol(), "<");
+    assert_eq!(buffer[(marker, y)].fg, HEADING_COLOR);
+    assert_eq!(buffer[(col, y)].symbol(), "h");
+    assert_eq!(buffer[(col, y)].fg, TEXT_COLOR);
+    let rest: String = ((marker + 1)..buffer.area.width)
+        .map(|x| buffer[(x, y)].symbol().to_string())
+        .collect();
+    let border = rest.find('│').expect("right border");
+    assert!(
+        rest[..border].trim().is_empty(),
+        "nothing but padding between the marker and the border: {rest:?}"
+    );
     let mut coach_at = None;
     for row_y in 0..buffer.area.height {
         if let Some(marker_col) = column_of(&buffer, row_y, "> Talking") {

@@ -11,7 +11,7 @@ use pairproof::orchestration::*;
 use pairproof::sandbox::{RunnabilityReport, TestOutcome};
 use pairproof::scoring::{ApproachGrade, ApproachQuality, ApproachSet};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 
 type PF<'a, T> = PipelineFuture<'a, T>;

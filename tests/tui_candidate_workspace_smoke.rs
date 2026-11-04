@@ -28,7 +28,7 @@ use pairproof::tui::candidate_runtime::{
 };
 use pairproof::tui::render::{draw_candidate_screen, FRAME_COLOR, PROOF_COLOR};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 
 type PF<'a, T> = PipelineFuture<'a, T>;

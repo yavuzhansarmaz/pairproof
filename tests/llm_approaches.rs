@@ -12,7 +12,7 @@ use pairproof::scoring::ApproachQuality;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::q;
 
 fn approach_json(title: &str, quality: &str, tokens: &str) -> String {

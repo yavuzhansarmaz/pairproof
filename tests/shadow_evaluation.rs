@@ -10,7 +10,7 @@ use pairproof::scoring::{
     final_rating, live_rating, ApproachGrade, ApproachOption, ApproachQuality, ApproachSet,
 };
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::qs;
 
 fn opt(title: &str, summary: &str, quality: ApproachQuality) -> ApproachOption {

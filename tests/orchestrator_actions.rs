@@ -2,7 +2,7 @@ use pairproof::core::{ApproachChoice, CoreError, EventKind, Language, QuestionRe
 use pairproof::leetcode::Difficulty;
 use pairproof::orchestration::{Orchestrator, OrchestratorError};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::{easy_five as easy, q, qs};
 
 fn medium() -> Vec<QuestionRef> {

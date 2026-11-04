@@ -1,7 +1,7 @@
 use pairproof::connection::{ConnectionError, ConnectionState, SecretRotator, ROTATION_WINDOW_MS};
 use pairproof::core::{EventKind, Language, Session};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::{easy_five as easy_questions, endpoint, fingerprint, username};
 
 const T0: u64 = 1_730_000_000_000;

@@ -11,7 +11,7 @@ use pairproof::leetcode::Difficulty;
 use pairproof::llm::extraction::{parse_extraction, ExtractionResult};
 use pairproof::llm::{LlmError, MetaClient};
 
-mod common_mod;
+use crate::common_mod;
 use common_mod::easy_five as easy_questions;
 
 struct TestDir(PathBuf);
