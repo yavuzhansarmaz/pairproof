@@ -142,6 +142,17 @@ impl QuestionPipeline {
         self.approaches_index = None;
     }
 
+    /// Drops the cached approach set for `index` so the next generate
+    /// is a fresh Meta call. Used after change-approach and after an
+    /// approved re-question replacement, which keep the slot index.
+    pub(crate) fn invalidate_approaches(&mut self, index: usize) {
+        self.approach_sets.remove(&index);
+        if self.approaches_index == Some(index) {
+            self.approaches = None;
+            self.approaches_index = None;
+        }
+    }
+
     /// Puts the cached approach set for the active question back on
     /// the live slot. Finish, skip, and navigate clear the live set
     /// so a stale selection cannot be reused, but a question the
@@ -245,7 +256,11 @@ impl QuestionPipeline {
         let selected = self.current_selection_quality(orch);
         orch.change_approach(now_ms)?;
         self.record_current_selection(selected);
-        self.clear_approaches();
+        if let Some(index) = orch.current_index() {
+            self.invalidate_approaches(index);
+        } else {
+            self.clear_approaches();
+        }
         Ok(())
     }
 }
