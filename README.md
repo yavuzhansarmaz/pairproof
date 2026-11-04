@@ -28,7 +28,7 @@ Installs `~/.local/bin/pairproof` (no sudo, SHA-256 verified). Add `~/.local/bin
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Docker (expert) and [Mutagen](https://mutagen.io/) (candidate) are installed separately.
+[Docker](https://docs.docker.com/get-docker/) (expert) and [Mutagen](https://mutagen.io/documentation/introduction/installation/) (candidate) are installed separately.
 
 ---
 
@@ -42,7 +42,7 @@ pairproof
 
 Press `e` for Expert or `c` for Candidate.
 
-**Expert** (`e`; needs Docker + a [Meta Model API](https://api.meta.ai/v1) key):
+**Expert** (`e`; needs [Docker](https://docs.docker.com/get-docker/) + a Meta Model API key):
 
 ```sh
 export MODEL_API_KEY="<your-key>"   # or save via the TUI / ~/.config/pairproof/api_key
@@ -51,7 +51,7 @@ pairproof
 
 Press `e`. Paste a job description → confirm the extracted topics/level/language → share the connection string.
 
-**Candidate** (`c`; needs Mutagen + `ssh`; same `pairproof` version as the expert). Start in an empty folder — that folder is the workspace:
+**Candidate** (`c`; needs [Mutagen](https://mutagen.io/documentation/introduction/installation/) + `ssh`; same `pairproof` version as the expert). Start in an empty folder — that folder is the workspace:
 
 ```sh
 mkdir interview && cd interview
@@ -90,7 +90,7 @@ pairproof uninstall --keep-data  # remove binary, keep config
 | | Expert | Candidate |
 |---|---|---|
 | Runs | Interview host, Meta calls, Docker sandbox | Client only |
-| Needs | Docker, Meta API key, network reachability | Mutagen, SSH tools |
+| Needs | [Docker](https://docs.docker.com/get-docker/), Meta API key, network reachability | [Mutagen](https://mutagen.io/documentation/introduction/installation/), SSH tools |
 | Sees | Live rating, progress, paste alerts | Questions, approaches, coach (unscored) |
 | Ends session | Yes (`e` on Monitor) | Acknowledges final breakdown |
 
@@ -137,9 +137,9 @@ Reachability is automatic (public address, NAT-PMP, or UPnP + STUN). If nothing 
 
 **Release binaries:** Linux x86_64/aarch64 (musl), macOS x86_64/aarch64. Windows is unsupported.
 
-**Expert:** `pairproof`, Docker (daemon running), Meta API key, network to Meta + LeetCode, reachable endpoint for the candidate.
+**Expert:** `pairproof`, [Docker](https://docs.docker.com/get-docker/) (daemon running), Meta API key, network to Meta + LeetCode, reachable endpoint for the candidate.
 
-**Candidate:** same `pairproof` version as the expert, empty working folder, Mutagen, `ssh` / `ssh-keyscan`, connection string.
+**Candidate:** same `pairproof` version as the expert, empty working folder, [Mutagen](https://mutagen.io/documentation/introduction/installation/), `ssh` / `ssh-keyscan`, connection string.
 
 Exact version match is required — mismatched binaries refuse to start the session.
 
@@ -166,7 +166,7 @@ Docs:
 
 ## Status
 
-Early open-source (`0.1.3`) — started as a hackathon project. Core flow (setup → connect → live scoring → report) is implemented and covered by a large automated suite.
+Early open-source (`0.1.4`) — started as a hackathon project. Core flow (setup → connect → live scoring → report) is implemented and covered by a large automated suite.
 
 **Known limits**
 
