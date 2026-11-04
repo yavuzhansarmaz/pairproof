@@ -168,8 +168,7 @@ pub fn build_snapshot_with_recovery(orch: &Orchestrator, pipe: &QuestionPipeline
     }
     let selected = slot.and_then(|s| s.approach.as_ref()).map(|choice| match choice {
         ApproachChoice::Preset(n) => SnapshotSelection::Preset(*n), ApproachChoice::Other(text) => SnapshotSelection::Other(text.clone()) });
-    let latest_test = slot.and_then(|s| s.latest_test).map(|t| SnapshotTest { passed: t.passed, failed: t.failed, at_ms: t.at_ms })
-        .or_else(|| { let idx = orch.current_index()?; let rec = pipe.latest_test_record(idx)?; Some(SnapshotTest { passed: u32::from(rec.outcome.success), failed: u32::from(!rec.outcome.success), at_ms: rec.at_ms }) });
+    let latest_test = slot.and_then(|s| s.latest_test).map(|t| SnapshotTest { passed: t.passed, failed: t.failed, at_ms: t.at_ms });
     let options = pipe.candidate_options().into_iter().map(|o| SnapshotOption { title: o.title, summary: o.summary }).collect();
     let final_breakdown = if final_visible_to_candidate(orch.status()) {
         breakdown.map(|b| SnapshotFinal { rating: b.rating, per_question: b.per_question.iter()

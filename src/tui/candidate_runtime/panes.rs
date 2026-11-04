@@ -336,7 +336,7 @@ fn question_hint(state: &CandidateRunState, option_count: usize) -> String {
             "focus: enter submit, backspace delete, tab panel, esc quit".to_string()
         }
         CandidateFocus::Redirect => {
-            "focus: enter send, backspace delete, tab panel, esc quit".to_string()
+            "focus: enter send, empty enter back, backspace delete, tab panel, esc quit".to_string()
         }
         CandidateFocus::Chat => {
             "focus: enter send, backspace delete, up/down scroll, tab panel, esc quit".to_string()

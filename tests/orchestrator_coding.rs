@@ -4,8 +4,8 @@ use pairproof::llm::approaches::parse_approach_set;
 use pairproof::llm::coding::{apply_usage, parse_coding_step, CodingStepInput, CodingStepOutput};
 use pairproof::llm::Usage;
 use pairproof::orchestration::{
-    ApproachGenerator, CodingTransport, FetchedStatement, Orchestrator, PipelineError,
-    PipelineFuture, QuestionPipeline, SandboxIo, StatementFetcher,
+    build_snapshot, ApproachGenerator, CodingTransport, FetchedStatement, Orchestrator,
+    PipelineError, PipelineFuture, QuestionPipeline, SandboxIo, SessionSyncPhase, StatementFetcher,
 };
 use pairproof::sandbox::{RunnabilityReport, TestOutcome};
 use pairproof::scoring::{ApproachGrade, ApproachQuality, ApproachSet};
@@ -341,6 +341,11 @@ async fn run_solution_without_tests_does_not_record_counts() {
     assert_eq!(
         count(&orch, |k| matches!(k, EventKind::TestRunCompleted { .. })),
         0
+    );
+    let snap = build_snapshot(&orch, &pipe, SessionSyncPhase::Active, &[], None);
+    assert_eq!(
+        snap.latest_test, None,
+        "a run with no tests must not look like 1 passed"
     );
 }
 #[tokio::test]

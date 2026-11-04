@@ -152,10 +152,9 @@ impl QuestionFlowState {
             Self::SyncingWorkspace { .. } => Some(format!(
                 "working: syncing q{n}/solution to workspace. this takes a moment"
             )),
-            Self::ContinuingInteraction => Some(
-                "ready: type instructions to update code or generate/update tests, then press enter."
-                    .to_string(),
-            ),
+            Self::ContinuingInteraction => {
+                Some("ready: type instructions, then enter. empty enter goes back.".to_string())
+            }
             Self::UpdatingSolution { .. } => Some(format!(
                 "working: updating solution in q{n}/. this takes a moment"
             )),

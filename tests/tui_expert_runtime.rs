@@ -170,6 +170,54 @@ async fn expert_runtime_drains_intents_and_publishes_snapshot() {
     assert_eq!(snapshot.current.as_ref().map(|c| c.index), Some(1));
 }
 
+#[tokio::test]
+#[rustfmt::skip]
+async fn expert_publishes_coding_snapshot_after_a_test_run() {
+    fn push_intent(control: &std::path::Path, seq: u64, kind: IntentKind) {
+        let intent = Intent::new("s1", seq, kind);
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(control.join(INTENT_REL)).unwrap();
+        file.write_all(format!("{}\n", intent.to_line().unwrap()).as_bytes()).unwrap();
+    }
+    let (_root, control, mut runtime) = make_runtime("publish-after-run", false).await;
+    write_hello(&control, "s1");
+    assert_eq!(runtime.poll_candidate(T0 + 1_000).await, PollOutcome::Connected);
+    for _ in 0..50 {
+        runtime.drain_intents(T0 + 2_000).await.unwrap();
+        let snap = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+        if snap.options.len() == 4 { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    push_intent(&control, 1, IntentKind::SelectPreset { preset: 0 });
+    runtime.drain_intents(T0 + 3_000).await.unwrap();
+    let after_code = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    let code_rev = after_code.code_revision();
+    assert!(code_rev > 0, "select must publish a coding run");
+    push_intent(&control, 2, IntentKind::RunSolution);
+    runtime.drain_intents(T0 + 4_000).await.unwrap();
+    let after_run = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    assert_eq!(after_run.latest_test, None, "a run with no tests must not look like 1 passed");
+    assert_eq!(after_run.code_revision(), code_rev);
+    push_intent(&control, 3, IntentKind::RequestTests);
+    runtime.drain_intents(T0 + 5_000).await.unwrap();
+    let after_tests = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    assert!(
+        after_tests.code_revision() > code_rev,
+        "t after r must publish the new code revision, got {} then {}",
+        code_rev,
+        after_tests.code_revision()
+    );
+    let tests_rev = after_tests.code_revision();
+    push_intent(&control, 4, IntentKind::Continue);
+    runtime.drain_intents(T0 + 6_000).await.unwrap();
+    let after_continue = parse_snapshot(&std::fs::read(control.join(SNAPSHOT_REL)).unwrap(), "s1").unwrap();
+    assert!(
+        after_continue.code_revision() > tests_rev,
+        "continue after tests must publish the new code revision, got {} then {}",
+        tests_rev,
+        after_continue.code_revision()
+    );
+}
+
 #[tokio::test] #[rustfmt::skip]
 async fn expert_snapshot_carries_typed_sync_phase_labels() {
     let cases = [

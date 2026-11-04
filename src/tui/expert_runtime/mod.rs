@@ -16,7 +16,7 @@ use crate::leetcode::LeetCodeClient;
 use crate::llm::extraction::ExtractionResult;
 use crate::orchestration::control::{
     check_app_versions, parse_final_ack, parse_heartbeat, parse_hello, CandidateSnapshot,
-    FinalAckOutcome,
+    FinalAckOutcome, SnapshotRun,
 };
 use crate::orchestration::{
     build_snapshot_with_recovery, compute_final, generate_report, grade_session, publish_snapshot,
@@ -201,6 +201,7 @@ pub struct ExpertRuntime {
     last_hb_at: Option<u64>,
     reissued: Option<ConnectionString>,
     last_published_snapshot: Option<CandidateSnapshot>,
+    last_published_run: Option<SnapshotRun>,
     username: EphemeralUsername,
     pushed_window: Option<u64>,
     secret_pusher: Option<Arc<dyn crate::orchestration::secret_push::SecretPush>>,
@@ -289,6 +290,7 @@ impl ExpertRuntime {
             last_hb_at: None,
             reissued: None,
             last_published_snapshot: None,
+            last_published_run: None,
             username: spec.username,
             pushed_window: None,
             secret_pusher,

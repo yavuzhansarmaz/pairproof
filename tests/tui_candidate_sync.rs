@@ -302,6 +302,23 @@ fn workspace_preview_handles_languages_and_refreshes_on_modification() {
     assert!(updated.contains("last run: passed (exit 0)"), "{updated}");
     assert!(updated.contains("stdout: 42"), "{updated}");
 
+    let no_tests = SnapshotRun {
+        kind: "test".to_string(),
+        seq: 2,
+        code_revision: 1,
+        success: true,
+        exit_code: Some(0),
+        stdout: "no tests ran. press t to write tests.".to_string(),
+        stderr: String::new(),
+        at_ms: 110,
+    };
+    let empty = workspace_preview_with_run(&alpha, 0, Some(&no_tests)).join("\n");
+    assert!(
+        empty.contains("last run: no tests (press t to write tests)"),
+        "{empty}"
+    );
+    assert!(!empty.contains("last test: passed"), "{empty}");
+
     // JavaScript and SQL paths and run hints.
     write_solution(
         &alpha,

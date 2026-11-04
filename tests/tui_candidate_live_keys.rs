@@ -117,6 +117,29 @@ fn chat_enter_keeps_the_sent_message_and_clears_the_box() {
 }
 
 #[test]
+fn empty_continue_enter_goes_back_without_coding() {
+    let mut state = CandidateRunState::new();
+    let mut runtime = connected_runtime();
+    let mut status = None;
+    handle_live_key(&mut state, &mut runtime, key(K::Char('c')), &mut status);
+    assert_eq!(state.focus, CandidateFocus::Redirect);
+    handle_live_key(&mut state, &mut runtime, key(K::Enter), &mut status);
+    assert_eq!(state.focus, CandidateFocus::Work);
+    assert!(
+        runtime.transport().sent.is_empty(),
+        "empty enter must not start a coding step: {:?}",
+        runtime.transport().sent
+    );
+    assert!(
+        status
+            .as_deref()
+            .unwrap_or("")
+            .contains("continue cancelled"),
+        "{status:?}"
+    );
+}
+
+#[test]
 fn empty_chat_enter_sends_nothing() {
     let mut state = CandidateRunState::new();
     state.focus = CandidateFocus::Chat;

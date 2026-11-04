@@ -119,7 +119,7 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
             "1-4 choose an approach (space select, enter generate solution)",
             "on other: type your approach, enter submits it",
             "5 or o opens that approach field",
-            "c continue with instructions (update code or generate/update tests)",
+            "c continue: type instructions to update code or tests, enter sends, empty enter goes back",
             "r run tests against the solution",
             "t write tests (counts toward the score)",
             "a change approach",
@@ -136,6 +136,7 @@ pub fn candidate_help_lines_for(screen: CandidateScreen, focus: CandidateFocus) 
         (CandidateScreen::Solving, CandidateFocus::Redirect) => lines.extend([
             "type instructions to update the solution or generate/update tests.",
             "enter send instructions to the coding agent",
+            "empty enter goes back without changing the code",
             "backspace delete a character",
             "tab or click a panel to switch pane",
         ]),

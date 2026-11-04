@@ -460,19 +460,17 @@ pub fn handle_live_key<T: CandidateTransport>(
                 let text = state.work.redirect_text().trim().to_string();
                 let base_revision = view.code_revision();
                 if text.is_empty() {
-                    if apply(status, runtime.send_intent(IntentKind::Continue)) {
-                        if let Some(index) = view.question_index {
-                            state.staging.set_flow(
-                                index,
-                                QuestionFlowState::UpdatingSolution {
-                                    instruction: None,
-                                    base_revision,
-                                },
-                            );
-                        }
-                        state.after_code = None;
-                        state.focus = CandidateFocus::Work;
+                    if let Some(index) = view.question_index {
+                        state
+                            .staging
+                            .set_flow(index, QuestionFlowState::SolutionReady);
                     }
+                    state.after_code = None;
+                    state.focus = CandidateFocus::Work;
+                    *status = Some(
+                        "continue cancelled. type instructions after c to update the code."
+                            .to_string(),
+                    );
                 } else if apply(
                     status,
                     runtime.send_intent(IntentKind::Redirect { text: text.clone() }),

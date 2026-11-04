@@ -210,16 +210,21 @@ fn format_run_output(
     let mut out = Vec::new();
     match run.kind.as_str() {
         "run" | "test" => {
-            let label = if run.kind == "run" {
-                "last run"
+            let no_tests = run.stdout.to_ascii_lowercase().contains("no tests ran");
+            if no_tests {
+                out.push("last run: no tests (press t to write tests)".to_string());
             } else {
-                "last test"
-            };
-            let status = if run.success { "passed" } else { "failed" };
-            let code_suffix = run
-                .exit_code
-                .map_or(String::new(), |c| format!(" (exit {c})"));
-            out.push(sanitize_display(&format!("{label}: {status}{code_suffix}")));
+                let label = if run.kind == "run" {
+                    "last run"
+                } else {
+                    "last test"
+                };
+                let status = if run.success { "passed" } else { "failed" };
+                let code_suffix = run
+                    .exit_code
+                    .map_or(String::new(), |c| format!(" (exit {c})"));
+                out.push(sanitize_display(&format!("{label}: {status}{code_suffix}")));
+            }
         }
         "code" if !run.success => {
             out.push("syntax check: failed".to_string());
