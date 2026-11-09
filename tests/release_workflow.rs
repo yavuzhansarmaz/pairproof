@@ -250,15 +250,19 @@ fn release_workflow_builds_four_targets() {
         !text.contains("macos-13"),
         "workflow must not use the retired macos-13 runner"
     );
+    assert!(
+        !text.contains("runner: macos-14\n"),
+        "workflow must not use the retired macos-14 runner"
+    );
     assert_eq!(
         runner_for_target(&text, "x86_64-apple-darwin"),
-        "macos-14",
-        "x86_64 darwin build must use macos-14"
+        "macos-15-intel",
+        "x86_64 darwin build must use the Intel macos-15-intel runner"
     );
     assert_eq!(
         runner_for_target(&text, "aarch64-apple-darwin"),
-        "macos-14",
-        "aarch64 darwin build must use macos-14"
+        "macos-15",
+        "aarch64 darwin build must use macos-15"
     );
     assert!(
         text.contains("matrix.runner"),
