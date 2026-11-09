@@ -44,7 +44,7 @@ pub const PROVIDER_PRESETS: &[ProviderPreset] = &[
         api_key_env: Some("MODEL_API_KEY"),
         requires_api_key: true,
         strong_model: "muse-wonder-1.0",
-        light_model: "muse-spark-1.3",
+        light_model: "muse-ember-1.0",
     },
     ProviderPreset {
         id: "openai",
@@ -391,7 +391,7 @@ mod tests {
         assert_eq!(c.id(), "meta");
         assert_eq!(c.base_url, "https://api.meta.ai/v1");
         assert_eq!(c.strong_model, "muse-wonder-1.0");
-        assert_eq!(c.light_model, "muse-spark-1.3");
+        assert_eq!(c.light_model, "muse-ember-1.0");
         assert!(c.requires_api_key);
         assert_eq!(ProviderConfig::default(), c);
     }
@@ -486,7 +486,7 @@ mod tests {
                 Some("MODEL_API_KEY"),
                 true,
                 "muse-wonder-1.0",
-                "muse-spark-1.3",
+                "muse-ember-1.0",
             ),
             (
                 "openai",

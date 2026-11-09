@@ -21,7 +21,7 @@ fn meta_default_preset_exact_values() {
     assert_eq!(c.base_url, "https://api.meta.ai/v1");
     assert_eq!(c.base_url, DEFAULT_BASE_URL);
     assert_eq!(c.strong_model, "muse-wonder-1.0");
-    assert_eq!(c.light_model, "muse-spark-1.3");
+    assert_eq!(c.light_model, "muse-ember-1.0");
     assert_eq!(c.strong_model, STRONG_MODEL);
     assert_eq!(c.light_model, LIGHT_MODEL);
     assert!(c.requires_api_key);
