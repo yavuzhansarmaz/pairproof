@@ -215,7 +215,7 @@ Docs:
 
 ## Status
 
-Early open-source (`0.1.8`) — originally built for a Meta hackathon, now model-agnostic with Meta as the default provider. Core flow (setup → connect → live scoring → report) is implemented and covered by a large automated suite.
+Early open-source (`0.1.9`) — originally built for a Meta hackathon, now model-agnostic with Meta as the default provider. Core flow (setup → connect → live scoring → report) is implemented and covered by a large automated suite.
 
 **Known limits**
 
