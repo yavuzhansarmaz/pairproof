@@ -38,14 +38,29 @@ pub(crate) fn handle_paste(
 /// Opens masked API-key entry on Expert Setup so a mistyped key can
 /// be replaced; an env-provided key is changed in the environment.
 fn open_api_key_change(app: &mut app::ExpertApp) {
-    if crate::tui::config::env_override_active() {
-        app.set_status_message(
-            "Meta API key comes from the MODEL_API_KEY environment variable; change it there.",
-        );
+    let preset = match crate::llm::ProviderConfig::preset_from_env() {
+        Ok(preset) => preset,
+        Err(err) => {
+            app.set_status_message(format!("Provider config error: {err}"));
+            return;
+        }
+    };
+    let label = preset.display_name();
+    if !preset.requires_api_key {
+        app.set_status_message(format!("{label} needs no API key."));
+        return;
+    }
+    if crate::tui::config::env_override_active_for_provider(&preset.provider) {
+        let env_name = preset.api_key_env().unwrap_or("PAIRPROOF_API_KEY");
+        app.set_status_message(format!(
+            "{label} API key comes from the environment (PAIRPROOF_API_KEY or {env_name}); change it there."
+        ));
         return;
     }
     app.set_api_key_entry(true);
-    app.set_status_message("type the new Meta API key, then press enter to save it.");
+    app.set_status_message(format!(
+        "type the new {label} API key, then press enter to save it."
+    ));
 }
 
 /// Starts a background pool fetch for a selection screen: the
@@ -313,7 +328,7 @@ fn advance(
                             .build()
                             .map_err(|e| e.to_string())?;
                         runtime.block_on(async {
-                            let client = expert_runtime::meta_client()?;
+                            let client = expert_runtime::provider_client()?;
                             let mut detached = ExpertSetupPastes::from_texts(&jd, &notes);
                             detached.acknowledge_disclosure();
                             detached

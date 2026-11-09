@@ -3,7 +3,7 @@
 use serde::Deserialize;
 
 use crate::core::{Language, Session};
-use crate::llm::common::{decode, language_name, LlmError, LlmOutcome};
+use crate::llm::common::{chat_json_with_repair, decode, language_name, LlmError, LlmOutcome};
 use crate::llm::{Message, MetaClient, Usage};
 
 /// Inputs for one coding step on the active question.
@@ -96,21 +96,27 @@ pub fn parse_coding_step(content: &str) -> Result<CodingStepOutput, LlmError> {
 /// Adds the total spent tokens to the session's active question.
 pub fn apply_usage(session: &mut Session, usage: &Usage) -> Result<(), LlmError> {
     session.add_tokens(usage.total_tokens)?;
+    if usage.estimated {
+        session.mark_token_usage_estimated();
+    }
     Ok(())
 }
 
-/// Runs one coding step, booking spent tokens before parsing the reply.
+/// Runs one coding step, booking tokens from both the initial and any
+/// repair attempt before parsing each reply.
 pub async fn run_coding_step(
     client: &MetaClient,
     session: &mut Session,
     input: &CodingStepInput,
 ) -> Result<LlmOutcome<CodingStepOutput>, LlmError> {
     let model = client.strong_model.clone();
-    let outcome = client.chat(&model, build_coding_messages(input)).await?;
-    apply_usage(session, &outcome.usage)?;
-    let value = parse_coding_step(&outcome.content)?;
-    Ok(LlmOutcome {
-        value,
-        usage: outcome.usage,
-    })
+    let mut on_usage = |usage: &Usage| apply_usage(session, usage);
+    chat_json_with_repair(
+        client,
+        &model,
+        build_coding_messages(input),
+        parse_coding_step,
+        &mut on_usage,
+    )
+    .await
 }

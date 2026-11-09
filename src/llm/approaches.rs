@@ -5,7 +5,9 @@ use rand::Rng;
 use serde::Deserialize;
 
 use crate::core::Language;
-use crate::llm::common::{decode, language_name, parse_quality, LlmError, LlmOutcome};
+use crate::llm::common::{
+    chat_json_with_repair, decode, language_name, parse_quality, LlmError, LlmOutcome,
+};
 use crate::llm::{Message, MetaClient};
 use crate::scoring::{ApproachGrade, ApproachOption, ApproachSet};
 
@@ -75,12 +77,14 @@ pub async fn generate_approaches(
 ) -> Result<LlmOutcome<ApproachSet>, LlmError> {
     let model = client.strong_model.clone();
     let messages = build_approach_messages(question_statement, language);
-    let outcome = client.chat(&model, messages).await?;
-    let value = parse_approach_set(&outcome.content, rng)?;
-    Ok(LlmOutcome {
-        value,
-        usage: outcome.usage,
-    })
+    chat_json_with_repair(
+        client,
+        &model,
+        messages,
+        |content| parse_approach_set(content, &mut *rng),
+        &mut |_| Ok(()),
+    )
+    .await
 }
 
 /// Builds messages asking to grade a candidate-written approach.
@@ -120,10 +124,8 @@ pub async fn grade_other_approach(
 ) -> Result<LlmOutcome<ApproachGrade>, LlmError> {
     let model = client.strong_model.clone();
     let messages = build_other_grade_messages(question_statement, other_text);
-    let outcome = client.chat(&model, messages).await?;
-    let value = parse_approach_grade(&outcome.content)?;
-    Ok(LlmOutcome {
-        value,
-        usage: outcome.usage,
+    chat_json_with_repair(client, &model, messages, parse_approach_grade, &mut |_| {
+        Ok(())
     })
+    .await
 }

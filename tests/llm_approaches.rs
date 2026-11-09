@@ -252,6 +252,7 @@ fn apply_usage_adds_tokens_and_errors_without_active_question() {
         prompt_tokens: 10,
         completion_tokens: 5,
         total_tokens: 15,
+        estimated: false,
     };
     let mut idle = new_session();
     let err = apply_usage(&mut idle, &usage);

@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ConfigError {
     /// No usable key from environment or stored file.
-    #[error("api key is missing; set MODEL_API_KEY or save a key")]
+    #[error("provider api key is missing; set PAIRPROOF_API_KEY or the provider key env (e.g. MODEL_API_KEY) or save a key")]
     MissingKey,
     /// A blank key was offered for saving.
     #[error("api key must not be empty")]
@@ -24,16 +24,73 @@ fn io_err(error: std::io::Error) -> ConfigError {
     ConfigError::Io(error.to_string())
 }
 
-fn env_key() -> Option<String> {
-    std::env::var(crate::llm::API_KEY_ENV)
+fn clean_env(name: &str) -> Option<String> {
+    std::env::var(name)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
 
-/// Returns true when a non-blank MODEL_API_KEY env var is set.
+/// Env key for the selected provider: `PAIRPROOF_API_KEY` wins, then the
+/// provider-specific env (for meta that is `MODEL_API_KEY`). The stored
+/// key file holds the current provider's key and is reused as fallback.
+fn env_key() -> Option<String> {
+    if let Some(key) = clean_env(crate::llm::PROVIDER_API_KEY_ENV) {
+        return Some(key);
+    }
+    let preset = crate::llm::ProviderConfig::preset_from_env().ok()?;
+    preset.api_key_env().and_then(clean_env)
+}
+
+/// Provider-aware variant of [`env_key`] for an explicit provider id.
+pub fn env_key_for_provider(provider: &str) -> Option<String> {
+    if let Some(key) = clean_env(crate::llm::PROVIDER_API_KEY_ENV) {
+        return Some(key);
+    }
+    crate::llm::provider_preset(provider)
+        .and_then(|p| p.api_key_env)
+        .and_then(clean_env)
+}
+
+/// Returns true when a non-blank provider key env var is set.
 pub fn env_override_active() -> bool {
     env_key().is_some()
+}
+
+/// Returns true when an env key is set for an explicit provider id.
+pub fn env_override_active_for_provider(provider: &str) -> bool {
+    env_key_for_provider(provider).is_some()
+}
+
+fn normalize_provider(provider: &str) -> String {
+    let normalized = provider.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        crate::llm::META_PROVIDER.to_string()
+    } else {
+        normalized
+    }
+}
+
+/// Legacy (untagged) stored keys were only ever written for Meta.
+const LEGACY_PROVIDER: &str = crate::llm::META_PROVIDER;
+
+/// Parses stored content into `(provider, key)`. Tagged form is
+/// `provider:<id>\n<key>`; anything else is legacy and maps to Meta.
+fn parse_stored(raw: &str) -> Option<(String, String)> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed.strip_prefix("provider:") {
+        let mut lines = rest.lines();
+        if let (Some(provider), Some(key)) = (lines.next(), lines.next()) {
+            let key = key.trim();
+            if !provider.trim().is_empty() && !key.is_empty() {
+                return Some((normalize_provider(provider), key.to_string()));
+            }
+        }
+    }
+    Some((LEGACY_PROVIDER.to_string(), trimmed.to_string()))
 }
 
 /// Resolves `$HOME/.config/pairproof/api_key` from the HOME variable.
@@ -180,6 +237,21 @@ impl ApiKeyConfig {
         stored_api_key(&self.path)
     }
 
+    /// Reads the stored key only when it was saved for `provider`.
+    pub fn stored_for_provider(&self, provider: &str) -> Result<Option<String>, ConfigError> {
+        stored_api_key_for_provider(&self.path, provider)
+    }
+
+    /// Resolves the effective key for an explicit provider id.
+    pub fn resolve_for_provider(&self, provider: &str) -> Result<String, ConfigError> {
+        resolve_api_key_for_provider(&self.path, provider)
+    }
+
+    /// Saves a key tagged with the provider it belongs to.
+    pub fn save_for_provider(&self, provider: &str, key: &str) -> Result<(), ConfigError> {
+        save_api_key_for_provider(&self.path, provider, key)
+    }
+
     /// Saves a key to this config path.
     pub fn save(&self, key: &str) -> Result<(), ConfigError> {
         save_api_key(&self.path, key)
@@ -191,8 +263,7 @@ impl ApiKeyConfig {
     }
 }
 
-/// Reads the stored key, returning None when missing or blank.
-pub fn stored_api_key(path: &Path) -> Result<Option<String>, ConfigError> {
+fn read_stored(path: &Path) -> Result<Option<(String, String)>, ConfigError> {
     reject_ancestor_symlinks(path)?;
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
@@ -210,28 +281,73 @@ pub fn stored_api_key(path: &Path) -> Result<Option<String>, ConfigError> {
         Err(error) => return Err(io_err(error)),
     }
     let raw = std::fs::read_to_string(path).map_err(io_err)?;
-    let trimmed = raw.trim().to_string();
-    if trimmed.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(trimmed))
-    }
+    Ok(parse_stored(&raw))
 }
 
-/// Resolves the effective key: non-blank env wins over stored.
-pub fn resolve_api_key(path: &Path) -> Result<String, ConfigError> {
-    if let Some(key) = env_key() {
+/// Reads the stored key, returning None when missing or blank.
+pub fn stored_api_key(path: &Path) -> Result<Option<String>, ConfigError> {
+    Ok(read_stored(path)?.map(|(_, key)| key))
+}
+
+/// Provider recorded with the stored key (legacy files report `meta`).
+pub fn stored_api_key_provider(path: &Path) -> Result<Option<String>, ConfigError> {
+    Ok(read_stored(path)?.map(|(provider, _)| provider))
+}
+
+/// Reads the stored key only when its recorded provider matches
+/// `provider`; a mismatch is treated as no stored key, never reused.
+pub fn stored_api_key_for_provider(
+    path: &Path,
+    provider: &str,
+) -> Result<Option<String>, ConfigError> {
+    let wanted = normalize_provider(provider);
+    Ok(read_stored(path)?.and_then(|(recorded, key)| (recorded == wanted).then_some(key)))
+}
+
+/// Resolves the effective key for an explicit provider: a non-blank
+/// env key for that provider wins, then a stored key recorded for
+/// that same provider; otherwise [`ConfigError::MissingKey`].
+pub fn resolve_api_key_for_provider(path: &Path, provider: &str) -> Result<String, ConfigError> {
+    if let Some(key) = env_key_for_provider(provider) {
         return Ok(key);
     }
-    match stored_api_key(path)? {
+    match stored_api_key_for_provider(path, provider)? {
         Some(key) => Ok(key),
         None => Err(ConfigError::MissingKey),
     }
 }
 
+/// Resolves the effective key for the provider selected in the
+/// environment: env wins over a provider-matching stored key. An
+/// invalid selected provider never falls back to a stored key.
+pub fn resolve_api_key(path: &Path) -> Result<String, ConfigError> {
+    match crate::llm::ProviderConfig::preset_from_env() {
+        Ok(preset) => resolve_api_key_for_provider(path, &preset.provider),
+        Err(_) => Err(ConfigError::MissingKey),
+    }
+}
+
 /// Saves a trimmed key atomically with private permissions on Unix.
 pub fn save_api_key(path: &Path, key: &str) -> Result<(), ConfigError> {
+    save_api_key_contents(path, key)
+}
+
+/// Saves a key tagged with `provider` so it is only reused for it.
+pub fn save_api_key_for_provider(
+    path: &Path,
+    provider: &str,
+    key: &str,
+) -> Result<(), ConfigError> {
     let trimmed = key.trim();
+    if trimmed.is_empty() {
+        return Err(ConfigError::EmptyKey);
+    }
+    let contents = format!("provider:{}\n{trimmed}", normalize_provider(provider));
+    save_api_key_contents(path, &contents)
+}
+
+fn save_api_key_contents(path: &Path, contents: &str) -> Result<(), ConfigError> {
+    let trimmed = contents.trim();
     if trimmed.is_empty() {
         return Err(ConfigError::EmptyKey);
     }

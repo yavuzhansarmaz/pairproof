@@ -5,7 +5,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use crate::core::{ApproachChoice, EventKind, QuestionStatus, Session, TestSummary};
-use crate::llm::common::{decode, LlmError, LlmOutcome};
+use crate::llm::common::{chat_json_with_repair, decode, LlmError, LlmOutcome};
 use crate::llm::{Message, MetaClient};
 use crate::scoring::{GradeOutcome, QuestionGrade};
 
@@ -216,12 +216,14 @@ pub async fn grade_question(
         let model = model.clone();
         let messages = messages.clone();
         async move {
-            let outcome = client.chat(&model, messages).await?;
-            let value = parse_question_grade(&outcome.content, slot_index)?;
-            Ok(LlmOutcome {
-                value,
-                usage: outcome.usage,
-            })
+            chat_json_with_repair(
+                client,
+                &model,
+                messages,
+                |content| parse_question_grade(content, slot_index),
+                &mut |_| Ok(()),
+            )
+            .await
         }
     })
     .await

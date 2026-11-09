@@ -50,7 +50,11 @@ pub fn classify_meta_recoverability(err: &MetaApiError) -> Recoverability {
         MetaApiError::MissingApiKey => Recoverability::NonRecoverable,
         MetaApiError::Http(inner) => classify_reqwest_error(inner),
         MetaApiError::Status { status, .. } => classify_status(*status),
-        MetaApiError::EmptyChoices | MetaApiError::EmptyStream => Recoverability::NonRecoverable,
+        MetaApiError::EmptyChoices
+        | MetaApiError::EmptyStream
+        | MetaApiError::UnknownProvider(_)
+        | MetaApiError::MissingBaseUrl(_)
+        | MetaApiError::InvalidBaseUrl(_) => Recoverability::NonRecoverable,
     }
 }
 

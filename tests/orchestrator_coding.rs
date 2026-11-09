@@ -99,6 +99,7 @@ impl CodingTransport for FakeCoding {
                 prompt_tokens: self.book,
                 completion_tokens: 0,
                 total_tokens: self.book,
+                estimated: false,
             };
             apply_usage(session, &usage).map_err(|e| PipelineError::Llm(e.to_string()))?;
             parse_coding_step(self.payload).map_err(|e| PipelineError::Llm(e.to_string()))
