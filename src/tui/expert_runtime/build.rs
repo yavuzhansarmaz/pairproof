@@ -16,19 +16,33 @@ pub(crate) fn widened_note(report: &FallbackReport) -> Option<String> {
     Some(format!("selection widened beyond topics ({tags})."))
 }
 
-/// Builds a Meta client from the environment or the stored API key.
-pub(crate) fn meta_client() -> Result<crate::llm::MetaClient, String> {
-    if let Ok(client) = crate::llm::MetaClient::from_env() {
+/// Builds an LLM client for the selected provider (Meta by default):
+/// env config first, else a stored key recorded for that same
+/// provider filled into the env-derived preset. A stored key for a
+/// different provider is never reused. Keyless providers (ollama)
+/// succeed with an empty key.
+pub(crate) fn provider_client() -> Result<crate::llm::LlmClient, String> {
+    if let Ok(client) = crate::llm::LlmClient::from_env() {
         return Ok(client);
+    }
+    let preset = crate::llm::ProviderConfig::preset_from_env().map_err(|e| e.to_string())?;
+    if !preset.requires_api_key {
+        return Ok(crate::llm::LlmClient::from_config(preset));
     }
     let path =
         crate::tui::config::default_api_key_path().ok_or_else(|| "no API key path".to_string())?;
-    let key = crate::tui::config::resolve_api_key(&path).map_err(|e| e.to_string())?;
-    Ok(crate::llm::MetaClient::new(
-        crate::llm::DEFAULT_BASE_URL,
-        &key,
+    let key = crate::tui::config::resolve_api_key_for_provider(&path, &preset.provider)
+        .map_err(|e| e.to_string())?;
+    Ok(crate::llm::LlmClient::from_config(
+        preset.with_api_key(&key),
     ))
 }
+
+/// Backwards-compat name for [`provider_client`].
+pub(crate) fn meta_client() -> Result<crate::llm::LlmClient, String> {
+    provider_client()
+}
+
 /// Maps an extraction result to runtime context (test seam for the build path).
 pub fn expert_context_from_extraction(
     result: &ExtractionResult,
@@ -176,6 +190,14 @@ pub(crate) async fn build_expert_runtime(
             .await
             .map_err(|e| e.to_string())?;
         runtime.set_clock(Arc::new(crate::orchestration::SystemClock));
+        if let Ok(client) = meta_client() {
+            let cfg = client.config();
+            runtime.set_model_provenance(crate::core::ModelProvenance::new(
+                &cfg.provider,
+                &cfg.strong_model,
+                &cfg.light_model,
+            ));
+        }
         if let Ok(meta) = meta_client() {
             runtime.set_health_probes(
                 Arc::new(crate::orchestration::LeetCodeHealthProbe::new(

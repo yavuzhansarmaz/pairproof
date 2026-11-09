@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use crate::connection::{ConnectionString, Endpoint, EphemeralUsername, Fingerprint};
 use crate::core::types::Difficulty;
-use crate::core::{ArtifactLayout, ContextSummary, Language, QuestionRef};
+use crate::core::{ArtifactLayout, ContextSummary, Language, ModelProvenance, QuestionRef};
 use crate::ingest::{prepare_documents, store_raw_documents, ExpertDocuments};
 use crate::leetcode::selection::{pool_with_fallback, FallbackReport, PoolClient};
 use crate::leetcode::LeetCodeClient;
@@ -19,14 +19,14 @@ use crate::orchestration::control::{
     FinalAckOutcome, SnapshotRun,
 };
 use crate::orchestration::{
-    build_snapshot_with_recovery, compute_final, generate_report, grade_session, publish_snapshot,
-    run_cancellable, ApplyOutcome, ApplyReport, ApproachGenerator, ChatTransport,
-    CleanupCoordinator, CleanupReport, CleanupSequence, Clock, CodingTransport, ConnectionGate,
-    ConnectionGateError, ControlError, ControlExecutor, ControlIo, ControlTransports,
-    FetchedStatement, GatePhase, HealthGate, KillReport, LeetCodeProbe, LifecycleError, MetaProbe,
-    Orchestrator, OrchestratorError, PauseClock, PipelineError, QuestionGrader, QuestionPipeline,
-    RecoveryController, RecoveryOutcome, RequestSupervisor, SandboxIo, SessionSyncPhase,
-    ShadowEvaluator, ShadowRuntime, StatementFetcher,
+    build_snapshot_with_recovery, compute_final, grade_session, publish_snapshot, run_cancellable,
+    ApplyOutcome, ApplyReport, ApproachGenerator, ChatTransport, CleanupCoordinator, CleanupReport,
+    CleanupSequence, Clock, CodingTransport, ConnectionGate, ConnectionGateError, ControlError,
+    ControlExecutor, ControlIo, ControlTransports, FetchedStatement, GatePhase, HealthGate,
+    KillReport, LeetCodeProbe, LifecycleError, MetaProbe, Orchestrator, OrchestratorError,
+    PauseClock, PipelineError, QuestionGrader, QuestionPipeline, RecoveryController,
+    RecoveryOutcome, RequestSupervisor, SandboxIo, SessionSyncPhase, ShadowEvaluator,
+    ShadowRuntime, StatementFetcher,
 };
 use crate::sandbox::SandboxHandle;
 use crate::scoring::{ApproachSet, GradeOutcome};
@@ -41,7 +41,7 @@ mod recovery;
 mod selection;
 mod session;
 pub use self::build::expert_context_from_extraction;
-pub(crate) use self::build::{build_expert_runtime, meta_client};
+pub(crate) use self::build::{build_expert_runtime, provider_client};
 pub use self::hello::{
     ConsumeFuture, DockerHelloSource, HelloFuture, HelloSource, LocalHelloSource,
     SessionPublishFuture,
@@ -217,6 +217,7 @@ pub struct ExpertRuntime {
     port_mapping: Option<crate::sandbox::nat::PortMapping>,
     shadow: ShadowRuntime,
     shadow_evaluator: Option<Arc<dyn ShadowEvaluator>>,
+    provenance: ModelProvenance,
 }
 
 impl ExpertRuntime {
@@ -308,6 +309,7 @@ impl ExpertRuntime {
             port_mapping: None,
             shadow: seeded_shadow,
             shadow_evaluator: deps.shadow_evaluator,
+            provenance: ModelProvenance::default(),
         })
     }
 
@@ -348,6 +350,17 @@ impl ExpertRuntime {
     /// Replaces the shadow evaluator (used by the production build).
     pub fn set_shadow_evaluator(&mut self, evaluator: Arc<dyn ShadowEvaluator>) {
         self.shadow_evaluator = Some(evaluator);
+    }
+    /// Records which provider/models produce this session's scores.
+    pub fn set_model_provenance(&mut self, provenance: ModelProvenance) {
+        self.provenance = provenance;
+    }
+    /// Current provenance, with the estimated flag refreshed from the session.
+    pub fn model_provenance(&self) -> ModelProvenance {
+        let mut provenance = self.provenance.clone();
+        provenance.token_usage_estimated =
+            provenance.token_usage_estimated || self.orch.session().token_usage_estimated();
+        provenance
     }
     /// Expert-owned sync phase published in snapshots. The Mutagen
     /// session is candidate-started (`CandidateRuntime` transport), so

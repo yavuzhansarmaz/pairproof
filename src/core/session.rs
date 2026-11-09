@@ -25,6 +25,7 @@ pub struct Session {
     pub(crate) connected: bool,
     pub(crate) ever_connected: bool,
     pub(crate) disconnected_since_ms: Option<u64>,
+    pub(crate) token_usage_estimated: bool,
 }
 
 impl Session {
@@ -56,6 +57,7 @@ impl Session {
             connected: false,
             ever_connected: false,
             disconnected_since_ms: None,
+            token_usage_estimated: false,
         };
         s.push(at_ms, SessionCreated);
         Ok(s)
@@ -128,6 +130,16 @@ impl Session {
 
     pub fn is_connected(&self) -> bool {
         self.connected
+    }
+
+    /// True when any booked token usage was locally estimated.
+    pub fn token_usage_estimated(&self) -> bool {
+        self.token_usage_estimated
+    }
+
+    /// Records that booked token usage included a local estimate.
+    pub fn mark_token_usage_estimated(&mut self) {
+        self.token_usage_estimated = true;
     }
 
     pub fn start(&mut self, at_ms: u64) -> R {

@@ -110,6 +110,9 @@ fn meta_reason(err: &MetaApiError) -> String {
         MetaApiError::Http(_) => "transport error".to_string(),
         MetaApiError::EmptyChoices => "empty response".to_string(),
         MetaApiError::EmptyStream => "empty stream".to_string(),
+        MetaApiError::UnknownProvider(_) => "unknown provider".to_string(),
+        MetaApiError::MissingBaseUrl(_) => "missing base url".to_string(),
+        MetaApiError::InvalidBaseUrl(_) => "invalid base url".to_string(),
     }
 }
 

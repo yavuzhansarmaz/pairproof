@@ -136,7 +136,13 @@ impl ExpertRuntime {
                 Some(&breakdown),
                 self.snapshot_recovery(),
             );
-            let mut md = generate_report(self.orch.session(), &breakdown, &grades, &[]);
+            let mut md = crate::orchestration::generate_report_with_provenance(
+                self.orch.session(),
+                &breakdown,
+                &grades,
+                &[],
+                &self.model_provenance(),
+            );
             let shadow_reports: Vec<_> = self.shadow.reports().values().cloned().collect();
             if !shadow_reports.is_empty() {
                 md.push_str(&crate::orchestration::report::render_shadow_section(
@@ -156,7 +162,8 @@ impl ExpertRuntime {
             self.orch.session(),
             self.topics.clone(),
             self.level.clone(),
-        );
+        )
+        .with_provenance(&self.model_provenance());
         let token = self.supervisor.token();
         let gate_ended = self.gate.phase() == GatePhase::Ended;
         let session_id = self.orch.session_id().to_string();

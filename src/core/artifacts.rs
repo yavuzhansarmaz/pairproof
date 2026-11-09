@@ -24,6 +24,8 @@ pub struct TokenRecord {
     pub title_slug: String,
     pub locked_expected_tokens: Option<u64>,
     pub actual_tokens: u64,
+    #[serde(default)]
+    pub token_usage_estimated: bool,
 }
 
 impl TokenRecord {
@@ -37,8 +39,57 @@ impl TokenRecord {
                 title_slug: slot.question.title_slug.clone(),
                 locked_expected_tokens: slot.locked_expected_tokens,
                 actual_tokens: slot.actual_tokens,
+                token_usage_estimated: session.token_usage_estimated(),
             })
             .collect()
+    }
+}
+
+fn default_unknown() -> String {
+    "unknown".to_string()
+}
+
+/// Which provider/models produced session scores and whether any
+/// booked token usage was locally estimated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProvenance {
+    #[serde(default = "default_unknown")]
+    pub provider: String,
+    #[serde(default = "default_unknown")]
+    pub strong_model: String,
+    #[serde(default = "default_unknown")]
+    pub light_model: String,
+    #[serde(default)]
+    pub token_usage_estimated: bool,
+}
+
+impl Default for ModelProvenance {
+    fn default() -> Self {
+        Self {
+            provider: default_unknown(),
+            strong_model: default_unknown(),
+            light_model: default_unknown(),
+            token_usage_estimated: false,
+        }
+    }
+}
+
+impl ModelProvenance {
+    /// Provenance for a known provider and its strong/light models.
+    pub fn new(provider: &str, strong_model: &str, light_model: &str) -> Self {
+        let clean = |v: &str| {
+            if v.trim().is_empty() {
+                default_unknown()
+            } else {
+                v.to_string()
+            }
+        };
+        Self {
+            provider: clean(provider),
+            strong_model: clean(strong_model),
+            light_model: clean(light_model),
+            token_usage_estimated: false,
+        }
     }
 }
 
@@ -50,10 +101,20 @@ pub struct ContextSummary {
     pub level: String,
     pub language: Language,
     pub questions: Vec<QuestionRef>,
+    #[serde(default = "default_unknown")]
+    pub provider: String,
+    #[serde(default = "default_unknown")]
+    pub strong_model: String,
+    #[serde(default = "default_unknown")]
+    pub light_model: String,
+    #[serde(default)]
+    pub token_usage_estimated: bool,
 }
 
 impl ContextSummary {
     /// Builds a summary from a session plus extracted topics and level.
+    /// Provider/model provenance defaults to `unknown` and the
+    /// estimated flag is taken from the session's booked coding usage.
     pub fn from_session(session: &Session, topics: Vec<String>, level: String) -> Self {
         Self {
             session_id: session.id().to_string(),
@@ -65,6 +126,30 @@ impl ContextSummary {
                 .iter()
                 .map(|slot| slot.question.clone())
                 .collect(),
+            provider: default_unknown(),
+            strong_model: default_unknown(),
+            light_model: default_unknown(),
+            token_usage_estimated: session.token_usage_estimated(),
+        }
+    }
+
+    /// Sets provider/model provenance, keeping the session-derived
+    /// estimated flag unless the provenance also marks it estimated.
+    pub fn with_provenance(mut self, provenance: &ModelProvenance) -> Self {
+        self.provider = provenance.provider.clone();
+        self.strong_model = provenance.strong_model.clone();
+        self.light_model = provenance.light_model.clone();
+        self.token_usage_estimated = self.token_usage_estimated || provenance.token_usage_estimated;
+        self
+    }
+
+    /// This summary as a [`ModelProvenance`] for report rendering.
+    pub fn provenance(&self) -> ModelProvenance {
+        ModelProvenance {
+            provider: self.provider.clone(),
+            strong_model: self.strong_model.clone(),
+            light_model: self.light_model.clone(),
+            token_usage_estimated: self.token_usage_estimated,
         }
     }
 }

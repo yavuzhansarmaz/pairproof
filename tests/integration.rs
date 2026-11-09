@@ -28,6 +28,8 @@ mod llm_chat;
 mod llm_extraction;
 mod llm_grading;
 mod llm_live_smoke;
+mod llm_phase3;
+mod llm_provider_config;
 mod meta_api_live;
 mod orchestrator_actions;
 mod orchestrator_chat;

@@ -86,7 +86,9 @@ pub use recovery::{
     classify_pipeline_recoverability, classify_status, is_recoverable, PauseClock, Recoverability,
     RecoveryController, RecoveryError, RecoveryPhase, RecoveryState, RecoveryTimer,
 };
-pub use report::{generate_report, limitations_footer, ChatExcerpt};
+pub use report::{
+    generate_report, generate_report_with_provenance, limitations_footer, ChatExcerpt,
+};
 pub use session::Orchestrator;
 pub use shadow_runtime::{MetaShadowEvaluator, ShadowEvaluator, ShadowRuntime, SHADOW_TIMEOUT};
 pub use ssh_auth::{

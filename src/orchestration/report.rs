@@ -2,7 +2,7 @@
 //! permitted chat excerpts are quoted; grades, counts, and times are
 //! rendered solely from the supplied breakdown and session state.
 
-use crate::core::{QuestionStatus, Session};
+use crate::core::{ModelProvenance, QuestionStatus, Session};
 use crate::orchestration::evidence::{
     per_question_evidence, render_evidence, score_line_evidence, summary_evidence,
 };
@@ -126,6 +126,27 @@ pub fn generate_report(
     grades: &[GradeOutcome],
     chat_excerpts: &[ChatExcerpt],
 ) -> String {
+    generate_report_with_provenance(
+        session,
+        breakdown,
+        grades,
+        chat_excerpts,
+        &ModelProvenance {
+            token_usage_estimated: session.token_usage_estimated(),
+            ..ModelProvenance::default()
+        },
+    )
+}
+
+/// Generates the report with an explicit provider/model provenance
+/// section. Unknown values are rendered honestly as `unknown`.
+pub fn generate_report_with_provenance(
+    session: &Session,
+    breakdown: &FinalBreakdown,
+    grades: &[GradeOutcome],
+    chat_excerpts: &[ChatExcerpt],
+    provenance: &ModelProvenance,
+) -> String {
     let not_scored = not_scored_slots(breakdown, grades);
     let mut per: Vec<&PerQuestionFinal> = breakdown.per_question.iter().collect();
     per.sort_by_key(|q| q.slot_index);
@@ -135,6 +156,14 @@ pub fn generate_report(
     out.push_str("# PairProof Session Report\n\n");
     out.push_str(&format!("Session: {}\n\n", session.id()));
     out.push_str(&format!("Status: {:?}\n\n", session.status()));
+    out.push_str("## Provenance\n\n");
+    out.push_str(&format!("Provider: {}\n\n", provenance.provider));
+    out.push_str(&format!("Strong model: {}\n\n", provenance.strong_model));
+    out.push_str(&format!("Light model: {}\n\n", provenance.light_model));
+    out.push_str(&format!(
+        "Token usage estimated: {}\n\n",
+        provenance.token_usage_estimated || session.token_usage_estimated()
+    ));
     let summary = summary_evidence(session, breakdown);
     out.push_str("## Final breakdown\n\n");
     out.push_str(&format!(

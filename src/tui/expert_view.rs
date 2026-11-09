@@ -113,13 +113,15 @@ pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
                         lines.push(format!("  {check}"));
                     }
                 }
+                let provider_label = match crate::llm::ProviderConfig::preset_from_env() {
+                    Ok(preset) => preset.display_name(),
+                    Err(err) => format!("provider config error: {err}"),
+                };
                 if app.api_key_entry {
-                    lines.push("  Meta API key: entry open (hidden).".into());
+                    lines.push(format!("  {provider_label} API key: entry open (hidden)."));
                 } else {
-                    let status = app
-                        .api_key_status
-                        .as_deref()
-                        .unwrap_or("Meta API key: not checked yet");
+                    let fallback = format!("{provider_label} API key: not checked yet");
+                    let status = app.api_key_status.as_deref().unwrap_or(&fallback);
                     lines.push(if app.api_key_ready {
                         format!("  [PASS] {status}")
                     } else {
@@ -130,10 +132,10 @@ pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
                     lines.push("  [PASS] Disclosure: acknowledged".into());
                 } else {
                     lines.extend([
-                        "Meta disclosure".into(),
+                        format!("{provider_label} disclosure"),
                         "  your job description and additional notes".into(),
                         "  (each up to 50,000 characters) will be sent".into(),
-                        "  to the Meta API to propose interview topics,".into(),
+                        format!("  to the {provider_label} API to propose interview topics,"),
                         "  level, and language.".into(),
                     ]);
                 }
@@ -143,7 +145,7 @@ pub fn screen_parts(app: &ExpertApp) -> (Vec<String>, Option<String>) {
                 } else if !app.disclosure_acknowledged {
                     "press enter to acknowledge the disclosure.".into()
                 } else if !app.api_key_ready {
-                    "press enter to add your Meta API key.".into()
+                    format!("press enter to add your {provider_label} API key.")
                 } else if !app.preflight_passed {
                     "fix the failing checks, then restart to check again.".into()
                 } else {

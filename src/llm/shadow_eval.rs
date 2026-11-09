@@ -5,7 +5,7 @@
 
 use serde::Deserialize;
 
-use crate::llm::common::{decode, LlmError, LlmOutcome};
+use crate::llm::common::{chat_json_with_repair, decode, LlmError, LlmOutcome};
 use crate::llm::{Message, MetaClient};
 use crate::scoring::shadow::{
     Confidence, DimensionScores, EvalLevel, OptionEvaluation, OptionVerdict, ShadowReport,
@@ -141,12 +141,14 @@ pub async fn evaluate_shadow_set(
 ) -> Result<LlmOutcome<ShadowReport>, LlmError> {
     let model = client.strong_model.clone();
     let messages = build_shadow_messages(question_statement, set);
-    let outcome = client.chat(&model, messages).await?;
-    let value = parse_shadow_response(&outcome.content, slot_index, &model, set)?;
-    Ok(LlmOutcome {
-        value,
-        usage: outcome.usage,
-    })
+    chat_json_with_repair(
+        client,
+        &model,
+        messages,
+        |content| parse_shadow_response(content, slot_index, &model, set),
+        &mut |_| Ok(()),
+    )
+    .await
 }
 
 /// Maps an evaluation result to a report, preserving failure honestly.

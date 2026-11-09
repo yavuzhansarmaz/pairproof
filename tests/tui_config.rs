@@ -3,7 +3,8 @@ use std::sync::Mutex;
 
 use pairproof::tui::config::{
     delete_api_key, env_override_active, mask_api_key, read_api_key_input, resolve_api_key,
-    save_api_key, stored_api_key, ApiKeyConfig, ConfigError,
+    resolve_api_key_for_provider, save_api_key, save_api_key_for_provider, stored_api_key,
+    stored_api_key_for_provider, stored_api_key_provider, ApiKeyConfig, ConfigError,
 };
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -25,7 +26,15 @@ fn cleanup(path: &std::path::Path) {
 }
 
 fn clear_env() {
-    std::env::remove_var("MODEL_API_KEY");
+    for name in [
+        "MODEL_API_KEY",
+        "PAIRPROOF_API_KEY",
+        "PAIRPROOF_PROVIDER",
+        "PAIRPROOF_BASE_URL",
+        "OPENAI_API_KEY",
+    ] {
+        std::env::remove_var(name);
+    }
 }
 
 #[test]
@@ -286,4 +295,112 @@ fn symlink_parent_is_rejected() {
         Err(ConfigError::Symlink(_))
     ));
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn stored_key_saved_as_meta_is_not_used_for_openai() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env();
+    let path = key_path("meta-not-openai");
+    save_api_key_for_provider(&path, "meta", "meta-key-12345678").unwrap();
+    assert_eq!(
+        stored_api_key_provider(&path).unwrap(),
+        Some("meta".to_string())
+    );
+    assert_eq!(
+        stored_api_key_for_provider(&path, "openai").unwrap(),
+        None,
+        "a Meta key must never be reported as OpenAI's key"
+    );
+    assert!(matches!(
+        resolve_api_key_for_provider(&path, "openai"),
+        Err(ConfigError::MissingKey)
+    ));
+    assert_eq!(
+        resolve_api_key_for_provider(&path, "meta").unwrap(),
+        "meta-key-12345678"
+    );
+    // Exact reported scenario: openai selected via env, no env key.
+    std::env::set_var("PAIRPROOF_PROVIDER", "openai");
+    assert!(matches!(
+        resolve_api_key(&path),
+        Err(ConfigError::MissingKey)
+    ));
+    clear_env();
+    cleanup(&path);
+}
+
+#[test]
+fn stored_key_saved_as_openai_is_used_for_openai() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env();
+    let path = key_path("openai-used");
+    save_api_key_for_provider(&path, "openai", "openai-key-12345678").unwrap();
+    assert_eq!(
+        stored_api_key_for_provider(&path, "openai").unwrap(),
+        Some("openai-key-12345678".to_string())
+    );
+    assert_eq!(
+        resolve_api_key_for_provider(&path, "openai").unwrap(),
+        "openai-key-12345678"
+    );
+    std::env::set_var("PAIRPROOF_PROVIDER", "openai");
+    assert_eq!(resolve_api_key(&path).unwrap(), "openai-key-12345678");
+    clear_env();
+    cleanup(&path);
+}
+
+#[test]
+fn legacy_untagged_stored_key_works_for_meta_only() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env();
+    let path = key_path("legacy-meta-only");
+    // Legacy on-disk form written by pre-tagging releases.
+    save_api_key(&path, "legacy-key-12345678").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "legacy-key-12345678"
+    );
+    assert_eq!(
+        stored_api_key_provider(&path).unwrap(),
+        Some("meta".to_string())
+    );
+    assert_eq!(
+        resolve_api_key_for_provider(&path, "meta").unwrap(),
+        "legacy-key-12345678"
+    );
+    assert_eq!(stored_api_key_for_provider(&path, "openai").unwrap(), None);
+    assert!(matches!(
+        resolve_api_key_for_provider(&path, "openai"),
+        Err(ConfigError::MissingKey)
+    ));
+    cleanup(&path);
+}
+
+#[test]
+fn env_key_wins_over_provider_mismatched_stored_key() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    clear_env();
+    let path = key_path("env-wins-mismatch");
+    save_api_key_for_provider(&path, "meta", "meta-key-12345678").unwrap();
+    std::env::set_var("OPENAI_API_KEY", "openai-env-key-12345");
+    assert_eq!(
+        resolve_api_key_for_provider(&path, "openai").unwrap(),
+        "openai-env-key-12345"
+    );
+    std::env::set_var("PAIRPROOF_API_KEY", "pairproof-env-key-12345");
+    assert_eq!(
+        resolve_api_key_for_provider(&path, "openai").unwrap(),
+        "pairproof-env-key-12345",
+        "PAIRPROOF_API_KEY beats the provider-specific env"
+    );
+    clear_env();
+    // Meta's legacy env also still wins for meta.
+    std::env::set_var("MODEL_API_KEY", "meta-env-key-12345");
+    assert_eq!(
+        resolve_api_key_for_provider(&path, "meta").unwrap(),
+        "meta-env-key-12345"
+    );
+    clear_env();
+    cleanup(&path);
 }

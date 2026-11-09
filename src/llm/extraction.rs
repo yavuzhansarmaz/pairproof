@@ -3,7 +3,7 @@
 use serde::Deserialize;
 
 use crate::core::Language;
-use crate::llm::common::{decode, LlmError, LlmOutcome};
+use crate::llm::common::{chat_json_with_repair, decode, LlmError, LlmOutcome};
 use crate::llm::{Message, MetaClient};
 
 /// The only topic slugs selection may use; unknown slugs are dropped.
@@ -165,10 +165,5 @@ pub async fn extract_context(
 ) -> Result<LlmOutcome<ExtractionResult>, LlmError> {
     let model = client.strong_model.clone();
     let messages = build_extraction_messages(jd_text, additional_text);
-    let outcome = client.chat(&model, messages).await?;
-    let value = parse_extraction(&outcome.content)?;
-    Ok(LlmOutcome {
-        value,
-        usage: outcome.usage,
-    })
+    chat_json_with_repair(client, &model, messages, parse_extraction, &mut |_| Ok(())).await
 }

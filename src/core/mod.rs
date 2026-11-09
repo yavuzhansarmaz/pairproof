@@ -11,7 +11,7 @@ pub mod session;
 pub(crate) mod test_support;
 pub mod types;
 
-pub use artifacts::{ArtifactError, ArtifactLayout, ContextSummary, TokenRecord};
+pub use artifacts::{ArtifactError, ArtifactLayout, ContextSummary, ModelProvenance, TokenRecord};
 pub use event_log::{read_events, EventLogError, EventLogWriter};
 pub use events::{EventKind, SessionEvent};
 pub use session::Session;

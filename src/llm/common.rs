@@ -1,7 +1,7 @@
 //! Shared error, outcome, and response-parsing helpers for LLM calls.
 
 use crate::core::{CoreError, Language};
-use crate::llm::{MetaApiError, Usage};
+use crate::llm::{Message, MetaApiError, MetaClient, Usage};
 use crate::scoring::{ApproachQuality, ScoringError};
 
 /// Errors returned by LLM orchestration calls.
@@ -52,6 +52,69 @@ pub(crate) fn strip_code_fences(text: &str) -> &str {
 /// Decodes a fenced JSON model reply, preserving `Parse` error wording.
 pub(crate) fn decode<T: serde::de::DeserializeOwned>(content: &str) -> Result<T, LlmError> {
     serde_json::from_str(strip_code_fences(content)).map_err(|e| LlmError::Parse(e.to_string()))
+}
+
+const REPAIR_REPLY_CHARS: usize = 2000;
+
+fn truncate_chars(text: &str, max: usize) -> String {
+    text.chars().take(max).collect()
+}
+
+/// Builds the single repair request: original messages (which carry the
+/// schema), the truncated bad reply, and the parse error.
+pub(crate) fn build_repair_messages(
+    original: &[Message],
+    bad_reply: &str,
+    error: &LlmError,
+) -> Vec<Message> {
+    let truncated = truncate_chars(bad_reply, REPAIR_REPLY_CHARS);
+    let mut messages = original.to_vec();
+    messages.push(Message::new("assistant", &truncated));
+    messages.push(Message::new(
+        "user",
+        &format!(
+            "Your previous reply failed to parse or validate: {error}. \
+             Return valid JSON only, matching the original schema exactly. \
+             No prose and no markdown fences. Previous reply (truncated):\n{truncated}"
+        ),
+    ));
+    messages
+}
+
+/// One non-streaming JSON call with exactly one repair retry on
+/// parse/validation failure. `on_usage` runs after each attempt, before
+/// parsing, so callers (coding) can book tokens from both attempts even
+/// when parsing ultimately fails. On success the returned usage is the
+/// sum of both attempts; if the repair reply also fails to parse, the
+/// original error is returned and no further request is made.
+pub(crate) async fn chat_json_with_repair<T, F>(
+    client: &MetaClient,
+    model: &str,
+    messages: Vec<Message>,
+    mut parse: F,
+    on_usage: &mut (dyn FnMut(&Usage) -> Result<(), LlmError> + Send),
+) -> Result<LlmOutcome<T>, LlmError>
+where
+    F: FnMut(&str) -> Result<T, LlmError>,
+{
+    let first = client.chat(model, messages.clone()).await?;
+    on_usage(&first.usage)?;
+    match parse(&first.content) {
+        Ok(value) => Ok(LlmOutcome {
+            value,
+            usage: first.usage,
+        }),
+        Err(original_err) => {
+            let repair_messages = build_repair_messages(&messages, &first.content, &original_err);
+            let second = client.chat(model, repair_messages).await?;
+            on_usage(&second.usage)?;
+            let usage = first.usage.combined(&second.usage);
+            match parse(&second.content) {
+                Ok(value) => Ok(LlmOutcome { value, usage }),
+                Err(_) => Err(original_err),
+            }
+        }
+    }
 }
 
 /// Parses a quality word case-insensitively.

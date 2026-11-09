@@ -48,22 +48,38 @@ pub fn run_preflight_check(app: &mut app::ExpertApp) {
     app.set_api_key_ready(ready);
 }
 
+/// Selected provider preset (Meta default when env is unset). An
+/// invalid provider/base-URL is a typed error, never a Meta fallback.
+fn selected_preset() -> Result<crate::llm::ProviderConfig, String> {
+    crate::llm::ProviderConfig::preset_from_env().map_err(|e| e.to_string())
+}
+
 fn api_key_status_line() -> (String, bool) {
-    if crate::tui::config::env_override_active() {
-        return ("Meta API key: configured (environment)".to_string(), true);
+    let preset = match selected_preset() {
+        Ok(preset) => preset,
+        Err(err) => return (format!("Provider config error: {err}"), false),
+    };
+    let label = preset.display_name();
+    if !preset.requires_api_key {
+        return (format!("{label} API key: not required"), true);
+    }
+    if crate::tui::config::env_override_active_for_provider(&preset.provider) {
+        return (format!("{label} API key: configured (environment)"), true);
     }
     if let Some(path) = crate::tui::config::default_api_key_path() {
-        if let Ok(Some(key)) = crate::tui::config::stored_api_key(&path) {
+        if let Ok(Some(key)) =
+            crate::tui::config::stored_api_key_for_provider(&path, &preset.provider)
+        {
             return (
                 format!(
-                    "Meta API key: configured ({})",
+                    "{label} API key: configured ({})",
                     crate::tui::config::mask_api_key(&key)
                 ),
                 true,
             );
         }
     }
-    ("Meta API key: not configured".to_string(), false)
+    (format!("{label} API key: not configured"), false)
 }
 
 /// Path of the persisted disclosure acknowledgement marker, next to
@@ -95,39 +111,75 @@ pub fn save_disclosure_ack(path: &std::path::Path) -> std::io::Result<()> {
 /// closes the entry without saving, so a key change can be backed
 /// out with Enter (`b` types into the key, so it cannot go back).
 pub fn save_entered_api_key(app: &mut app::ExpertApp, input: &mut String) {
+    let preset = match selected_preset() {
+        Ok(preset) => preset,
+        Err(err) => {
+            if input.trim().is_empty() {
+                input.clear();
+                app.set_api_key_entry(false);
+                app.set_status_message("API key unchanged.".to_string());
+            } else {
+                set_error(app, "API key save failed", &err);
+            }
+            return;
+        }
+    };
+    let label = preset.display_name();
     if input.trim().is_empty() {
         input.clear();
         app.set_api_key_entry(false);
-        app.set_status_message("Meta API key unchanged.");
+        app.set_status_message(format!("{label} API key unchanged."));
         return;
     }
     let Some(path) = crate::tui::config::default_api_key_path() else {
         set_error(app, "API key save failed", "no API key path");
         return;
     };
-    match crate::tui::config::save_api_key(&path, input) {
+    match crate::tui::config::save_api_key_for_provider(&path, &preset.provider, input) {
         Ok(()) => {
             app.set_api_key_entry(false);
             app.set_api_key_ready(true);
             app.set_api_key_status(format!(
-                "Meta API key: configured ({})",
+                "{label} API key: configured ({})",
                 crate::tui::config::mask_api_key(input)
             ));
             input.clear();
-            app.set_status_message("Meta API key saved.");
+            app.set_status_message(format!("{label} API key saved."));
         }
         Err(err) => set_error(app, "API key save failed", &err.to_string()),
     }
 }
 
-/// Health-checks a candidate Meta API key with one bounded
-/// `list_models` call; nothing is saved when this fails.
+/// Health-checks a candidate key against the SELECTED provider (its
+/// base_url) with one bounded `list_models` call; nothing is saved on
+/// failure. Keyless providers succeed without any key/network check.
 pub async fn check_api_key(key: &str) -> Result<(), String> {
-    let client = crate::llm::MetaClient::new(crate::llm::DEFAULT_BASE_URL, key.trim());
+    check_api_key_resolved(key, selected_preset()).await
+}
+
+/// [`check_api_key`] with preset resolution as an input (test seam):
+/// a resolution error is returned before any network call.
+async fn check_api_key_resolved(
+    key: &str,
+    preset: Result<crate::llm::ProviderConfig, String>,
+) -> Result<(), String> {
+    check_api_key_for(key, &preset?).await
+}
+
+/// [`check_api_key`] against an explicit preset (test seam).
+pub async fn check_api_key_for(
+    key: &str,
+    preset: &crate::llm::ProviderConfig,
+) -> Result<(), String> {
+    if !preset.requires_api_key {
+        return Ok(());
+    }
+    let label = preset.display_name();
+    let client = crate::llm::LlmClient::from_config(preset.clone().with_api_key(key.trim()));
     match tokio::time::timeout(std::time::Duration::from_secs(15), client.list_models()).await {
         Ok(Ok(_)) => Ok(()),
         Ok(Err(err)) => Err(err.to_string()),
-        Err(_) => Err("Meta API check timed out after 15 seconds".to_string()),
+        Err(_) => Err(format!("{label} API check timed out after 15 seconds")),
     }
 }
 
@@ -195,4 +247,82 @@ pub fn block_on<T>(
             .ok();
     }
     slot.as_ref().map(|runtime| runtime.block_on(future))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn env_map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn ollama_key_check_succeeds_with_empty_key_and_no_network() {
+        let preset = crate::llm::ProviderConfig::for_provider("ollama").unwrap();
+        assert_eq!(preset.base_url, "http://localhost:11434/v1");
+        assert!(runtime().block_on(check_api_key_for("", &preset)).is_ok());
+    }
+
+    #[test]
+    fn openai_preset_targets_openai_base_url() {
+        let preset = crate::llm::ProviderConfig::for_provider("openai").unwrap();
+        let client = crate::llm::LlmClient::from_config(preset.with_api_key("k"));
+        assert_eq!(client.base_url(), "https://api.openai.com/v1");
+        assert_eq!(client.provider(), "openai");
+    }
+
+    #[test]
+    fn custom_without_base_url_check_errors_without_targeting_meta() {
+        let preset = crate::llm::ProviderConfig::preset_from_env_map(&env_map(&[
+            ("PAIRPROOF_PROVIDER", "custom"),
+            ("PAIRPROOF_API_KEY", "k"),
+        ]))
+        .map_err(|e| e.to_string());
+        let err = runtime()
+            .block_on(check_api_key_resolved("k", preset))
+            .unwrap_err();
+        assert!(err.contains("PAIRPROOF_BASE_URL"), "{err}");
+        assert!(!err.contains("api.meta.ai"), "{err}");
+    }
+
+    #[test]
+    fn bogus_provider_check_errors_without_targeting_meta() {
+        let preset = crate::llm::ProviderConfig::preset_from_env_map(&env_map(&[
+            ("PAIRPROOF_PROVIDER", "bogus-provider"),
+            ("PAIRPROOF_API_KEY", "k"),
+        ]))
+        .map_err(|e| e.to_string());
+        let err = runtime()
+            .block_on(check_api_key_resolved("k", preset))
+            .unwrap_err();
+        assert!(err.contains("unknown provider"), "{err}");
+        assert!(!err.contains("api.meta.ai"), "{err}");
+    }
+
+    #[test]
+    fn invalid_base_url_check_errors_without_targeting_meta() {
+        let preset = crate::llm::ProviderConfig::preset_from_env_map(&env_map(&[
+            ("PAIRPROOF_PROVIDER", "openai"),
+            ("PAIRPROOF_API_KEY", "k"),
+            ("PAIRPROOF_BASE_URL", "ftp://example.test"),
+        ]))
+        .map_err(|e| e.to_string());
+        let err = runtime()
+            .block_on(check_api_key_resolved("k", preset))
+            .unwrap_err();
+        assert!(err.contains("invalid provider base url"), "{err}");
+        assert!(!err.contains("api.meta.ai"), "{err}");
+    }
 }

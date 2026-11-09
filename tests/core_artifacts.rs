@@ -191,6 +191,7 @@ fn token_records_capture_locked_and_actual_in_slot_order() {
             title_slug: "e0".to_string(),
             locked_expected_tokens: Some(100),
             actual_tokens: 42,
+            token_usage_estimated: false,
         }
     );
     assert_eq!(records[1].locked_expected_tokens, None);
